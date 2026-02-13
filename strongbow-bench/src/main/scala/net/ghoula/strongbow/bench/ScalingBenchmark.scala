@@ -1,40 +1,42 @@
 package net.ghoula.strongbow.bench
 
+import com.sun.management.ThreadMXBean
+
+import java.lang.management.ManagementFactory
+import scala.jdk.CollectionConverters.*
+import scala.util.Random
+
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
-import scala.util.Random
-import java.lang.management.{ManagementFactory, GarbageCollectorMXBean, MemoryMXBean}
-import com.sun.management.ThreadMXBean
-import scala.jdk.CollectionConverters.*
 
 /** Multi-scale benchmarks to find where Longbow's advantages matter.
   *
   * Tests at realistic single-machine scales:
-  * - 100K rows: 10x current baseline
-  * - 500K rows: 50x current baseline
-  * - 1M rows: 100x current baseline
+  *   - 100K rows: 10x current baseline
+  *   - 500K rows: 50x current baseline
+  *   - 1M rows: 100x current baseline
   *
-  * Goal: Show where memory efficiency and zero-GC architecture compound
-  * to deliver real value for data science iteration.
+  * Goal: Show where memory efficiency and zero-GC architecture compound to deliver real value for
+  * data science iteration.
   */
 object ScalingBenchmark {
 
-  val threadBean = ManagementFactory.getThreadMXBean.asInstanceOf[ThreadMXBean]
+  val threadBean: ThreadMXBean = ManagementFactory.getThreadMXBean.asInstanceOf[ThreadMXBean]
   val memoryBean = ManagementFactory.getMemoryMXBean
   val gcBeans = ManagementFactory.getGarbageCollectorMXBeans.asScala.toList
 
   case class ScaleResult(
-      scale: String,
-      rows: Int,
-      operation: String,
-      medianMs: Double,
-      p95Ms: Double,
-      allocatedMB: Double,
-      avgHeapMB: Double,
-      maxHeapMB: Double,
-      gcCollections: Long,
-      gcTimeMs: Long,
-      gcOverhead: Double
+    scale: String,
+    rows: Int,
+    operation: String,
+    medianMs: Double,
+    p95Ms: Double,
+    allocatedMB: Double,
+    avgHeapMB: Double,
+    maxHeapMB: Double,
+    gcCollections: Long,
+    gcTimeMs: Long,
+    gcOverhead: Double
   )
 
   def getGCStats(): (Long, Long) = {
@@ -79,11 +81,11 @@ object ScalingBenchmark {
   }
 
   def benchmarkOperation[T](
-      scale: String,
-      rows: Int,
-      operation: String,
-      warmups: Int,
-      runs: Int
+    scale: String,
+    rows: Int,
+    operation: String,
+    warmups: Int,
+    runs: Int
   )(f: => T): ScaleResult = {
     // Aggressive GC
     System.gc()
@@ -171,18 +173,22 @@ object ScalingBenchmark {
     val results = scala.collection.mutable.ArrayBuffer[ScaleResult]()
 
     // Filter
-    print(s"  Filter... ")
+    print("  Filter... ")
     val filterResult = benchmarkOperation(scale, rows, "Filter", 20, 50) {
       val valCell = Expr.Cell[(String, Int), Int]("value", ColumnIndex(1))
       val filtered = dataset.filter(valCell > Expr.lit(500))
-      val materialized = DatasetInterpreter.execute(filtered)
+      val materialized = DatasetInterpreter.execute(filtered).getOrElse(
+        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+      )
       materialized.rowCount
     }
     results += filterResult
-    println(f"${filterResult.medianMs}%.2f ms (alloc: ${filterResult.allocatedMB}%.1f MB, heap: ${filterResult.maxHeapMB}%.0f MB, GC: ${filterResult.gcCollections})")
+    println(
+      f"${filterResult.medianMs}%.2f ms (alloc: ${filterResult.allocatedMB}%.1f MB, heap: ${filterResult.maxHeapMB}%.0f MB, GC: ${filterResult.gcCollections})"
+    )
 
     // GroupBy
-    print(s"  GroupBy... ")
+    print("  GroupBy... ")
     val groupByResult = benchmarkOperation(scale, rows, "GroupBy", 20, 50) {
       val grouped = dataset.groupBy(_._1)
       val reduced = grouped.reduceByKey((a, b) => (a._1, a._2 + b._2))
@@ -190,20 +196,26 @@ object ScalingBenchmark {
       pairs.length
     }
     results += groupByResult
-    println(f"${groupByResult.medianMs}%.2f ms (alloc: ${groupByResult.allocatedMB}%.1f MB, heap: ${groupByResult.maxHeapMB}%.0f MB, GC: ${groupByResult.gcCollections})")
+    println(
+      f"${groupByResult.medianMs}%.2f ms (alloc: ${groupByResult.allocatedMB}%.1f MB, heap: ${groupByResult.maxHeapMB}%.0f MB, GC: ${groupByResult.gcCollections})"
+    )
 
     // Sort
-    print(s"  Sort... ")
+    print("  Sort... ")
     val sortResult = benchmarkOperation(scale, rows, "Sort", 20, 50) {
       val sorted = dataset.sortBy(_._2)(using Ordering[Int])
-      val materialized = DatasetInterpreter.execute(sorted)
+      val materialized = DatasetInterpreter.execute(sorted).getOrElse(
+        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+      )
       materialized.rowCount
     }
     results += sortResult
-    println(f"${sortResult.medianMs}%.2f ms (alloc: ${sortResult.allocatedMB}%.1f MB, heap: ${sortResult.maxHeapMB}%.0f MB, GC: ${sortResult.gcCollections})")
+    println(
+      f"${sortResult.medianMs}%.2f ms (alloc: ${sortResult.allocatedMB}%.1f MB, heap: ${sortResult.maxHeapMB}%.0f MB, GC: ${sortResult.gcCollections})"
+    )
 
     // Join
-    print(s"  Join... ")
+    print("  Join... ")
     val (keys1, values1) = generateData(rows / 2, groups / 2)
     val (keys2, values2) = generateData(rows / 2, groups / 2)
     val dataset1 = createDataset(keys1, values1)
@@ -217,7 +229,9 @@ object ScalingBenchmark {
       pairs.length
     }
     results += joinResult
-    println(f"${joinResult.medianMs}%.2f ms (alloc: ${joinResult.allocatedMB}%.1f MB, heap: ${joinResult.maxHeapMB}%.0f MB, GC: ${joinResult.gcCollections})")
+    println(
+      f"${joinResult.medianMs}%.2f ms (alloc: ${joinResult.allocatedMB}%.1f MB, heap: ${joinResult.maxHeapMB}%.0f MB, GC: ${joinResult.gcCollections})"
+    )
 
     results.toSeq
   }

@@ -9,4 +9,7 @@ enum ExecutionError {
   case UnsupportedExpression(expression: String)
   case InvalidPlan(message: String)
   case ResourceExhausted(resource: String)
+  case TypeMismatch(expected: String, actual: String, context: String)
+  case InvalidValue(message: String)
+  case PreconditionViolation(message: String)
 }

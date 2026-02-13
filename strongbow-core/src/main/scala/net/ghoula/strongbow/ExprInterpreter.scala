@@ -8,8 +8,8 @@ import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
   * Key architectural principle: ONE cast at the Cell evaluation boundary (where we access typed
   * arrays), then fully typed expression evaluation using GADT evidence.
   *
-  * Unlike TypedDataset which casts everywhere (due to Spark's untyped Column), we exploit our
-  * typed array storage (IntColumn, StringColumn, etc.) to minimize casts.
+  * Unlike TypedDataset which casts everywhere (due to Spark's untyped Column), we exploit our typed
+  * array storage (IntColumn, StringColumn, etc.) to minimize casts.
   */
 object ExprInterpreter {
 
@@ -19,9 +19,9 @@ object ExprInterpreter {
     * boundary where we transition from typed column storage to generic type A.
     */
   def eval[Row, A](
-      expr: Expr[Row, A],
-      columns: Vector[Column],
-      rowIdx: RowIndex
+    expr: Expr[Row, A],
+    columns: Vector[Column],
+    rowIdx: RowIndex
   ): Either[ExecutionError, A] = {
     (expr: @unchecked) match {
       case Expr.Const(value) =>
@@ -43,15 +43,27 @@ object ExprInterpreter {
           if (idx >= column.length) {
             Left(ExecutionError.IndexOutOfBounds(idx, column.length))
           } else {
-            // Use typed accessors, cast once at this boundary
+            // ONE-CAST-AT-BOUNDARY PATTERN:
+            // This is the ONLY place in the expression evaluation pipeline where we cast.
+            // We bridge from typed column accessors (getInt: Int, getString: String, etc.)
+            // to the GADT's generic type variable `a`.
+            //
+            // After this cast, all downstream expression logic is zero-cast because GADTs
+            // provide compile-time type refinement (e.g., Add[Row] refines to Int + Int).
+            //
+            // These casts are architecturally fundamental and cannot be eliminated without
+            // losing the zero-cast property in the rest of the interpreter.
             val value: a = column.columnType match {
-              case ColumnType.IntType => column.getInt(idx).asInstanceOf[a]
-              case ColumnType.LongType => column.getLong(idx).asInstanceOf[a]
-              case ColumnType.DoubleType => column.getDouble(idx).asInstanceOf[a]
-              case ColumnType.StringType => column.getString(idx).asInstanceOf[a]
-              case ColumnType.BooleanType => column.getBoolean(idx).asInstanceOf[a]
+              case ColumnType.IntType => column.getInt(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+              case ColumnType.LongType => column.getLong(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+              case ColumnType.DoubleType =>
+                column.getDouble(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+              case ColumnType.StringType =>
+                column.getString(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+              case ColumnType.BooleanType =>
+                column.getBoolean(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.AnyType | ColumnType.OptionType(_) =>
-                column.getValue(idx).asInstanceOf[a]
+                column.getValue(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
             }
             Right(value)
           }
@@ -60,9 +72,9 @@ object ExprInterpreter {
       // Numeric operations - GADT guarantees types, NO CASTS
       case add: Expr.Add[Row] =>
         for {
-          l <- eval(add.left, columns, rowIdx)  // l: Int by GADT
+          l <- eval(add.left, columns, rowIdx) // l: Int by GADT
           r <- eval(add.right, columns, rowIdx) // r: Int by GADT
-        } yield l + r  // NO CAST NEEDED!
+        } yield l + r // NO CAST NEEDED!
 
       case sub: Expr.Sub[Row] =>
         for {
@@ -165,29 +177,28 @@ object ExprInterpreter {
       case isDefined: Expr.IsDefined[Row, _] =>
         eval(isDefined.expr, columns, rowIdx) match {
           case Right(Some(_)) => Right(true)
-          case Right(None)    => Right(false)
-          case Left(err)      => Left(err)
+          case Right(None) => Right(false)
+          case Left(err) => Left(err)
         }
 
       case getOrElse: Expr.GetOrElse[Row, _] =>
         eval(getOrElse.expr, columns, rowIdx) match {
           case Right(Some(value)) => Right(value)
-          case Right(None)        => Right(getOrElse.default)
-          case Left(err)          => Left(err)
+          case Right(None) => Right(getOrElse.default)
+          case Left(err) => Left(err)
         }
 
       // Aggregations - not supported at row level
-      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] |
-          _: Expr.Avg[Row] =>
+      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
     }
   }
 
   /** Evaluate expression for all rows, producing a new column. */
   def evalColumn[Row, A](
-      expr: Expr[Row, A],
-      columns: Vector[Column],
-      columnType: ColumnType
+    expr: Expr[Row, A],
+    columns: Vector[Column],
+    columnType: ColumnType
   ): Either[ExecutionError, Column] = {
     if (columns.isEmpty || columns.head.length == 0) {
       Right(Column.empty(columnType))
@@ -203,7 +214,7 @@ object ExprInterpreter {
         }
       }
 
-      valuesOrError.flatMap(values => Right(Column.fromValues(values, columnType)))
+      valuesOrError.flatMap(values => Column.fromValues(values, columnType))
     }
   }
 
@@ -213,8 +224,8 @@ object ExprInterpreter {
     * type-safe aggregation logic without casts.
     */
   def evalAggregation[Row, A](
-      expr: Expr[Row, A],
-      columns: Vector[Column]
+    expr: Expr[Row, A],
+    columns: Vector[Column]
   ): Either[ExecutionError, A] = {
     if (columns.isEmpty || columns.head.length == 0) {
       // Handle empty datasets - GADT refinement means NO CASTS
@@ -245,40 +256,37 @@ object ExprInterpreter {
 
         case avg: Expr.Avg[Row] =>
           val rowCount = columns.head.length
-          val sumResult = (0 until rowCount).foldLeft[Either[ExecutionError, Double]](Right(0.0)) {
-            (acc, rowIdx) =>
-              acc.flatMap { currentSum =>
-                eval(avg.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
-              }
+          val sumResult = (0 until rowCount).foldLeft[Either[ExecutionError, Double]](Right(0.0)) { (acc, rowIdx) =>
+            acc.flatMap { currentSum =>
+              eval(avg.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+            }
           }
           sumResult.map(_ / rowCount)
 
         case max: Expr.Max[Row, a] =>
           val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Option[a]]](Right(None)) {
-            (acc, rowIdx) =>
-              acc.flatMap { currentMax =>
-                eval(max.expr, columns, RowIndex(rowIdx)).map { value =>
-                  currentMax match {
-                    case None    => Some(value)
-                    case Some(m) => Some(if (max.ordering.gt(value, m)) value else m)
-                  }
+          (0 until rowCount).foldLeft[Either[ExecutionError, Option[a]]](Right(None)) { (acc, rowIdx) =>
+            acc.flatMap { currentMax =>
+              eval(max.expr, columns, RowIndex(rowIdx)).map { value =>
+                currentMax match {
+                  case None => Some(value)
+                  case Some(m) => Some(if (max.ordering.gt(value, m)) value else m)
                 }
               }
+            }
           }
 
         case min: Expr.Min[Row, a] =>
           val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Option[a]]](Right(None)) {
-            (acc, rowIdx) =>
-              acc.flatMap { currentMin =>
-                eval(min.expr, columns, RowIndex(rowIdx)).map { value =>
-                  currentMin match {
-                    case None    => Some(value)
-                    case Some(m) => Some(if (min.ordering.lt(value, m)) value else m)
-                  }
+          (0 until rowCount).foldLeft[Either[ExecutionError, Option[a]]](Right(None)) { (acc, rowIdx) =>
+            acc.flatMap { currentMin =>
+              eval(min.expr, columns, RowIndex(rowIdx)).map { value =>
+                currentMin match {
+                  case None => Some(value)
+                  case Some(m) => Some(if (min.ordering.lt(value, m)) value else m)
                 }
               }
+            }
           }
       }
     }

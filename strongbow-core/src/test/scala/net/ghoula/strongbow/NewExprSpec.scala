@@ -1,9 +1,10 @@
 package net.ghoula.strongbow
 
-import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import net.ghoula.strongbow.prelude.*
+import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
 
 /** Tests for new expression operations (>=, <=, !=, as, lit, when). */
 class NewExprSpec extends AnyFlatSpec with Matchers {
@@ -117,7 +118,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val x = Expr.Cell[Int, Int]("x", ColumnIndex(0))
     val expr = Expr.when(
       x < Expr.lit(0),
-      Expr.lit[Int, Int](0) - x,  // -x
+      Expr.lit[Int, Int](0) - x, // -x
       x
     )
 
@@ -138,7 +139,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     // All comparison operations should work without casts
     val gteExpr = x >= ten
     val lteExpr = x <= ten
-    val neqExpr = Expr.Neq(x, ten)  // Use constructor directly to avoid conflict with Scala's !=
+    val neqExpr = Expr.Neq(x, ten) // Use constructor directly to avoid conflict with Scala's !=
 
     val gteResult: Either[ExecutionError, Boolean] = ExprInterpreter.eval(gteExpr, columns, RowIndex(0))
     val lteResult: Either[ExecutionError, Boolean] = ExprInterpreter.eval(lteExpr, columns, RowIndex(0))

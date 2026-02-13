@@ -1,6 +1,6 @@
 package net.ghoula.strongbow
 
-import net.ghoula.strongbow.errors.{SchemaError, NonEmptyList}
+import net.ghoula.strongbow.errors.{NonEmptyList, SchemaError}
 
 /** Immutable description of dataset transformations.
   *
@@ -16,27 +16,27 @@ enum Dataset[+T] {
   case Map[A, B](parent: Dataset[A], func: A => B) extends Dataset[B]
   case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B]) extends Dataset[B]
   case Select[T, U](parent: Dataset[T], projection: T => U) extends Dataset[U]
-  case SelectExprs[T](parent: Dataset[T], exprs: Vector[(String, Expr[T, Any], ColumnType)])
-      extends Dataset[T]
+  case SelectExprs[T](parent: Dataset[T], exprs: Vector[(String, Expr[T, Any], ColumnType)]) extends Dataset[T]
   case Distinct[T](parent: Dataset[T]) extends Dataset[T]
   case Limit[T](parent: Dataset[T], n: Int) extends Dataset[T]
   case Union[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
   case Sort[T](parent: Dataset[T], ordering: Ordering[T]) extends Dataset[T]
   case SortBy[T, K](parent: Dataset[T], key: T => K, ordering: Ordering[K]) extends Dataset[T]
-  case GroupedToPairs[K, V](grouped: Grouped[K, V]) extends Dataset[(K, V)]
-  case GroupedKeys[K, V](grouped: Grouped[K, V]) extends Dataset[K]
-  case GroupedValues[K, V](grouped: Grouped[K, V]) extends Dataset[V]
+  case GroupedToPairs[K, V](grouped: Grouped[K, V], schemaK: Schema[K], schemaV: Schema[V]) extends Dataset[(K, V)]
+  case GroupedKeys[K, V](grouped: Grouped[K, V], schemaK: Schema[K]) extends Dataset[K]
+  case GroupedValues[K, V](grouped: Grouped[K, V], schemaV: Schema[V]) extends Dataset[V]
 }
 
 object Dataset {
+
   /** Smart constructor with validation using Either (no deps).
     *
     * Returns Either[NonEmptyList[SchemaError], Dataset[T]] NonEmptyList ensures at least one error
     * on Left.
     */
   def fromColumns[T](
-      cols: Vector[Column],
-      schema: Schema[T]
+    cols: Vector[Column],
+    schema: Schema[T]
   ): Either[NonEmptyList[SchemaError], Dataset[T]] = {
     val validations = List(
       validateColumnCount(cols, schema),
@@ -104,20 +104,22 @@ object Dataset {
       SelectExprs(ds, exprs.toVector)
     }
 
-    /** Join with another dataset on a condition. */
+    /** Join with another dataset on a condition.
+      *
+      * TODO: Implement join logic. For now throws to indicate unimplemented feature.
+      */
     inline def join[U](
-        other: Dataset[U],
-        condition: (Dataset[T], Dataset[U]) => Expr[(T, U), Boolean]
+      other: Dataset[U],
+      condition: (Dataset[T], Dataset[U]) => Expr[(T, U), Boolean]
     ): Dataset[(T, U)] = {
-      // For now, throw - will implement shortly
-      throw new UnsupportedOperationException("Dataset joins not yet implemented")
+      throw new UnsupportedOperationException("Dataset joins not yet implemented") // scalafix:ok DisableSyntax.throw
     }
   }
 
   // Validation helpers (return Option[List[Error]])
   private def validateColumnCount[T](
-      cols: Vector[Column],
-      schema: Schema[T]
+    cols: Vector[Column],
+    schema: Schema[T]
   ): Either[List[SchemaError], Unit] = {
     if (cols.length == schema.columnCount) {
       Right(())
@@ -127,8 +129,8 @@ object Dataset {
   }
 
   private def validateColumnTypes[T](
-      cols: Vector[Column],
-      schema: Schema[T]
+    cols: Vector[Column],
+    schema: Schema[T]
   ): Either[List[SchemaError], Unit] = {
     val mismatches = cols.zip(schema.columnTypes).zipWithIndex.collect {
       case ((col, expectedType), idx) if col.columnType != expectedType =>
@@ -143,7 +145,7 @@ object Dataset {
   }
 
   private def validateColumnLengths(
-      cols: Vector[Column]
+    cols: Vector[Column]
   ): Either[List[SchemaError], Unit] = {
     if (cols.isEmpty) {
       Right(())

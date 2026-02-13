@@ -1,8 +1,9 @@
 package net.ghoula.strongbow
 
-import net.ghoula.strongbow.prelude.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import net.ghoula.strongbow.prelude.*
 
 class AggregationSpec extends AnyFlatSpec with Matchers {
 

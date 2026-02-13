@@ -25,14 +25,10 @@ enum Expr[Row, +A] {
   case Div[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
 
   // Comparisons (GADT carries Ordering evidence as field)
-  case Gt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A])
-      extends Expr[Row, Boolean]
-  case Gte[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A])
-      extends Expr[Row, Boolean]
-  case Lt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A])
-      extends Expr[Row, Boolean]
-  case Lte[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A])
-      extends Expr[Row, Boolean]
+  case Gt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
+  case Gte[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
+  case Lt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
+  case Lte[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
   case Eq[Row, A](left: Expr[Row, A], right: Expr[Row, A]) extends Expr[Row, Boolean]
   case Neq[Row, A](left: Expr[Row, A], right: Expr[Row, A]) extends Expr[Row, Boolean]
 
@@ -42,8 +38,7 @@ enum Expr[Row, +A] {
   case Not[Row](expr: Expr[Row, Boolean]) extends Expr[Row, Boolean]
 
   // Conditional logic
-  case When[Row, A](condition: Expr[Row, Boolean], thenExpr: Expr[Row, A], elseExpr: Expr[Row, A])
-      extends Expr[Row, A]
+  case When[Row, A](condition: Expr[Row, Boolean], thenExpr: Expr[Row, A], elseExpr: Expr[Row, A]) extends Expr[Row, A]
 
   // String operations
   case Concat[Row](left: Expr[Row, String], right: Expr[Row, String]) extends Expr[Row, String]
@@ -78,15 +73,16 @@ object Expr {
 
   /** Create a conditional (when/then/else) expression. */
   def when[Row, A](
-      condition: Expr[Row, Boolean],
-      thenExpr: Expr[Row, A],
-      elseExpr: Expr[Row, A]
+    condition: Expr[Row, Boolean],
+    thenExpr: Expr[Row, A],
+    elseExpr: Expr[Row, A]
   ): Expr[Row, A] = {
     When(condition, thenExpr, elseExpr)
   }
 
   // Extension methods for fluent syntax
   extension [Row, A](left: Expr[Row, A]) {
+
     /** Rename this expression for output. */
     def as(name: String): Expr[Row, A] = {
       Named(left, name)

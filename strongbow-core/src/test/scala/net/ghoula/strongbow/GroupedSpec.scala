@@ -1,8 +1,9 @@
 package net.ghoula.strongbow
 
-import net.ghoula.strongbow.prelude.*
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import net.ghoula.strongbow.prelude.*
 
 /** Tests for Grouped operations and aggregations. */
 class GroupedSpec extends AnyFlatSpec with Matchers {
@@ -55,13 +56,13 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
 
   "reduceByKey" should "combine values for same key" in {
     val dataset = createIntDataset(Vector(1, 2, 3, 4, 5, 6))
-    val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0)  // Even/odd
+    val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0) // Even/odd
 
     val reduced = grouped.reduceByKey(_ + _)
     val result = GroupByInterpreter.execute(reduced).toMap
 
-    result(false) shouldBe 9  // 1 + 3 + 5
-    result(true) shouldBe 12  // 2 + 4 + 6
+    result(false) shouldBe 9 // 1 + 3 + 5
+    result(true) shouldBe 12 // 2 + 4 + 6
   }
 
   "mapValues" should "transform values without changing keys" in {
@@ -72,8 +73,11 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val result = GroupByInterpreter.execute(mapped)
 
     result should contain theSameElementsAs Vector(
-      (false, 10), (false, 30), (false, 50),
-      (true, 20), (true, 40)
+      (false, 10),
+      (false, 30),
+      (false, 50),
+      (true, 20),
+      (true, 40)
     )
   }
 
@@ -85,7 +89,8 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val result = GroupByInterpreter.execute(filtered)
 
     result should contain theSameElementsAs Vector(
-      (4, 4), (5, 5)
+      (4, 4),
+      (5, 5)
     )
   }
 
@@ -163,9 +168,12 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val result = GroupByInterpreter.execute(expanded)
 
     result should contain theSameElementsAs Vector(
-      (false, 1), (false, 1),
-      (true, 2), (true, 2),
-      (false, 3), (false, 3)
+      (false, 1),
+      (false, 1),
+      (true, 2),
+      (true, 2),
+      (false, 3),
+      (false, 3)
     )
   }
 
@@ -174,7 +182,10 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0)
 
     val valuesDs = grouped.values
-    val result = DatasetInterpreter.execute(valuesDs)
+    val result = DatasetInterpreter.execute(valuesDs) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     result.toVectorUnsafe should contain theSameElementsAs Vector(1, 2, 3)
   }
@@ -184,7 +195,10 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0)
 
     val keysDs = grouped.keys
-    val result = DatasetInterpreter.execute(keysDs)
+    val result = DatasetInterpreter.execute(keysDs) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     result.toVectorUnsafe should contain theSameElementsAs Vector(false, true, false, true)
   }

@@ -17,32 +17,30 @@ enum Grouped[K, +V] {
   case FlatMapValues[K, A, B](parent: Grouped[K, A], func: A => Iterable[B]) extends Grouped[K, B]
   case FilterKeys[K, V](parent: Grouped[K, V], predicate: K => Boolean) extends Grouped[K, V]
   case InnerJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, (V, U)]
-  case LeftJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U])
-      extends Grouped[K, (V, Option[U])]
-  case RightJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U])
-      extends Grouped[K, (Option[V], U)]
-  case FullJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U])
-      extends Grouped[K, (Option[V], Option[U])]
+  case LeftJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, (V, Option[U])]
+  case RightJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, (Option[V], U)]
+  case FullJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, (Option[V], Option[U])]
   case ReduceByKey[K, V](parent: Grouped[K, V], reduce: (V, V) => V) extends Grouped[K, V]
 }
 
 object Grouped {
   extension [K, V](grouped: Grouped[K, V]) {
+
     /** Extract only the values, discarding keys. */
-    def values: Dataset[V] = {
-      Dataset.GroupedValues(grouped)
+    def values(using schemaV: Schema[V]): Dataset[V] = {
+      Dataset.GroupedValues(grouped, schemaV)
     }
 
     /** Extract only the keys, discarding values. */
-    def keys: Dataset[K] = {
-      Dataset.GroupedKeys(grouped)
+    def keys(using schemaK: Schema[K]): Dataset[K] = {
+      Dataset.GroupedKeys(grouped, schemaK)
     }
 
     /** Convert to Dataset of (K, V) pairs. */
-    def toPairs: Dataset[(K, V)] = {
+    def toPairs(using schemaK: Schema[K], schemaV: Schema[V]): Dataset[(K, V)] = {
       grouped match {
         case FromPairs(parent) => parent
-        case _ => Dataset.GroupedToPairs(grouped)
+        case _ => Dataset.GroupedToPairs(grouped, schemaK, schemaV)
       }
     }
 

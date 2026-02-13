@@ -1,46 +1,47 @@
 package net.ghoula.strongbow.bench
 
+import com.sun.management.ThreadMXBean
+
+import java.lang.management.{ManagementFactory, MemoryMXBean}
+import scala.jdk.CollectionConverters.*
+import scala.util.Random
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
-import scala.util.Random
-import java.lang.management.{ManagementFactory, GarbageCollectorMXBean, MemoryMXBean}
-import com.sun.management.ThreadMXBean
-import scala.jdk.CollectionConverters.*
 
 /** Benchmark Longbow vs Crossbow for comparable operations.
   *
   * Setup mirrors Crossbow's GroupByFairBenchmark: - 10K rows, 100 groups
-  * - ThreadMXBean allocation tracking
-  * - 20 warmup + 100 measurement runs
+  *   - ThreadMXBean allocation tracking
+  *   - 20 warmup + 100 measurement runs
   */
 object LongbowVsCrossbow {
 
-  val threadBean = ManagementFactory.getThreadMXBean.asInstanceOf[ThreadMXBean]
-  val memoryBean = ManagementFactory.getMemoryMXBean
+  val threadBean: ThreadMXBean = ManagementFactory.getThreadMXBean.asInstanceOf[ThreadMXBean]
+  val memoryBean: MemoryMXBean = ManagementFactory.getMemoryMXBean
   val gcBeans = ManagementFactory.getGarbageCollectorMXBeans.asScala.toList
 
   case class MemoryStats(
-      heapUsedMB: Vector[Double],
-      heapCommittedMB: Vector[Double],
-      avgHeapUsedMB: Double,
-      maxHeapUsedMB: Double,
-      allocatedMB: Double
+    heapUsedMB: Vector[Double],
+    heapCommittedMB: Vector[Double],
+    avgHeapUsedMB: Double,
+    maxHeapUsedMB: Double,
+    allocatedMB: Double
   )
 
   case class GCStats(
-      totalCollections: Long,
-      totalGCTimeMs: Long
+    totalCollections: Long,
+    totalGCTimeMs: Long
   )
 
   case class BenchResult(
-      medianMs: Double,
-      p95Ms: Double,
-      minMs: Double,
-      maxMs: Double,
-      stdDevMs: Double,
-      memory: MemoryStats,
-      gc: GCStats,
-      gcOverheadPercent: Double
+    medianMs: Double,
+    p95Ms: Double,
+    minMs: Double,
+    maxMs: Double,
+    stdDevMs: Double,
+    memory: MemoryStats,
+    gc: GCStats,
+    gcOverheadPercent: Double
   )
 
   def getGCStats(): GCStats = {
@@ -132,7 +133,7 @@ object LongbowVsCrossbow {
 
   /** Run a benchmark multiple times and compute statistics. */
   def measureMultipleRuns[T](iterations: Int, warmups: Int, runs: Int)(
-      f: => T
+    f: => T
   ): Seq[BenchResult] = {
     (0 until iterations).map { iteration =>
       println(s"  Run ${iteration + 1}/$iterations...")
@@ -221,7 +222,9 @@ object LongbowVsCrossbow {
     val results = measureMultipleRuns(5, 50, 200) {
       val valCell = Expr.Cell[(String, Int), Int]("value", ColumnIndex(1))
       val filtered = dataset.filter(valCell > Expr.lit(500))
-      val materialized = DatasetInterpreter.execute(filtered)
+      val materialized = DatasetInterpreter.execute(filtered).getOrElse(
+        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+      )
       materialized.rowCount // Force evaluation
     }
 
@@ -252,7 +255,9 @@ object LongbowVsCrossbow {
 
     val results = measureMultipleRuns(5, 50, 200) {
       val sorted = dataset.sortBy(_._2)(using Ordering[Int])
-      val materialized = DatasetInterpreter.execute(sorted)
+      val materialized = DatasetInterpreter.execute(sorted).getOrElse(
+        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+      )
       materialized.rowCount // Force evaluation
     }
 

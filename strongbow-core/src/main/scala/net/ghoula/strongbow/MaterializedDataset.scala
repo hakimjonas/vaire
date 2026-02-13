@@ -1,5 +1,7 @@
 package net.ghoula.strongbow
 
+import net.ghoula.strongbow.errors.ExecutionError
+
 /** Result of executing a Dataset plan.
   *
   * MaterializedDataset represents the concrete output after interpreting a Dataset. It wraps the
@@ -9,8 +11,8 @@ package net.ghoula.strongbow
   *   The row type decoded from columns
   */
 final case class MaterializedDataset[T](
-    columns: Vector[Column],
-    schema: Schema[T]
+  columns: Vector[Column],
+  schema: Schema[T]
 ) {
   require(columns.nonEmpty, "MaterializedDataset cannot be empty")
   require(
@@ -35,11 +37,15 @@ final case class MaterializedDataset[T](
     }.toVector
   }
 
-  /** Get all rows, throwing on decode errors. */
+  /** Get all rows, throwing on decode errors.
+    *
+    * This is the unsafe version. Prefer `toVector` which returns Either. This method exists for
+    * convenience when you know decoding cannot fail.
+    */
   def toVectorUnsafe: Vector[T] = {
     toVector.map {
       case Right(value) => value
-      case Left(err)    => throw new RuntimeException(s"Decode error: $err")
+      case Left(err) => throw new RuntimeException(s"Decode error: $err") // scalafix:ok DisableSyntax.throw
     }
   }
 
@@ -52,21 +58,23 @@ final case class MaterializedDataset[T](
   }
 
   /** Map over decoded rows. */
-  def map[U](f: T => U)(using schemaU: Schema[U]): MaterializedDataset[U] = {
+  def map[U](f: T => U)(using schemaU: Schema[U]): Either[ExecutionError, MaterializedDataset[U]] = {
     val newRows = toVectorUnsafe.map(f)
     val encodedRows = newRows.map(schemaU.encode)
 
     // Transpose to get columns
-    val newColumns = if (encodedRows.isEmpty) {
-      Vector.empty
+    val newColumnsOrError = if (encodedRows.isEmpty) {
+      Right(Vector.empty)
     } else {
-      (0 until schemaU.columnCount).map { colIdx =>
-        val values = encodedRows.map(_(colIdx))
-        Column.fromValues(values, schemaU.columnTypes(colIdx))
-      }.toVector
+      (0 until schemaU.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, colIdx) =>
+        acc.flatMap { cols =>
+          val values = encodedRows.map(_(colIdx))
+          Column.fromValues(values, schemaU.columnTypes(colIdx)).map(cols :+ _)
+        }
+      }
     }
 
-    MaterializedDataset(newColumns, schemaU)
+    newColumnsOrError.map(cols => MaterializedDataset(cols, schemaU))
   }
 
   /** Show first n rows for debugging. */
@@ -96,19 +104,22 @@ final case class MaterializedDataset[T](
 }
 
 object MaterializedDataset {
+
   /** Create from a Vector of values and schema. */
-  def fromVector[T](values: Vector[T])(using schema: Schema[T]): MaterializedDataset[T] = {
+  def fromVector[T](values: Vector[T])(using schema: Schema[T]): Either[ExecutionError, MaterializedDataset[T]] = {
     val encodedRows = values.map(schema.encode)
 
-    val columns = if (encodedRows.isEmpty) {
-      Vector.fill(schema.columnCount)(Column.empty(schema.columnTypes.head))
+    val columnsOrError = if (encodedRows.isEmpty) {
+      Right(Vector.fill(schema.columnCount)(Column.empty(schema.columnTypes.head)))
     } else {
-      (0 until schema.columnCount).map { colIdx =>
-        val colValues = encodedRows.map(_(colIdx))
-        Column.fromValues(colValues, schema.columnTypes(colIdx))
-      }.toVector
+      (0 until schema.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, colIdx) =>
+        acc.flatMap { cols =>
+          val colValues = encodedRows.map(_(colIdx))
+          Column.fromValues(colValues, schema.columnTypes(colIdx)).map(cols :+ _)
+        }
+      }
     }
 
-    MaterializedDataset(columns, schema)
+    columnsOrError.map(cols => MaterializedDataset(cols, schema))
   }
 }

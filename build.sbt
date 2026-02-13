@@ -112,3 +112,6 @@ lazy val bench = project
     fork := true,
     javaOptions ++= Seq("-Xms8G", "-Xmx128G", "-Xss4M", "-XX:+UseZGC")
   )
+
+// Command aliases
+addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; scalafixAll; Test/compile")

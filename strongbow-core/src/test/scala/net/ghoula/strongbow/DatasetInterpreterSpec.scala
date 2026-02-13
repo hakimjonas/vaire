@@ -1,9 +1,10 @@
 package net.ghoula.strongbow
 
-import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.ColumnIndex
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
+import net.ghoula.strongbow.prelude.*
+import net.ghoula.strongbow.types.ColumnIndex
 
 /** Basic smoke test for columnar interpreter.
   *
@@ -36,7 +37,10 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     )
 
     // Execute
-    val result = DatasetInterpreter.execute(filtered)
+    val result = DatasetInterpreter.execute(filtered) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     // Verify results
     val values = result.toVectorUnsafe
@@ -53,7 +57,10 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     }
 
     val distinctDataset = dataset.distinct
-    val result = DatasetInterpreter.execute(distinctDataset)
+    val result = DatasetInterpreter.execute(distinctDataset) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     val values = result.toVectorUnsafe.sorted
     values shouldBe Vector(1, 2, 3, 4)
@@ -69,7 +76,10 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     }
 
     val limited = dataset.limit(3)
-    val result = DatasetInterpreter.execute(limited)
+    val result = DatasetInterpreter.execute(limited) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     val values = result.toVectorUnsafe
     values shouldBe Vector(10, 20, 30)
@@ -85,7 +95,10 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     }
 
     val sorted = dataset.sort
-    val result = DatasetInterpreter.execute(sorted)
+    val result = DatasetInterpreter.execute(sorted) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     val values = result.toVectorUnsafe
     values shouldBe Vector(1, 2, 5, 8, 9)
@@ -107,7 +120,10 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     }
 
     val unioned = ds1.union(ds2)
-    val result = DatasetInterpreter.execute(unioned)
+    val result = DatasetInterpreter.execute(unioned) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     val values = result.toVectorUnsafe
     values shouldBe Vector(1, 2, 3, 4, 5, 6)
@@ -129,7 +145,7 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
         // The actual comparison uses gt.ordering.gt(l, r) with NO CAST
         gt.left shouldBe a[Expr.Const[?, ?]]
         gt.right shouldBe a[Expr.Const[?, ?]]
-        gt.ordering should not be null
+        gt.ordering shouldBe an[Ordering[?]]
       case _ =>
         fail("Expected Gt expression")
     }
@@ -166,7 +182,10 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
 
     // Filter using the expression
     val filtered = dataset.filter(expr)
-    val result = DatasetInterpreter.execute(filtered)
+    val result = DatasetInterpreter.execute(filtered) match {
+      case Right(ds) => ds
+      case Left(err) => fail(s"Execution failed: $err")
+    }
 
     // Should keep 20 and 30
     val values = result.toVectorUnsafe

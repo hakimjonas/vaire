@@ -1,47 +1,20 @@
-# Strongbow: Zero-Cast Columnar Dataset Library
+# Strongbow
 
-**A type-safe, high-performance Scala 3 dataset library with zero-cast architecture**
+**A strongly-typed, zero-cast DataFrame library for Scala 3**
 
 [![Scala 3.7.4](https://img.shields.io/badge/scala-3.7.4-red.svg)](https://www.scala-lang.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-## Overview
+> *Named after Beleg Strongbow, chief of the Marchwardens of Doriath*
 
-Strongbow is a columnar dataset library that achieves both **compile-time type safety** and **runtime performance** through Scala 3's GADT (Generalized Algebraic Data Types) pattern matching. It provides:
+## What is Strongbow?
 
-- **Zero-cast expression evaluation** - No `asInstanceOf` in hot paths
-- **Columnar storage** - Efficient memory layout with type-specialized columns
-- **Pure functional API** - Immutable transformations with interpreter pattern
-- **Dual execution** - Single plan compiles to both columnar and Spark execution
+Strongbow is a columnar dataset library that leverages Scala 3's GADT (Generalized Algebraic Data Types) to achieve compile-time type safety without runtime overhead. The architecture eliminates type casts in expression evaluation while maintaining strong type guarantees.
 
-## Performance Characteristics
-
-We benchmarked against [Crossbow](https://github.com/audienceproject/crossbow), a production-proven Scala 3 DataFrame library, to validate our architectural choices. All benchmarks use identical configuration (Scala 3.7.4, ZGC, 128GB heap) for fair comparison.
-
-### 100K rows
-
-| Operation | Strongbow | Crossbow | Ratio | Memory Ratio |
-|-----------|---------|----------|-------|--------------|
-| Filter | 3.42 ms | 2.99 ms | 0.87x | 0.60x |
-| GroupBy | 7.19 ms | 9.38 ms | 1.30x | 1.10x |
-| Sort | 16.01 ms | 59.61 ms | 3.72x | 4.38x |
-| Join | 27.38 ms | 510.21 ms | 18.6x | 3.71x |
-
-### Scaling behavior
-
-| Scale | Strongbow | Crossbow |
-|-------|---------|----------|
-| 100K rows | Completes all operations | Completes all operations |
-| 500K rows | Completes all operations | Crashes on Join |
-| 1M rows | Completes (313.80ms Join) | Not reached |
-
-**Observations:**
-- Type-specialized columns provide significant performance advantages on complex operations (Join, Sort)
-- Zero-boxing architecture enables stable operation at higher scales
-- Both libraries achieve zero GC at 100K with ZGC
-- Crossbow's row-oriented approach has lower overhead for simple filter operations
-
-See [FAIR-COMPARISON-RESULTS.md](FAIR-COMPARISON-RESULTS.md) for detailed analysis and [CROSSBOW-CRASH-ANALYSIS.md](CROSSBOW-CRASH-ANALYSIS.md) for technical explanation of scaling limitations.
+**Core Design:**
+- **Zero-cast expression evaluation** - GADT pattern matching eliminates `asInstanceOf` in hot paths
+- **Type-specialized columnar storage** - Efficient memory layout with primitive arrays
+- **Pure functional API** - Immutable transformation plans with no vars in public API
+- **Interpreter pattern** - Single logical plan, multiple execution backends
 
 ## Architecture
 
@@ -173,14 +146,14 @@ val result = DatasetInterpreter.execute(adults)
 
 ## Documentation
 
+**Architecture:**
 - [MANIFESTO.md](MANIFESTO.md) - Project vision and principles
 - [ZERO-CAST-ARCHITECTURE.md](ZERO-CAST-ARCHITECTURE.md) - Technical deep-dive on zero-cast design
-- [FAIR-COMPARISON-RESULTS.md](FAIR-COMPARISON-RESULTS.md) - Benchmark comparison with Crossbow (Scala 3.7.4, ZGC)
-- [CROSSBOW-CRASH-ANALYSIS.md](CROSSBOW-CRASH-ANALYSIS.md) - Analysis of boxing overhead at scale
-- [RIGOROUS-BENCHMARK-RESULTS.md](RIGOROUS-BENCHMARK-RESULTS.md) - 10K baseline benchmarks
-- [SCALING-BENCHMARK-RESULTS.md](SCALING-BENCHMARK-RESULTS.md) - Scaling results with G1GC
-- [CROSSBOW-PARITY-ANALYSIS.md](CROSSBOW-PARITY-ANALYSIS.md) - Feature comparison matrix
-- [PHASE3.5-COMPLETE.md](PHASE3.5-COMPLETE.md) - Phase 3.5 completion report
+
+**Benchmarks & Analysis:**
+- [FAIR-COMPARISON-RESULTS.md](FAIR-COMPARISON-RESULTS.md) - Performance validation benchmarks
+- [CROSSBOW-CRASH-ANALYSIS.md](CROSSBOW-CRASH-ANALYSIS.md) - Scaling behavior analysis
+- Additional benchmark reports available in repository
 
 ## Building
 
@@ -200,13 +173,29 @@ sbt "bench/runMain net.ghoula.strongbow.bench.StrongbowVsCrossbow"
 - Java 21+
 - sbt 1.12.2
 
-## Design Principles
+## Architectural Signature
 
-1. **Zero Dependencies** - Core library depends only on Scala stdlib
-2. **Type Safety** - Compile-time guarantees via GADTs and refined types
-3. **Performance** - Zero-cast architecture for hot paths
-4. **Simplicity** - Pure data structures, interpreter pattern
-5. **Testability** - Pure functions, no side effects in plans
+**One Cast at Boundary, Zero in Logic:**
+```scala
+// Single cast when reading from typed column
+case cell: Expr.Cell[Row, a] =>
+  column.getInt(idx).asInstanceOf[a]  // Only cast
+
+// Zero casts in expression logic - GADT provides types
+case add: Expr.Add[Row] =>
+  for {
+    l <- eval(add.left, ...)   // l: Int (proven by GADT)
+    r <- eval(add.right, ...)  // r: Int (proven by GADT)
+  } yield l + r                // No cast needed!
+```
+
+**Design Principles:**
+
+1. **Type Safety First** - Compile-time guarantees via GADTs, no unsafe casts in hot paths
+2. **Zero Dependencies** - Core library depends only on Scala stdlib
+3. **Pure Functional** - Immutable plans, no vars in public API, referentially transparent
+4. **Interpreter Pattern** - Separate logical plan from execution strategy
+5. **Principled Performance** - Performance through architecture, not shortcuts
 
 ## License
 

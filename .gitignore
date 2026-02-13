@@ -1,0 +1,22 @@
+# sbt
+target/
+project/target/
+project/project/
+
+# IDE
+.idea/
+.vscode/
+.bsp/
+*.swp
+*.swo
+*~
+
+# Metals
+.metals/
+.bloop/
+
+# Mac
+.DS_Store
+
+# Logs
+*.log

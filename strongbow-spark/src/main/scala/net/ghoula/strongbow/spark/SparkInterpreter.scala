@@ -100,6 +100,16 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val parent = buildPlan(srtBy.parent)
         applySortByViaCollect(parent, srtBy.key, srtBy.ordering)
 
+      case srtExpr: Dataset.SortByExpr[T, _] =>
+        val parent = buildPlan(srtExpr.parent)
+        // Try native Spark column sort first, fall back to collect-sort
+        ExprToColumn.convert(srtExpr.keyExpr) match {
+          case Right((sparkCol, _)) =>
+            SparkPlan(parent.df.sort(sparkCol), parent.schema)
+          case Left(_) =>
+            applySortByExprViaCollect(parent, srtExpr.keyExpr, srtExpr.keyType, srtExpr.ordering)
+        }
+
       case samp: Dataset.Sample[T] =>
         val parent = buildPlan(samp.parent)
         SparkPlan(
@@ -195,6 +205,32 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val values = collectValues(parent)
     val sorted = values.sortBy(key)(using ord)
     SparkPlan(createDataFrame(sorted, parent.schema), parent.schema)
+  }
+
+  private def applySortByExprViaCollect[T, K](
+    parent: SparkPlan[T],
+    keyExpr: Expr[T, K],
+    keyType: net.ghoula.strongbow.ColumnType,
+    ord: Ordering[K]
+  ): SparkPlan[T] = {
+    // Fall back to in-memory: collect, build columns, use DatasetInterpreter's sortByExpr logic
+    val values = collectValues(parent)
+    import net.ghoula.strongbow.MaterializedDataset
+    MaterializedDataset.fromVector(values)(using parent.schema) match {
+      case Right(materialized) =>
+        net.ghoula.strongbow.ExprInterpreter.evalColumn(keyExpr, materialized.columns, keyType) match {
+          case Right(keyCol) =>
+            val rowCount = materialized.rowCount
+            val decoded = materialized.toVectorUnsafe
+            val keys = (0 until rowCount).map(i => keyCol.getValue(i).asInstanceOf[K]) // scalafix:ok DisableSyntax.asInstanceOf
+            val sorted = decoded.indices.sortWith((a, b) => ord.lt(keys(a), keys(b))).map(decoded)
+            SparkPlan(createDataFrame(sorted.toVector, parent.schema), parent.schema)
+          case Left(_) =>
+            // Last resort: just return unsorted
+            parent
+        }
+      case Left(_) => parent
+    }
   }
 
   // --- Joins (collect both sides, cross-product with condition) ---

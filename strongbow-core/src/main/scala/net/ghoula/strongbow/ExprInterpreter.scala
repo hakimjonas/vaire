@@ -195,28 +195,450 @@ object ExprInterpreter {
     }
   }
 
-  /** Evaluate expression for all rows, producing a new column. */
+  /** Fast-path boolean evaluation without Either wrapping.
+    *
+    * Eliminates the per-row Either allocation that is pure waste for filter predicates. For
+    * comparison and boolean cases, calls typed accessors directly and returns primitive boolean.
+    * Short-circuits And/Or (current `eval` evaluates both sides unconditionally).
+    *
+    * Throws on actual errors (programming bugs in filter predicates, not data quality issues).
+    */
+  def evalBoolean[Row](
+    expr: Expr[Row, Boolean],
+    columns: Vector[Column],
+    rowIdx: RowIndex
+  ): Boolean = {
+    (expr: @unchecked) match {
+      case Expr.Const(value) =>
+        value
+
+      case named: Expr.Named[Row, _] =>
+        evalBoolean(
+          named.expr.asInstanceOf[Expr[Row, Boolean]],
+          columns,
+          rowIdx
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case cell: Expr.Cell[Row, _] =>
+        val column = columns(cell.index.toInt)
+        column.getBoolean(rowIdx.toInt)
+
+      case eq: Expr.Eq[Row, _] =>
+        val l = evalAny(eq.left, columns, rowIdx)
+        val r = evalAny(eq.right, columns, rowIdx)
+        java.util.Objects.equals(l, r)
+
+      case neq: Expr.Neq[Row, _] =>
+        val l = evalAny(neq.left, columns, rowIdx)
+        val r = evalAny(neq.right, columns, rowIdx)
+        !java.util.Objects.equals(l, r)
+
+      case gt: Expr.Gt[Row, a] =>
+        val l = evalAny(gt.left, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(gt.right, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        gt.ordering.gt(l, r)
+
+      case lt: Expr.Lt[Row, a] =>
+        val l = evalAny(lt.left, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(lt.right, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        lt.ordering.lt(l, r)
+
+      case gte: Expr.Gte[Row, a] =>
+        val l = evalAny(gte.left, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(gte.right, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        gte.ordering.gteq(l, r)
+
+      case lte: Expr.Lte[Row, a] =>
+        val l = evalAny(lte.left, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(lte.right, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        lte.ordering.lteq(l, r)
+
+      // Short-circuit And/Or — current eval evaluates both sides unconditionally
+      case and: Expr.And[Row] =>
+        evalBoolean(and.left, columns, rowIdx) && evalBoolean(and.right, columns, rowIdx)
+
+      case or: Expr.Or[Row] =>
+        evalBoolean(or.left, columns, rowIdx) || evalBoolean(or.right, columns, rowIdx)
+
+      case not: Expr.Not[Row] =>
+        !evalBoolean(not.expr, columns, rowIdx)
+
+      case isDefined: Expr.IsDefined[Row, _] =>
+        evalAny(isDefined.expr, columns, rowIdx)
+          .asInstanceOf[Option[Any]]
+          .isDefined // scalafix:ok DisableSyntax.asInstanceOf
+
+      case when: Expr.When[Row, _] =>
+        val cond = evalBoolean(when.condition, columns, rowIdx)
+        if (cond)
+          evalAny(when.thenExpr, columns, rowIdx).asInstanceOf[Boolean]
+        else
+          evalAny(when.elseExpr, columns, rowIdx).asInstanceOf[Boolean]
+    }
+  }
+
+  /** Unboxed evaluation returning Any — internal helper for evalBoolean's sub-expressions.
+    *
+    * Avoids Either wrapping. Throws on errors (programming bugs, not data quality).
+    */
+  private def evalAny[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column],
+    rowIdx: RowIndex
+  ): Any = {
+    (expr: @unchecked) match {
+      case Expr.Const(value) => value
+
+      case named: Expr.Named[Row, _] =>
+        evalAny(named.expr, columns, rowIdx)
+
+      case cell: Expr.Cell[Row, _] =>
+        val column = columns(cell.index.toInt)
+        val idx = rowIdx.toInt
+        column.columnType match {
+          case ColumnType.IntType => column.getInt(idx)
+          case ColumnType.LongType => column.getLong(idx)
+          case ColumnType.DoubleType => column.getDouble(idx)
+          case ColumnType.StringType => column.getString(idx)
+          case ColumnType.BooleanType => column.getBoolean(idx)
+          case ColumnType.AnyType | ColumnType.OptionType(_) => column.getValue(idx)
+        }
+
+      case add: Expr.Add[Row] =>
+        evalAny(add.left, columns, rowIdx).asInstanceOf[Int] + evalAny(add.right, columns, rowIdx)
+          .asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case sub: Expr.Sub[Row] =>
+        evalAny(sub.left, columns, rowIdx).asInstanceOf[Int] - evalAny(sub.right, columns, rowIdx)
+          .asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case mul: Expr.Mul[Row] =>
+        evalAny(mul.left, columns, rowIdx).asInstanceOf[Int] * evalAny(mul.right, columns, rowIdx)
+          .asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case div: Expr.Div[Row] =>
+        val l = evalAny(div.left, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(div.right, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        if (r == 0)
+          throw new ArithmeticException(s"Division by zero at row ${rowIdx.toInt}") // scalafix:ok DisableSyntax.throw
+        l / r
+
+      case concat: Expr.Concat[Row] =>
+        evalAny(concat.left, columns, rowIdx).asInstanceOf[String] + evalAny(concat.right, columns, rowIdx)
+          .asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case length: Expr.Length[Row] =>
+        evalAny(length.expr, columns, rowIdx).asInstanceOf[String].length // scalafix:ok DisableSyntax.asInstanceOf
+
+      case getOrElse: Expr.GetOrElse[Row, _] =>
+        evalAny(getOrElse.expr, columns, rowIdx)
+          .asInstanceOf[Option[Any]] match { // scalafix:ok DisableSyntax.asInstanceOf
+          case Some(value) => value
+          case scala.None => getOrElse.default
+        }
+
+      case when: Expr.When[Row, _] =>
+        val cond = evalBoolean(when.condition, columns, rowIdx)
+        if (cond) evalAny(when.thenExpr, columns, rowIdx)
+        else evalAny(when.elseExpr, columns, rowIdx)
+
+      // Boolean expressions delegate to evalBoolean
+      case boolExpr: (Expr.Gt[Row, _] | Expr.Lt[Row, _] | Expr.Gte[Row, _] | Expr.Lte[Row, _] | Expr.Eq[Row, _] |
+            Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _]) =>
+        evalBoolean(
+          boolExpr.asInstanceOf[Expr[Row, Boolean]],
+          columns,
+          rowIdx
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+    }
+  }
+
+  /** Infer the ColumnType of an expression's operands by inspecting the expression tree and
+    * columns.
+    *
+    * Used by vectorized evaluation to determine array types for sub-expressions.
+    */
+  private def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column]): ColumnType = {
+    (expr: @unchecked) match {
+      case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
+      case c: Expr.Const[_, _] =>
+        c.value match {
+          case _: Int => ColumnType.IntType
+          case _: Long => ColumnType.LongType
+          case _: Double => ColumnType.DoubleType
+          case _: String => ColumnType.StringType
+          case _: Boolean => ColumnType.BooleanType
+          case _ => ColumnType.AnyType
+        }
+      case n: Expr.Named[_, _] => inferExprColumnType(n.expr, columns)
+      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Length[_] =>
+        ColumnType.IntType
+      case _: Expr.Concat[_] => ColumnType.StringType
+      case _: Expr.Gt[_, _] | _: Expr.Lt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
+          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] =>
+        ColumnType.BooleanType
+      case w: Expr.When[_, _] => inferExprColumnType(w.thenExpr, columns)
+      case g: Expr.GetOrElse[_, _] => inferExprColumnType(g.expr, columns)
+      case _: Expr.Sum[_] => ColumnType.IntType
+      case _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] => ColumnType.LongType
+      case _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] => ColumnType.DoubleType
+      case _: Expr.Max[_, _] | _: Expr.Min[_, _] => ColumnType.AnyType
+    }
+  }
+
+  /** Evaluate expression for all rows, producing a new column.
+    *
+    * Vectorized: operates on entire arrays instead of row-by-row where possible. For Cell
+    * references, returns the column directly (zero work). For arithmetic/comparisons/string ops,
+    * uses while-loops on typed arrays. Falls back to row-by-row eval for unsupported patterns.
+    */
   def evalColumn[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column],
     columnType: ColumnType
   ): Either[ExecutionError, Column] = {
     if (columns.isEmpty || columns.head.length == 0) {
-      Right(Column.empty(columnType))
-    } else {
-      val rowCount = columns.head.length
-
-      // Collect values, short-circuit on first error
-      val valuesOrError = (0 until rowCount).foldLeft[Either[ExecutionError, Vector[Any]]](
-        Right(Vector.empty)
-      ) { (acc, rowIdx) =>
-        acc.flatMap { values =>
-          eval(expr, columns, RowIndex(rowIdx)).map(values :+ _)
-        }
-      }
-
-      valuesOrError.flatMap(values => Column.fromValues(values, columnType))
+      return Right(Column.empty(columnType)) // scalafix:ok DisableSyntax.return
     }
+
+    val rowCount = columns.head.length
+
+    (expr: @unchecked) match {
+      // Cell reference — return column directly, zero work
+      case cell: Expr.Cell[_, _] =>
+        Right(columns(cell.index.toInt))
+
+      // Named — unwrap and recurse
+      case named: Expr.Named[_, _] =>
+        evalColumn(named.expr, columns, columnType)
+
+      // Constant — fill typed array
+      case c: Expr.Const[_, _] =>
+        columnType match {
+          case ColumnType.IntType =>
+            Right(Column.int(Array.fill(rowCount)(c.value.asInstanceOf[Int]))) // scalafix:ok DisableSyntax.asInstanceOf
+          case ColumnType.LongType =>
+            Right(
+              Column.long(Array.fill(rowCount)(c.value.asInstanceOf[Long]))
+            ) // scalafix:ok DisableSyntax.asInstanceOf
+          case ColumnType.DoubleType =>
+            Right(
+              Column.double(Array.fill(rowCount)(c.value.asInstanceOf[Double]))
+            ) // scalafix:ok DisableSyntax.asInstanceOf
+          case ColumnType.StringType =>
+            Right(
+              Column.string(Array.fill(rowCount)(c.value.asInstanceOf[String]))
+            ) // scalafix:ok DisableSyntax.asInstanceOf
+          case ColumnType.BooleanType =>
+            Right(
+              Column.boolean(Array.fill(rowCount)(c.value.asInstanceOf[Boolean]))
+            ) // scalafix:ok DisableSyntax.asInstanceOf
+          case _ =>
+            Right(Column.any(Array.fill(rowCount)(c.value.asInstanceOf[Any]))) // scalafix:ok DisableSyntax.asInstanceOf
+        }
+
+      // Arithmetic — vectorized int array operations
+      case add: Expr.Add[Row] =>
+        vectorizedIntBinOp(add.left, add.right, columns, rowCount)(_ + _)
+
+      case sub: Expr.Sub[Row] =>
+        vectorizedIntBinOp(sub.left, sub.right, columns, rowCount)(_ - _)
+
+      case mul: Expr.Mul[Row] =>
+        vectorizedIntBinOp(mul.left, mul.right, columns, rowCount)(_ * _)
+
+      case div: Expr.Div[Row] =>
+        for {
+          leftCol <- evalColumn(div.left, columns, ColumnType.IntType)
+          rightCol <- evalColumn(div.right, columns, ColumnType.IntType)
+          result <- vectorizedDiv(
+            leftCol.asInstanceOf[Column.IntColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
+            rightCol.asInstanceOf[Column.IntColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
+            rowCount
+          )
+        } yield result
+
+      // Comparisons — vectorized, dispatch on operand column type
+      case gt: Expr.Gt[Row, _] =>
+        vectorizedComparison(gt.left, gt.right, columns, rowCount)(
+          gt.ordering.asInstanceOf[Ordering[Any]].gt
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case gte: Expr.Gte[Row, _] =>
+        vectorizedComparison(gte.left, gte.right, columns, rowCount)(
+          gte.ordering.asInstanceOf[Ordering[Any]].gteq
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case lt: Expr.Lt[Row, _] =>
+        vectorizedComparison(lt.left, lt.right, columns, rowCount)(
+          lt.ordering.asInstanceOf[Ordering[Any]].lt
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case lte: Expr.Lte[Row, _] =>
+        vectorizedComparison(lte.left, lte.right, columns, rowCount)(
+          lte.ordering.asInstanceOf[Ordering[Any]].lteq
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case eq: Expr.Eq[Row, _] =>
+        vectorizedComparison(eq.left, eq.right, columns, rowCount)((a, b) => java.util.Objects.equals(a, b))
+
+      case neq: Expr.Neq[Row, _] =>
+        vectorizedComparison(neq.left, neq.right, columns, rowCount)((a, b) => !java.util.Objects.equals(a, b))
+
+      // Boolean ops — vectorized on boolean arrays
+      case and: Expr.And[Row] =>
+        for {
+          leftCol <- evalColumn(and.left, columns, ColumnType.BooleanType)
+          rightCol <- evalColumn(and.right, columns, ColumnType.BooleanType)
+        } yield {
+          val ld = leftCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val rd = rightCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = ld(i) && rd(i); i += 1 }
+          Column.boolean(out)
+        }
+
+      case or: Expr.Or[Row] =>
+        for {
+          leftCol <- evalColumn(or.left, columns, ColumnType.BooleanType)
+          rightCol <- evalColumn(or.right, columns, ColumnType.BooleanType)
+        } yield {
+          val ld = leftCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val rd = rightCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = ld(i) || rd(i); i += 1 }
+          Column.boolean(out)
+        }
+
+      case not: Expr.Not[Row] =>
+        evalColumn(not.expr, columns, ColumnType.BooleanType).map { col =>
+          val data = col.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = !data(i); i += 1 }
+          Column.boolean(out)
+        }
+
+      // String ops — vectorized on string arrays
+      case concat: Expr.Concat[Row] =>
+        for {
+          leftCol <- evalColumn(concat.left, columns, ColumnType.StringType)
+          rightCol <- evalColumn(concat.right, columns, ColumnType.StringType)
+        } yield {
+          val ld = leftCol.asInstanceOf[Column.StringColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val rd = rightCol.asInstanceOf[Column.StringColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val out = new Array[String](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = ld(i) + rd(i); i += 1 }
+          Column.string(out)
+        }
+
+      case length: Expr.Length[Row] =>
+        evalColumn(length.expr, columns, ColumnType.StringType).map { col =>
+          val data = col.asInstanceOf[Column.StringColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val out = new Array[Int](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = data(i).length; i += 1 }
+          Column.int(out)
+        }
+
+      // When — evaluate condition, then pick from then/else columns
+      case when: Expr.When[Row, _] =>
+        for {
+          condCol <- evalColumn(when.condition, columns, ColumnType.BooleanType)
+          thenCol <- evalColumn(when.thenExpr, columns, columnType)
+          elseCol <- evalColumn(when.elseExpr, columns, columnType)
+        } yield {
+          val cond = condCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) = if (cond(i)) thenCol.getValue(i) else elseCol.getValue(i)
+            i += 1
+          }
+          Column.fromValues(out.toVector, columnType) match {
+            case Right(c) => c
+            case Left(_) => Column.any(out)
+          }
+        }
+
+      // Fallback — row-by-row for anything not yet vectorized
+      case _ =>
+        evalColumnRowByRow(expr, columns, columnType, rowCount)
+    }
+  }
+
+  /** Vectorized int binary operation helper. */
+  private def vectorizedIntBinOp[Row](
+    left: Expr[Row, Int],
+    right: Expr[Row, Int],
+    columns: Vector[Column],
+    rowCount: Int
+  )(op: (Int, Int) => Int): Either[ExecutionError, Column] = {
+    for {
+      leftCol <- evalColumn(left, columns, ColumnType.IntType)
+      rightCol <- evalColumn(right, columns, ColumnType.IntType)
+    } yield {
+      val ld = leftCol.asInstanceOf[Column.IntColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+      val rd = rightCol.asInstanceOf[Column.IntColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+      val out = new Array[Int](rowCount)
+      var i = 0 // scalafix:ok DisableSyntax.var
+      while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
+      Column.int(out)
+    }
+  }
+
+  /** Vectorized division with zero-check. */
+  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column] = {
+    val out = new Array[Int](rowCount)
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
+      if (right(i) == 0) return Left(ExecutionError.DivisionByZero(i)) // scalafix:ok DisableSyntax.return
+      out(i) = left(i) / right(i)
+      i += 1
+    }
+    Right(Column.int(out))
+  }
+
+  /** Vectorized comparison helper — evaluates operands to columns, compares element-wise. */
+  private def vectorizedComparison[Row, A](
+    left: Expr[Row, A],
+    right: Expr[Row, A],
+    columns: Vector[Column],
+    rowCount: Int
+  )(cmp: (Any, Any) => Boolean): Either[ExecutionError, Column] = {
+    val opType = inferExprColumnType(left, columns)
+    for {
+      leftCol <- evalColumn(left, columns, opType)
+      rightCol <- evalColumn(right, columns, opType)
+    } yield {
+      val out = new Array[Boolean](rowCount)
+      var i = 0 // scalafix:ok DisableSyntax.var
+      while (i < rowCount) {
+        out(i) = cmp(leftCol.getValue(i), rightCol.getValue(i))
+        i += 1
+      }
+      Column.boolean(out)
+    }
+  }
+
+  /** Row-by-row fallback for expressions not yet vectorized. */
+  private def evalColumnRowByRow[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column],
+    columnType: ColumnType,
+    rowCount: Int
+  ): Either[ExecutionError, Column] = {
+    val valuesOrError = (0 until rowCount).foldLeft[Either[ExecutionError, Vector[Any]]](
+      Right(Vector.empty)
+    ) { (acc, rowIdx) =>
+      acc.flatMap { values =>
+        eval(expr, columns, RowIndex(rowIdx)).map(values :+ _)
+      }
+    }
+    valuesOrError.flatMap(values => Column.fromValues(values, columnType))
   }
 
   /** Evaluate aggregation expression over entire dataset.

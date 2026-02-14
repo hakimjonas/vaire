@@ -202,10 +202,11 @@ object ScalingBenchmark {
       f"${groupByResult.medianMs}%.2f ms (alloc: ${groupByResult.allocatedMB}%.1f MB, heap: ${groupByResult.maxHeapMB}%.0f MB, GC: ${groupByResult.gcCollections})"
     )
 
-    // Sort
+    // Sort (expression-based: zero decode, reads typed int array directly)
     print("  Sort... ")
     val sortResult = benchmarkOperation(scale, rows, "Sort", 20, 50) {
-      val sorted = dataset.sortBy(_._2)(using Ordering[Int])
+      val valCell = Expr.Cell[(String, Int), Int]("value", ColumnIndex(1))
+      val sorted = dataset.sortByExpr(valCell, ColumnType.IntType)(using Ordering[Int])
       val materialized = DatasetInterpreter
         .execute(sorted)
         .getOrElse(
@@ -216,6 +217,54 @@ object ScalingBenchmark {
     results += sortResult
     println(
       f"${sortResult.medianMs}%.2f ms (alloc: ${sortResult.allocatedMB}%.1f MB, heap: ${sortResult.maxHeapMB}%.0f MB, GC: ${sortResult.gcCollections})"
+    )
+
+    // Limit
+    print("  Limit... ")
+    val limitResult = benchmarkOperation(scale, rows, "Limit", 20, 50) {
+      val limited = dataset.limit(rows / 2)
+      val materialized = DatasetInterpreter
+        .execute(limited)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
+    }
+    results += limitResult
+    println(
+      f"${limitResult.medianMs}%.2f ms (alloc: ${limitResult.allocatedMB}%.1f MB, heap: ${limitResult.maxHeapMB}%.0f MB, GC: ${limitResult.gcCollections})"
+    )
+
+    // Union
+    print("  Union... ")
+    val unionResult = benchmarkOperation(scale, rows, "Union", 20, 50) {
+      val unioned = dataset.union(dataset)
+      val materialized = DatasetInterpreter
+        .execute(unioned)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
+    }
+    results += unionResult
+    println(
+      f"${unionResult.medianMs}%.2f ms (alloc: ${unionResult.allocatedMB}%.1f MB, heap: ${unionResult.maxHeapMB}%.0f MB, GC: ${unionResult.gcCollections})"
+    )
+
+    // Distinct
+    print("  Distinct... ")
+    val distinctResult = benchmarkOperation(scale, rows, "Distinct", 20, 50) {
+      val distincted = dataset.distinct
+      val materialized = DatasetInterpreter
+        .execute(distincted)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
+    }
+    results += distinctResult
+    println(
+      f"${distinctResult.medianMs}%.2f ms (alloc: ${distinctResult.allocatedMB}%.1f MB, heap: ${distinctResult.maxHeapMB}%.0f MB, GC: ${distinctResult.gcCollections})"
     )
 
     // Join
@@ -245,7 +294,7 @@ object ScalingBenchmark {
     println("SCALING SUMMARY")
     println("=".repeat(80))
 
-    val operations = Seq("Filter", "GroupBy", "Sort", "Join")
+    val operations = Seq("Filter", "GroupBy", "Sort", "Limit", "Union", "Distinct", "Join")
     val scales = allResults.map(_.scale).distinct
 
     println()
@@ -352,24 +401,28 @@ object ScalingBenchmark {
   def main(args: Array[String]): Unit = {
     println("Longbow Scaling Benchmark")
     println("=".repeat(80))
-    println("Testing at realistic single-machine scales:")
-    println("  - 100K rows: 10x baseline")
-    println("  - 500K rows: 50x baseline")
-    println("  - 1M rows: 100x baseline")
+    println("Testing at multiple scales:")
+    println("  - 10K rows: Crossbow comparison baseline")
+    println("  - 100K rows: 10x")
+    println("  - 200K rows: 20x")
+    println("  - 400K rows: 40x")
     println()
     println("Goal: Show where memory efficiency and zero-GC compound")
     println("=".repeat(80))
 
     val allResults = scala.collection.mutable.ArrayBuffer[ScaleResult]()
 
+    // 10K rows (Crossbow comparison)
+    allResults ++= benchmarkScale(10000, 100)
+
     // 100K rows
     allResults ++= benchmarkScale(100000, 1000)
 
-    // 500K rows
-    allResults ++= benchmarkScale(500000, 5000)
+    // 200K rows
+    allResults ++= benchmarkScale(200000, 2000)
 
-    // 1M rows
-    allResults ++= benchmarkScale(1000000, 10000)
+    // 400K rows
+    allResults ++= benchmarkScale(400000, 4000)
 
     printSummaryTable(allResults.toSeq)
 

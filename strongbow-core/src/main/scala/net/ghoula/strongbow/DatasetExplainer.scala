@@ -60,6 +60,9 @@ object DatasetExplainer {
       case Dataset.SortBy(parent, _, _) =>
         s"SortBy[key]\n${explain(parent, indent + 1)}"
 
+      case Dataset.SortByExpr(parent, _, _, _) =>
+        s"SortByExpr[expr]\n${explain(parent, indent + 1)}"
+
       case Dataset.Sample(parent, fraction, seed, withReplacement) =>
         s"Sample(fraction=$fraction, seed=$seed, withReplacement=$withReplacement)\n${explain(parent, indent + 1)}"
 

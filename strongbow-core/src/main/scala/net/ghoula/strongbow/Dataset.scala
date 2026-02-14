@@ -35,6 +35,8 @@ enum Dataset[+T] {
   case Except[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
   case Sort[T](parent: Dataset[T], ordering: Ordering[T]) extends Dataset[T]
   case SortBy[T, K](parent: Dataset[T], key: T => K, ordering: Ordering[K]) extends Dataset[T]
+  case SortByExpr[T, K](parent: Dataset[T], keyExpr: Expr[T, K], keyType: ColumnType, ordering: Ordering[K])
+      extends Dataset[T]
   case Sample[T](
     parent: Dataset[T],
     fraction: Double,
@@ -125,6 +127,11 @@ object Dataset {
 
     inline def sortBy[K](key: T => K)(using ord: Ordering[K]): Dataset[T] = {
       SortBy(ds, key, ord)
+    }
+
+    /** Sort by expression — avoids decoding rows, reads sort keys directly from columns. */
+    inline def sortByExpr[K](keyExpr: Expr[T, K], keyType: ColumnType)(using ord: Ordering[K]): Dataset[T] = {
+      SortByExpr(ds, keyExpr, keyType, ord)
     }
 
     inline def groupBy[K](key: T => K): Grouped[K, T] = {

@@ -110,6 +110,102 @@ enum Column {
       throw new IllegalStateException(s"Cannot get Boolean from ${this.columnType}") // scalafix:ok DisableSyntax.throw
   }
 
+  /** Typed prefix slicing — takes the first n elements without boxing.
+    *
+    * Uses `Array.copyOfRange` on typed arrays for zero-boxing, cache-friendly copies. This replaces
+    * the `getValue` + `fromValues` round-trip in `limit`.
+    *
+    * @param n
+    *   Number of elements to take from the front. Clamped to column length.
+    */
+  def take(n: Int): Column = {
+    val len = Math.min(n, length)
+    this match {
+      case IntColumn(data, nulls) =>
+        IntColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
+      case LongColumn(data, nulls) =>
+        LongColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
+      case DoubleColumn(data, nulls) =>
+        DoubleColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
+      case StringColumn(data, nulls) =>
+        StringColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
+      case BooleanColumn(data, nulls) =>
+        BooleanColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
+      case AnyColumn(data, nulls) =>
+        val arr = new Array[Any](len)
+        System.arraycopy(data, 0, arr, 0, len)
+        AnyColumn(arr, nulls.filter(_ < len))
+    }
+  }
+
+  /** Typed array concatenation — appends another column without boxing.
+    *
+    * Uses `System.arraycopy` on typed arrays. Returns error if column types don't match.
+    *
+    * @param other
+    *   Column to append. Must be the same column type.
+    */
+  def concat(other: Column): Either[ExecutionError, Column] = {
+    if (this.columnType != other.columnType) {
+      Left(ExecutionError.TypeMismatch(this.columnType.toString, other.columnType.toString, "Column.concat"))
+    } else {
+      val leftLen = this.length
+      val rightLen = other.length
+      val rightNulls = other match {
+        case IntColumn(_, n) => n
+        case LongColumn(_, n) => n
+        case DoubleColumn(_, n) => n
+        case StringColumn(_, n) => n
+        case BooleanColumn(_, n) => n
+        case AnyColumn(_, n) => n
+      }
+      val leftNulls = this match {
+        case IntColumn(_, n) => n
+        case LongColumn(_, n) => n
+        case DoubleColumn(_, n) => n
+        case StringColumn(_, n) => n
+        case BooleanColumn(_, n) => n
+        case AnyColumn(_, n) => n
+      }
+      val combinedNulls = leftNulls | rightNulls.map(_ + leftLen)
+
+      (this, other) match {
+        case (IntColumn(l, _), IntColumn(r, _)) =>
+          val arr = new Array[Int](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(IntColumn(arr, combinedNulls))
+        case (LongColumn(l, _), LongColumn(r, _)) =>
+          val arr = new Array[Long](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(LongColumn(arr, combinedNulls))
+        case (DoubleColumn(l, _), DoubleColumn(r, _)) =>
+          val arr = new Array[Double](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(DoubleColumn(arr, combinedNulls))
+        case (StringColumn(l, _), StringColumn(r, _)) =>
+          val arr = new Array[String](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(StringColumn(arr, combinedNulls))
+        case (BooleanColumn(l, _), BooleanColumn(r, _)) =>
+          val arr = new Array[Boolean](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(BooleanColumn(arr, combinedNulls))
+        case (AnyColumn(l, _), AnyColumn(r, _)) =>
+          val arr = new Array[Any](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(AnyColumn(arr, combinedNulls))
+        case _ =>
+          Left(ExecutionError.TypeMismatch(this.columnType.toString, other.columnType.toString, "Column.concat"))
+      }
+    }
+  }
+
   /** Type-specialized slicing for efficient filter operations.
     *
     * Creates a new column with only the specified indices, avoiding boxing and intermediate
@@ -150,23 +246,24 @@ enum Column {
 
   /** Generic array slicing with null handling.
     *
-    * Uses iterator-based map for optimal performance. Benchmarked alternatives:
-    *   - Current (iterator.map): baseline
-    *   - While loop with var: same performance, but var in hot path
-    *   - View: similar performance
-    *   - Direct functional: slower + more memory
-    *
-    * Iterator approach eliminates vars while maintaining performance.
+    * Preallocates exact-sized array and fills with a while loop — zero intermediate allocations.
+    * The var is contained (private method, local scope, no aliasing).
     */
   private def sliceArray[T: scala.reflect.ClassTag](
     data: Array[T],
     indices: Array[Int],
     nulls: BitSet,
     defaultValue: T
-  ): Array[T] =
-    indices.iterator.map { srcIdx =>
-      if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)
-    }.toArray
+  ): Array[T] = {
+    val newData = new Array[T](indices.length)
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < indices.length) {
+      val srcIdx = indices(i)
+      newData(i) = if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)
+      i += 1
+    }
+    newData
+  }
 
   /** Build new null BitSet for sliced indices.
     *

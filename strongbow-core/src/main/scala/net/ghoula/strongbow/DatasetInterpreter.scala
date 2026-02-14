@@ -113,6 +113,9 @@ object DatasetInterpreter extends Interpreter {
       case srtBy: Dataset.SortBy[T, _] =>
         execute(srtBy.parent).flatMap(parent => sortBy(parent, srtBy.key, srtBy.ordering))
 
+      case srtExpr: Dataset.SortByExpr[T, _] =>
+        execute(srtExpr.parent).flatMap(parent => sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType, srtExpr.ordering))
+
       case samp: Dataset.Sample[T] =>
         execute(samp.parent).map { parent =>
           sample(parent, samp.fraction, samp.seed, samp.withReplacement)
@@ -153,17 +156,17 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Filter rows based on predicate expression. */
+  /** Filter rows based on predicate expression.
+    *
+    * Uses evalBoolean fast path — no Either allocation per row, short-circuit And/Or.
+    */
   private def filter[T](
     dataset: MaterializedDataset[T],
     predicate: Expr[T, Boolean]
   ): MaterializedDataset[T] = {
     // Convert to Array for 2x better slice performance (benchmarked at 500K elements)
     val rowIndices = (0 until dataset.rowCount).filter { rowIdx =>
-      ExprInterpreter.eval(predicate, dataset.columns, RowIndex(rowIdx)) match {
-        case Right(true) => true
-        case _ => false
-      }
+      ExprInterpreter.evalBoolean(predicate, dataset.columns, RowIndex(rowIdx))
     }.toArray
 
     // Use type-specialized slice instead of getValue + fromValues
@@ -173,7 +176,11 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset(newColumns, dataset.schema)
   }
 
-  /** Remove duplicate rows. */
+  /** Remove duplicate rows.
+    *
+    * Keeps the HashSet-based index collection (right algorithm), but uses Column.slice for
+    * reconstruction instead of the boxing getValue/fromValues round-trip.
+    */
   private def distinct[T](dataset: MaterializedDataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
     val seen = scala.collection.mutable.HashSet.empty[Vector[Any]]
     val rowIndices = (0 until dataset.rowCount).filter { rowIdx =>
@@ -184,43 +191,29 @@ object DatasetInterpreter extends Interpreter {
         seen.add(row)
         true
       }
-    }
+    }.toArray
 
-    dataset.columns
-      .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, col) =>
-        acc.flatMap { cols =>
-          Column
-            .fromValues(
-              rowIndices.map(idx => col.getValue(idx)).toVector,
-              col.columnType
-            )
-            .map(cols :+ _)
-        }
-      }
-      .map(cols => MaterializedDataset(cols, dataset.schema))
+    val newColumns = dataset.columns.map(_.slice(rowIndices))
+    Right(MaterializedDataset(newColumns, dataset.schema))
   }
 
-  /** Limit result to first n rows. */
+  /** Limit result to first n rows.
+    *
+    * Uses Column.take for typed prefix slicing — no boxing round-trip.
+    */
   private def limit[T](dataset: MaterializedDataset[T], n: Int): Either[ExecutionError, MaterializedDataset[T]] = {
     if (n >= dataset.rowCount) {
       Right(dataset)
     } else {
-      dataset.columns
-        .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, col) =>
-          acc.flatMap { cols =>
-            Column
-              .fromValues(
-                (0 until n).map(idx => col.getValue(idx)).toVector,
-                col.columnType
-              )
-              .map(cols :+ _)
-          }
-        }
-        .map(cols => MaterializedDataset(cols, dataset.schema))
+      val newColumns = dataset.columns.map(_.take(n))
+      Right(MaterializedDataset(newColumns, dataset.schema))
     }
   }
 
-  /** Union two datasets with the same schema. */
+  /** Union two datasets with the same schema.
+    *
+    * Uses Column.concat for typed array concatenation — no boxing round-trip.
+    */
   private def union[T](
     left: MaterializedDataset[T],
     right: MaterializedDataset[T]
@@ -236,71 +229,101 @@ object DatasetInterpreter extends Interpreter {
         .zip(right.columns)
         .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { case (acc, (leftCol, rightCol)) =>
           acc.flatMap { cols =>
-            if (leftCol.columnType != rightCol.columnType) {
-              Left(
-                ExecutionError.PreconditionViolation(
-                  s"Cannot union columns with different types: ${leftCol.columnType} vs ${rightCol.columnType}"
-                )
-              )
-            } else {
-              val leftValues = (0 until leftCol.length).map(leftCol.getValue)
-              val rightValues = (0 until rightCol.length).map(rightCol.getValue)
-
-              Column.fromValues((leftValues ++ rightValues).toVector, leftCol.columnType).map(cols :+ _)
-            }
+            leftCol.concat(rightCol).map(cols :+ _)
           }
         }
         .map(cols => MaterializedDataset(cols, left.schema))
     }
   }
 
-  /** Sort dataset using ordering. */
+  /** Sort dataset using ordering.
+    *
+    * Index-based sort: decode N rows once, sort an index array, then Column.slice to reorder.
+    * Eliminates the expensive MaterializedDataset.fromVector re-encoding (N encodes + N fromValues
+    * boxing round-trips).
+    */
   private def sort[T](
     dataset: MaterializedDataset[T],
     ord: Ordering[T]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
-    val rows = dataset.toVectorUnsafe
-    val sortedRows = rows.sorted(using ord)
-
-    MaterializedDataset.fromVector(sortedRows)(using dataset.schema)
+    val rowCount = dataset.rowCount
+    val decoded = dataset.toVectorUnsafe
+    val indices = (0 until rowCount).sortWith((a, b) => ord.lt(decoded(a), decoded(b))).toArray
+    val newColumns = dataset.columns.map(_.slice(indices))
+    Right(MaterializedDataset(newColumns, dataset.schema))
   }
 
-  /** Sort dataset by key function. */
+  /** Sort dataset by key function.
+    *
+    * Index-based sort: decode N rows, apply key function once per row, sort index array by cached
+    * keys, then Column.slice. Eliminates re-encoding.
+    */
   private def sortBy[T, K](
     dataset: MaterializedDataset[T],
     key: T => K,
     ord: Ordering[K]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
-    val rows = dataset.toVectorUnsafe
-    val sortedRows = rows.sortBy(key)(using ord)
-
-    MaterializedDataset.fromVector(sortedRows)(using dataset.schema)
+    val rowCount = dataset.rowCount
+    val decoded = dataset.toVectorUnsafe
+    val keys = decoded.map(key)
+    val indices = (0 until rowCount).sortWith((a, b) => ord.lt(keys(a), keys(b))).toArray
+    val newColumns = dataset.columns.map(_.slice(indices))
+    Right(MaterializedDataset(newColumns, dataset.schema))
   }
 
-  /** Select columns by evaluating expressions. */
+  /** Sort dataset by expression — zero decode.
+    *
+    * Evaluates the expression to a key column, then sorts index by reading typed array values
+    * directly. For Cell expressions, this is a column passthrough (zero work). Eliminates the
+    * toVectorUnsafe decode that lambda-based sortBy requires.
+    */
+  private def sortByExpr[T, K](
+    dataset: MaterializedDataset[T],
+    keyExpr: Expr[T, K],
+    keyType: ColumnType,
+    ord: Ordering[K]
+  ): Either[ExecutionError, MaterializedDataset[T]] = {
+    ExprInterpreter.evalColumn(keyExpr, dataset.columns, keyType).map { keyCol =>
+      val rowCount = dataset.rowCount
+      val indices = keyCol match {
+        case Column.IntColumn(data, _) =>
+          val intOrd = ord.asInstanceOf[Ordering[Int]] // scalafix:ok DisableSyntax.asInstanceOf
+          (0 until rowCount).sortWith((a, b) => intOrd.lt(data(a), data(b))).toArray
+        case Column.LongColumn(data, _) =>
+          val longOrd = ord.asInstanceOf[Ordering[Long]] // scalafix:ok DisableSyntax.asInstanceOf
+          (0 until rowCount).sortWith((a, b) => longOrd.lt(data(a), data(b))).toArray
+        case Column.DoubleColumn(data, _) =>
+          val dblOrd = ord.asInstanceOf[Ordering[Double]] // scalafix:ok DisableSyntax.asInstanceOf
+          (0 until rowCount).sortWith((a, b) => dblOrd.lt(data(a), data(b))).toArray
+        case Column.StringColumn(data, _) =>
+          val strOrd = ord.asInstanceOf[Ordering[String]] // scalafix:ok DisableSyntax.asInstanceOf
+          (0 until rowCount).sortWith((a, b) => strOrd.lt(data(a), data(b))).toArray
+        case _ =>
+          // Fallback: read via getValue
+          (0 until rowCount).sortWith { (a, b) =>
+            ord.lt(keyCol.getValue(a).asInstanceOf[K], keyCol.getValue(b).asInstanceOf[K]) // scalafix:ok DisableSyntax.asInstanceOf
+          }.toArray
+      }
+      val newColumns = dataset.columns.map(_.slice(indices))
+      MaterializedDataset(newColumns, dataset.schema)
+    }
+  }
+
+  /** Select columns by evaluating expressions.
+    *
+    * Uses vectorized evaluation — expressions operate on entire columns at once instead of
+    * row-by-row. Cell references return columns directly (zero work), arithmetic and comparisons
+    * use while-loops on typed arrays.
+    */
   private def selectExpressions[In, Out](
     dataset: MaterializedDataset[In],
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
     outputSchema: Schema[Out]
   ): Either[ExecutionError, MaterializedDataset[Out]] = {
-    val rowCount = dataset.rowCount
-
-    // Evaluate each expression to create new columns
     val newColumnsOrError = exprs.foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
       case (acc, (_, expr, columnType)) =>
         acc.flatMap { cols =>
-          val valuesOrError = (0 until rowCount).foldLeft[Either[ExecutionError, Vector[Any]]](Right(Vector.empty)) {
-            (accValues, rowIdx) =>
-              accValues.flatMap { values =>
-                ExprInterpreter.eval(expr, dataset.columns, RowIndex(rowIdx)) match {
-                  case Right(value) => Right(values :+ value)
-                  case Left(err) =>
-                    Left(ExecutionError.InvalidValue(s"Expression evaluation failed: $err"))
-                }
-              }
-          }
-
-          valuesOrError.flatMap(values => Column.fromValues(values, columnType).map(cols :+ _))
+          ExprInterpreter.evalColumn(expr, dataset.columns, columnType).map(cols :+ _)
         }
     }
 

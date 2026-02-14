@@ -129,6 +129,49 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     results shouldBe Seq(Right(5), Right(0), Right(5))
   }
 
+  // --- outputType ---
+
+  "outputType" should "return IntType for arithmetic expressions" in {
+    val cell = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    (cell + Expr.const(1)).outputType shouldBe Some(ColumnType.IntType)
+    (cell - Expr.const(1)).outputType shouldBe Some(ColumnType.IntType)
+    (cell * Expr.const(2)).outputType shouldBe Some(ColumnType.IntType)
+    (cell / Expr.const(2)).outputType shouldBe Some(ColumnType.IntType)
+  }
+
+  "outputType" should "return BooleanType for comparison expressions" in {
+    val cell = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    (cell > Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+    (cell >= Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+    (cell < Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+    (cell <= Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+    Expr.Eq(cell, Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+    Expr.Neq(cell, Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+  }
+
+  "outputType" should "return StringType for Concat and IntType for Length" in {
+    val cell = Expr.Cell[String, String]("value", ColumnIndex(0))
+    (cell ++ Expr.const("!")).outputType shouldBe Some(ColumnType.StringType)
+    cell.length.outputType shouldBe Some(ColumnType.IntType)
+  }
+
+  "outputType" should "return None for Cell and Const (erased types)" in {
+    Expr.Cell[Int, Int]("value", ColumnIndex(0)).outputType shouldBe None
+    Expr.Const[Int, Int](42).outputType shouldBe None
+  }
+
+  "outputType" should "return LongType for count expressions" in {
+    Expr.Count[Int]().outputType shouldBe Some(ColumnType.LongType)
+    Expr.CountDistinct(Expr.Cell[Int, Int]("value", ColumnIndex(0))).outputType shouldBe Some(ColumnType.LongType)
+  }
+
+  "outputType" should "return DoubleType for Avg and StdDev" in {
+    val cell = Expr.Cell[Double, Double]("value", ColumnIndex(0))
+    Expr.Avg(cell).outputType shouldBe Some(ColumnType.DoubleType)
+    Expr.StdDev(cell).outputType shouldBe Some(ColumnType.DoubleType)
+    Expr.StdDevPop(cell).outputType shouldBe Some(ColumnType.DoubleType)
+  }
+
   "comparison operators" should "maintain zero-cast architecture" in {
     val col = Column.int(Array(10))
     val columns = Vector(col)

@@ -192,6 +192,40 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     values shouldBe Vector(20, 30)
   }
 
+  "selectAs" should "change output type from String to Int via length expression" in {
+    val col = Column.string(Array("hi", "hello", "greetings"))
+    val ds = Dataset.fromColumns(Vector(col), Schema.stringSchema).toOption.get
+
+    val strCell: Expr[String, String] = Expr.Cell("value", ColumnIndex(0))
+    val selected = ds.selectAs[Int](
+      ("result", strCell.length: Expr[String, Any], ColumnType.IntType)
+    )
+
+    val result = DatasetInterpreter.execute(selected) match {
+      case Right(ds) => ds.toVectorUnsafe
+      case Left(err) => fail(s"Execution failed: $err")
+    }
+
+    result shouldBe Vector(2, 5, 9)
+  }
+
+  "selectAs" should "change output type with arithmetic expression" in {
+    val col = Column.int(Array(10, 21, 35))
+    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+
+    val intCell: Expr[Int, Int] = Expr.Cell("value", ColumnIndex(0))
+    val selected = ds.selectAs[Int](
+      ("result", intCell / Expr.const(10): Expr[Int, Any], ColumnType.IntType)
+    )
+
+    val result = DatasetInterpreter.execute(selected) match {
+      case Right(ds) => ds.toVectorUnsafe
+      case Left(err) => fail(s"Execution failed: $err")
+    }
+
+    result shouldBe Vector(1, 2, 3)
+  }
+
   "Schema validation" should "catch column count mismatch" in {
     val column1 = Column.int(Array(1, 2, 3))
     val column2 = Column.string(Array("a", "b", "c"))

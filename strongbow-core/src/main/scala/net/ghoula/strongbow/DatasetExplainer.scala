@@ -21,7 +21,7 @@ object DatasetExplainer {
       case Dataset.Select(parent, _, _) =>
         s"Select[projection]\n${explain(parent, indent + 1)}"
 
-      case Dataset.SelectExprs(parent, exprs) =>
+      case Dataset.SelectExprs(parent, exprs, _) =>
         s"SelectExprs[${exprs.map(_._1).mkString(", ")}]\n${explain(parent, indent + 1)}"
 
       case Dataset.Distinct(parent) =>

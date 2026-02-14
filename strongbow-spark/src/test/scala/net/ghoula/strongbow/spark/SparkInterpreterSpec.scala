@@ -239,6 +239,23 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     sparkResult shouldBe inMemory
   }
 
+  // --- SelectAs (type-changing select) ---
+
+  "selectAs" should "change output type from String to Int via length (Spark parity)" in {
+    val col = Column.string(Array("hi", "hello", "greetings"))
+    val ds = Dataset.fromColumns(Vector(col), Schema.stringSchema).toOption.get
+
+    val strCell: Expr[String, String] = Expr.Cell("value", ColumnIndex(0))
+    val selected = ds.selectAs[Int](
+      ("result", strCell.length.asInstanceOf[Expr[String, Any]], ColumnType.IntType)
+    )
+
+    val inMemory = DatasetInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+    sparkResult shouldBe Right(Vector(2, 5, 9))
+  }
+
   // --- Chained operations ---
 
   "Chained operations" should "filter then map" in {

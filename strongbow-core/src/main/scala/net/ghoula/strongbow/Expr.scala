@@ -161,4 +161,27 @@ object Expr {
     inline def isDefined: Expr[Row, Boolean] = IsDefined(e)
     inline def getOrElse(default: A): Expr[Row, A] = GetOrElse(e, default)
   }
+
+  /** Infer the output ColumnType of an expression, if statically known. */
+  extension [Row, A](expr: Expr[Row, A]) {
+    def outputType: Option[ColumnType] = (expr: @unchecked) match {
+      case _: Expr.Cell[_, _] => None
+      case _: Expr.Const[_, _] => None
+      case n: Expr.Named[_, _] => n.expr.outputType
+      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Sum[_] =>
+        Some(ColumnType.IntType)
+      case _: Expr.Gt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lt[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
+          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] =>
+        Some(ColumnType.BooleanType)
+      case w: Expr.When[_, _] => w.thenExpr.outputType
+      case _: Expr.Concat[_] => Some(ColumnType.StringType)
+      case _: Expr.Length[_] => Some(ColumnType.IntType)
+      case g: Expr.GetOrElse[_, _] => g.expr.outputType
+      case _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
+        Some(ColumnType.LongType)
+      case _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] =>
+        Some(ColumnType.DoubleType)
+      case _: Expr.Max[_, _] | _: Expr.Min[_, _] => None
+    }
+  }
 }

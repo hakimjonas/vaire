@@ -40,7 +40,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case filt: Dataset.Filter[T] =>
         val parent = buildPlan(filt.parent)
         ExprToColumn.convert(filt.predicate) match {
-          case Right(sparkCol) =>
+          case Right((sparkCol, _)) =>
             SparkPlan(parent.df.filter(sparkCol), parent.schema)
           case Left(_) =>
             applyFilterViaMap(parent, filt.predicate)
@@ -58,24 +58,16 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val parent = buildPlan(sel.parent)
         applyMapFunction[a, T](parent, sel.projection, sel.schema)
 
-      case selectExprs: Dataset.SelectExprs[T] =>
+      case selectExprs: Dataset.SelectExprs[_, T] =>
         val parent = buildPlan(selectExprs.parent)
         val columns = selectExprs.exprs.map { case (name, expr, _) =>
           ExprToColumn.convert(expr) match {
-            case Right(sparkCol) => sparkCol.as(name)
+            case Right((sparkCol, _)) => sparkCol.as(name)
             case Left(err) =>
               throw new RuntimeException(s"Expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
           }
         }
-        val newSchema = new Schema[T] {
-          def columnCount: Int = selectExprs.exprs.length
-          def columnNames: Vector[String] = selectExprs.exprs.map(_._1)
-          def columnTypes: Vector[net.ghoula.strongbow.ColumnType] = selectExprs.exprs.map(_._3)
-          def encode(value: T): Vector[Any] = parent.schema.encode(value)
-          def decode(values: Vector[Any]): Either[net.ghoula.strongbow.errors.DecodeError, T] =
-            parent.schema.decode(values)
-        }
-        SparkPlan(parent.df.select(columns*), newSchema)
+        SparkPlan(parent.df.select(columns*), selectExprs.schema)
 
       case dist: Dataset.Distinct[T] =>
         val parent = buildPlan(dist.parent)

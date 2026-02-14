@@ -1,6 +1,6 @@
 package net.ghoula.strongbow
 
-import net.ghoula.strongbow.errors.{DecodeError, ExecutionError}
+import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.types.RowIndex
 
 /** Main interpreter for Dataset execution.
@@ -40,8 +40,10 @@ object DatasetInterpreter extends Interpreter {
           MaterializedDataset.fromVector(projected)(using sel.schema)
         }
 
-      case selectExprs: Dataset.SelectExprs[T] =>
-        execute(selectExprs.parent).flatMap(parent => selectExpressions(parent, selectExprs.exprs))
+      case selectExprs: Dataset.SelectExprs[_, T] =>
+        execute(selectExprs.parent).flatMap { parent =>
+          selectExpressions(parent, selectExprs.exprs, selectExprs.schema)
+        }
 
       case dist: Dataset.Distinct[T] =>
         execute(dist.parent).flatMap(distinct)
@@ -276,10 +278,11 @@ object DatasetInterpreter extends Interpreter {
   }
 
   /** Select columns by evaluating expressions. */
-  private def selectExpressions[T](
-    dataset: MaterializedDataset[T],
-    exprs: Vector[(String, Expr[T, Any], ColumnType)]
-  ): Either[ExecutionError, MaterializedDataset[T]] = {
+  private def selectExpressions[In, Out](
+    dataset: MaterializedDataset[In],
+    exprs: Vector[(String, Expr[In, Any], ColumnType)],
+    outputSchema: Schema[Out]
+  ): Either[ExecutionError, MaterializedDataset[Out]] = {
     val rowCount = dataset.rowCount
 
     // Evaluate each expression to create new columns
@@ -301,16 +304,7 @@ object DatasetInterpreter extends Interpreter {
         }
     }
 
-    // Create schema with new column names and types
-    val newSchema = new Schema[T] {
-      def columnCount: Int = exprs.length
-      def columnNames: Vector[String] = exprs.map(_._1)
-      def columnTypes: Vector[ColumnType] = exprs.map(_._3)
-      def encode(value: T): Vector[Any] = dataset.schema.encode(value)
-      def decode(values: Vector[Any]): Either[DecodeError, T] = dataset.schema.decode(values)
-    }
-
-    newColumnsOrError.map(cols => MaterializedDataset(cols, newSchema))
+    newColumnsOrError.map(cols => MaterializedDataset(cols, outputSchema))
   }
 
   /** Sample rows using reservoir sampling. */

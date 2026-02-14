@@ -16,7 +16,11 @@ enum Dataset[+T] {
   case Map[A, B](parent: Dataset[A], func: A => B, schema: Schema[B]) extends Dataset[B]
   case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B], schema: Schema[B]) extends Dataset[B]
   case Select[T, U](parent: Dataset[T], projection: T => U, schema: Schema[U]) extends Dataset[U]
-  case SelectExprs[T](parent: Dataset[T], exprs: Vector[(String, Expr[T, Any], ColumnType)]) extends Dataset[T]
+  case SelectExprs[In, Out](
+    parent: Dataset[In],
+    exprs: Vector[(String, Expr[In, Any], ColumnType)],
+    schema: Schema[Out]
+  ) extends Dataset[Out]
   case Distinct[T](parent: Dataset[T]) extends Dataset[T]
   case Limit[T](parent: Dataset[T], n: Int) extends Dataset[T]
   case Union[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
@@ -132,8 +136,13 @@ object Dataset {
     }
 
     /** Select columns by evaluating expressions. */
-    inline def select(exprs: (String, Expr[T, Any], ColumnType)*): Dataset[T] = {
-      SelectExprs(ds, exprs.toVector)
+    inline def select(exprs: (String, Expr[T, Any], ColumnType)*)(using schema: Schema[T]): Dataset[T] = {
+      SelectExprs(ds, exprs.toVector, schema)
+    }
+
+    /** Select columns, changing the output type. */
+    inline def selectAs[U](exprs: (String, Expr[T, Any], ColumnType)*)(using schema: Schema[U]): Dataset[U] = {
+      SelectExprs(ds, exprs.toVector, schema)
     }
 
     /** Sample fraction of rows.

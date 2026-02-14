@@ -102,6 +102,17 @@ class ExprToColumnSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     assertFilterParity(intDataset(10, 20, 30), (cell / Expr.const(10)) > Expr.const(1))
   }
 
+  "Div" should "produce integer results in select (Spark parity)" in {
+    val ds = intDataset(10, 21, 35)
+    val selected = ds.select(
+      ("result", (cell / Expr.const(10)).asInstanceOf[Expr[Int, Any]], ColumnType.IntType)
+    )
+    val inMemory = DatasetInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+    sparkResult shouldBe Right(Vector(1, 2, 3))
+  }
+
   "When" should "work in select expressions" in {
     val ds = intDataset(1, 2, 3, 4, 5)
     val whenExpr = Expr.When(

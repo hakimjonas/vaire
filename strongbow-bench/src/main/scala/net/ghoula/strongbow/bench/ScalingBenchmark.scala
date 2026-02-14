@@ -177,9 +177,11 @@ object ScalingBenchmark {
     val filterResult = benchmarkOperation(scale, rows, "Filter", 20, 50) {
       val valCell = Expr.Cell[(String, Int), Int]("value", ColumnIndex(1))
       val filtered = dataset.filter(valCell > Expr.lit(500))
-      val materialized = DatasetInterpreter.execute(filtered).getOrElse(
-        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
-      )
+      val materialized = DatasetInterpreter
+        .execute(filtered)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
       materialized.rowCount
     }
     results += filterResult
@@ -204,9 +206,11 @@ object ScalingBenchmark {
     print("  Sort... ")
     val sortResult = benchmarkOperation(scale, rows, "Sort", 20, 50) {
       val sorted = dataset.sortBy(_._2)(using Ordering[Int])
-      val materialized = DatasetInterpreter.execute(sorted).getOrElse(
-        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
-      )
+      val materialized = DatasetInterpreter
+        .execute(sorted)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
       materialized.rowCount
     }
     results += sortResult

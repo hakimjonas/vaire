@@ -1,7 +1,7 @@
 package net.ghoula.strongbow.bench
 
-import scala.collection.immutable.BitSet
 import java.lang.management.ManagementFactory
+import scala.collection.immutable.BitSet
 import scala.jdk.CollectionConverters.*
 
 /** Benchmark Array vs Vector for indices parameter in buildNullSet.
@@ -33,11 +33,11 @@ object ArrayVsVectorBench {
   }
 
   case class BenchResult(
-      impl: String,
-      size: Int,
-      medianMs: Double,
-      memoryMB: Double,
-      gcCount: Long
+    impl: String,
+    size: Int,
+    medianMs: Double,
+    memoryMB: Double,
+    gcCount: Long
   )
 
   def benchmark(name: String, size: Int, warmups: Int, iterations: Int)(f: => Unit): BenchResult = {
@@ -110,8 +110,12 @@ object ArrayVsVectorBench {
         buildNullSetArray(nulls, indicesArray)
       }
 
-      println(f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${vectorResult.impl}%-15s ${vectorResult.medianMs}%-12.4f ${vectorResult.memoryMB}%-12.4f ${vectorResult.gcCount}%-8d")
-      println(f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${arrayResult.impl}%-15s ${arrayResult.medianMs}%-12.4f ${arrayResult.memoryMB}%-12.4f ${arrayResult.gcCount}%-8d")
+      println(
+        f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${vectorResult.impl}%-15s ${vectorResult.medianMs}%-12.4f ${vectorResult.memoryMB}%-12.4f ${vectorResult.gcCount}%-8d"
+      )
+      println(
+        f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${arrayResult.impl}%-15s ${arrayResult.medianMs}%-12.4f ${arrayResult.memoryMB}%-12.4f ${arrayResult.gcCount}%-8d"
+      )
 
       // Calculate ratios
       val timeRatio = arrayResult.medianMs / vectorResult.medianMs

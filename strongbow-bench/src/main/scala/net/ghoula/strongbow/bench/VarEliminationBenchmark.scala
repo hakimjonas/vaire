@@ -1,9 +1,9 @@
 package net.ghoula.strongbow.bench
 
-import scala.collection.immutable.BitSet
-import scala.reflect.ClassTag
 import java.lang.management.ManagementFactory
+import scala.collection.immutable.BitSet
 import scala.jdk.CollectionConverters.*
+import scala.reflect.ClassTag
 
 /** Benchmark comparing var-based loops vs functional approaches for Column slicing operations.
   *
@@ -20,10 +20,10 @@ object VarEliminationBenchmark {
   // Current implementation with vars
   object WithVars {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] = {
       val newData = new Array[T](indices.size)
       var i = 0
@@ -49,42 +49,40 @@ object VarEliminationBenchmark {
   // Iterator approach
   object WithIterator {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] =
       indices.iterator.map(srcIdx => if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)).toArray
 
     def buildNullSet(nulls: BitSet, indices: IndexedSeq[Int]): BitSet =
-      indices.iterator.zipWithIndex
-        .collect { case (srcIdx, dstIdx) if nulls.contains(srcIdx) => dstIdx }
+      indices.iterator.zipWithIndex.collect { case (srcIdx, dstIdx) if nulls.contains(srcIdx) => dstIdx }
         .to(BitSet)
   }
 
   // View approach (Scala 3 lazy collections)
   object WithView {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] =
       indices.view.map(srcIdx => if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)).toArray
 
     def buildNullSet(nulls: BitSet, indices: IndexedSeq[Int]): BitSet =
-      indices.view.zipWithIndex
-        .collect { case (srcIdx, dstIdx) if nulls.contains(srcIdx) => dstIdx }
+      indices.view.zipWithIndex.collect { case (srcIdx, dstIdx) if nulls.contains(srcIdx) => dstIdx }
         .to(BitSet)
   }
 
   // Direct functional (allocates intermediate collection)
   object DirectFunctional {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] =
       indices.map(srcIdx => if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)).toArray
 
@@ -95,10 +93,10 @@ object VarEliminationBenchmark {
   // FoldLeft approach (like Eru pattern)
   object WithFoldLeft {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] = {
       val result = new Array[T](indices.size)
       indices.zipWithIndex.foldLeft(()) { case (_, (srcIdx, dstIdx)) =>
@@ -116,10 +114,10 @@ object VarEliminationBenchmark {
   // Array.tabulate approach
   object WithTabulate {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] =
       Array.tabulate(indices.size) { dstIdx =>
         val srcIdx = indices(dstIdx)
@@ -135,10 +133,10 @@ object VarEliminationBenchmark {
   // Builder with iterator (no intermediate IndexedSeq)
   object WithBuilderIterator {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] =
       indices.iterator.map(srcIdx => if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)).toArray
 
@@ -154,16 +152,16 @@ object VarEliminationBenchmark {
   // Range-based (O(1) Range, no zipWithIndex allocation)
   object WithRange {
     def sliceArray[T: ClassTag](
-        data: Array[T],
-        indices: IndexedSeq[Int],
-        nulls: BitSet,
-        defaultValue: T
+      data: Array[T],
+      indices: IndexedSeq[Int],
+      nulls: BitSet,
+      defaultValue: T
     ): Array[T] =
       indices.iterator.map(srcIdx => if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)).toArray
 
     def buildNullSet(nulls: BitSet, indices: IndexedSeq[Int]): BitSet = {
       val builder = BitSet.newBuilder
-      indices.indices.foreach { dstIdx =>  // Range, not zipWithIndex!
+      indices.indices.foreach { dstIdx => // Range, not zipWithIndex!
         if (nulls.contains(indices(dstIdx))) builder += dstIdx
       }
       builder.result()
@@ -172,11 +170,11 @@ object VarEliminationBenchmark {
 
   // Test data generator
   case class TestData(
-      size: Int,
-      data: Array[Int],
-      indices: IndexedSeq[Int],
-      nulls: BitSet,
-      description: String
+    size: Int,
+    data: Array[Int],
+    indices: IndexedSeq[Int],
+    nulls: BitSet,
+    description: String
   )
 
   def generateTestData(totalSize: Int, sliceSize: Int, nullPercentage: Double): TestData = {
@@ -197,20 +195,20 @@ object VarEliminationBenchmark {
 
   // Benchmark runner
   case class BenchmarkResult(
-      implementation: String,
-      operation: String,
-      dataSize: Int,
-      medianMs: Double,
-      memoryMB: Double,
-      gcCount: Long
+    implementation: String,
+    operation: String,
+    dataSize: Int,
+    medianMs: Double,
+    memoryMB: Double,
+    gcCount: Long
   )
 
   def benchmark[T](
-      name: String,
-      operation: String,
-      testData: TestData,
-      warmups: Int,
-      iterations: Int
+    name: String,
+    operation: String,
+    testData: TestData,
+    warmups: Int,
+    iterations: Int
   )(f: => T): BenchmarkResult = {
     val runtime = Runtime.getRuntime
     val gcBeans = ManagementFactory.getGarbageCollectorMXBeans
@@ -311,7 +309,9 @@ object VarEliminationBenchmark {
 
   def printResults(results: Seq[BenchmarkResult]): Unit = {
     println("\n" + "=" * 100)
-    println(f"${"Implementation"}%-20s ${"Operation"}%-15s ${"Size"}%-10s ${"Median(ms)"}%-12s ${"Memory(MB)"}%-12s ${"GC"}%-8s")
+    println(
+      f"${"Implementation"}%-20s ${"Operation"}%-15s ${"Size"}%-10s ${"Median(ms)"}%-12s ${"Memory(MB)"}%-12s ${"GC"}%-8s"
+    )
     println("=" * 100)
 
     results.foreach { r =>

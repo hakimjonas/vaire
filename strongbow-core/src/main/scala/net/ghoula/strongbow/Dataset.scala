@@ -22,8 +22,10 @@ enum Dataset[+T] {
   case Union[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
   case InnerJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(A, B)]
   case LeftJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(A, Option[B])]
-  case RightJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(Option[A], B)]
-  case FullJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(Option[A], Option[B])]
+  case RightJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean)
+      extends Dataset[(Option[A], B)]
+  case FullJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean)
+      extends Dataset[(Option[A], Option[B])]
   case LeftAntiJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[A]
   case Intersect[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
   case Except[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
@@ -136,9 +138,12 @@ object Dataset {
 
     /** Sample fraction of rows.
       *
-      * @param fraction Sampling fraction 0.0 to 1.0
-      * @param seed Random seed for reproducibility
-      * @param withReplacement Allow duplicate samples
+      * @param fraction
+      *   Sampling fraction 0.0 to 1.0
+      * @param seed
+      *   Random seed for reproducibility
+      * @param withReplacement
+      *   Allow duplicate samples
       */
     inline def sample(
       fraction: Double,
@@ -164,9 +169,12 @@ object Dataset {
 
     /** Inner join with another dataset on a condition.
       *
-      * @param other The right dataset to join with
-      * @param condition Join predicate evaluated on pairs of rows
-      * @return Dataset of tuples (T, U) for matching rows
+      * @param other
+      *   The right dataset to join with
+      * @param condition
+      *   Join predicate evaluated on pairs of rows
+      * @return
+      *   Dataset of tuples (T, U) for matching rows
       */
     inline def join[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(T, U)] = {
       InnerJoin(ds, other, condition)
@@ -174,9 +182,12 @@ object Dataset {
 
     /** Left outer join with another dataset.
       *
-      * @param other The right dataset to join with
-      * @param condition Join predicate evaluated on pairs of rows
-      * @return Dataset of tuples (T, Option[U]) where U is None for unmatched left rows
+      * @param other
+      *   The right dataset to join with
+      * @param condition
+      *   Join predicate evaluated on pairs of rows
+      * @return
+      *   Dataset of tuples (T, Option[U]) where U is None for unmatched left rows
       */
     inline def leftJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(T, Option[U])] = {
       LeftJoin(ds, other, condition)
@@ -184,9 +195,12 @@ object Dataset {
 
     /** Right outer join with another dataset.
       *
-      * @param other The right dataset to join with
-      * @param condition Join predicate evaluated on pairs of rows
-      * @return Dataset of tuples (Option[T], U) where T is None for unmatched right rows
+      * @param other
+      *   The right dataset to join with
+      * @param condition
+      *   Join predicate evaluated on pairs of rows
+      * @return
+      *   Dataset of tuples (Option[T], U) where T is None for unmatched right rows
       */
     inline def rightJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(Option[T], U)] = {
       RightJoin(ds, other, condition)
@@ -194,9 +208,12 @@ object Dataset {
 
     /** Full outer join with another dataset.
       *
-      * @param other The right dataset to join with
-      * @param condition Join predicate evaluated on pairs of rows
-      * @return Dataset of tuples (Option[T], Option[U]) where either side may be None for unmatched rows
+      * @param other
+      *   The right dataset to join with
+      * @param condition
+      *   Join predicate evaluated on pairs of rows
+      * @return
+      *   Dataset of tuples (Option[T], Option[U]) where either side may be None for unmatched rows
       */
     inline def fullJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(Option[T], Option[U])] = {
       FullJoin(ds, other, condition)
@@ -204,9 +221,12 @@ object Dataset {
 
     /** Left anti join - returns rows from left with no match in right.
       *
-      * @param other The right dataset to join with
-      * @param condition Join predicate evaluated on pairs of rows
-      * @return Dataset of T rows from left that have no matching right rows
+      * @param other
+      *   The right dataset to join with
+      * @param condition
+      *   Join predicate evaluated on pairs of rows
+      * @return
+      *   Dataset of T rows from left that have no matching right rows
       */
     inline def antiJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[T] = {
       LeftAntiJoin(ds, other, condition)

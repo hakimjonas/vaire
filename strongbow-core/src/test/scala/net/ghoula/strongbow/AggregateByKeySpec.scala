@@ -69,8 +69,8 @@ class AggregateByKeySpec extends AnyFlatSpec with Matchers {
         agg2 = (s: Sale) => s.quantity,
         agg3 = (s: Sale) => s.revenue,
         agg4 = (s: Sale) => s.revenue,
-        reduce1 = (a: Int, b: Int) => a + b,    // count
-        reduce2 = (a: Int, b: Int) => a + b,    // sum quantity
+        reduce1 = (a: Int, b: Int) => a + b, // count
+        reduce2 = (a: Int, b: Int) => a + b, // sum quantity
         reduce3 = (a: Double, b: Double) => a + b, // sum revenue
         reduce4 = (a: Double, b: Double) => math.max(a, b) // max revenue
       )
@@ -111,6 +111,36 @@ class AggregateByKeySpec extends AnyFlatSpec with Matchers {
     result should have length 2
     result.find(_._1 == "Widget").get._2 shouldBe (1, 10.0)
     result.find(_._1 == "Gadget").get._2 shouldBe (2, 20.0)
+  }
+
+  "aggregateByKey (5-arity)" should "compute five aggregations per key" in {
+    val sales = createSalesDataset()
+
+    val result = sales
+      .groupBy(_.product)
+      .aggregateByKey(
+        agg1 = (_: Sale) => 1,
+        agg2 = (s: Sale) => s.quantity,
+        agg3 = (s: Sale) => s.revenue,
+        agg4 = (s: Sale) => s.revenue,
+        agg5 = (s: Sale) => s.quantity.toDouble,
+        reduce1 = (a: Int, b: Int) => a + b, // count
+        reduce2 = (a: Int, b: Int) => a + b, // sum quantity
+        reduce3 = (a: Double, b: Double) => a + b, // sum revenue
+        reduce4 = (a: Double, b: Double) => math.max(a, b), // max revenue
+        reduce5 = (a: Double, b: Double) => math.min(a, b) // min quantity
+      )
+      .toPairs
+      .collect
+      .toOption
+      .get
+
+    val laptopStats = result.find(_._1 == "Laptop").get._2
+    laptopStats._1 shouldBe 3 // count
+    laptopStats._2 shouldBe 5 // sum quantity
+    laptopStats._3 shouldBe (2499.95 +- 0.01) // sum revenue
+    laptopStats._4 shouldBe (999.99 +- 0.01) // max revenue
+    laptopStats._5 shouldBe (1.0 +- 0.01) // min quantity as double
   }
 
   "aggregateByKey" should "chain with other grouped operations" in {

@@ -232,9 +232,9 @@ object NewMethodsBench {
   }
 
   def main(args: Array[String]): Unit = {
-    println("=" .repeat(70))
+    println("=".repeat(70))
     println("Strongbow New Methods Sanity Benchmark")
-    println("=" .repeat(70))
+    println("=".repeat(70))
 
     val smallScale = 10_000
     val medScale = 50_000
@@ -263,8 +263,8 @@ object NewMethodsBench {
     val schemaResults = benchSchemaDerived(smallScale)
     printResults(s"Schema.derived ($smallScale rows)", schemaResults)
 
-    println("\n" + "=" .repeat(70))
+    println("\n" + "=".repeat(70))
     println("Benchmark complete.")
-    println("=" .repeat(70))
+    println("=".repeat(70))
   }
 }

@@ -4,11 +4,11 @@ import net.ghoula.strongbow.errors.ExecutionError
 
 /** Action methods that materialize Dataset results.
   *
-  * Actions execute the Dataset plan and return values directly,
-  * bypassing the lazy AST construction.
+  * Actions execute the Dataset plan and return values directly, bypassing the lazy AST
+  * construction.
   *
-  * The interpreter defaults to the in-memory columnar DatasetInterpreter.
-  * Users opt into Spark via `given Interpreter = SparkInterpreter(spark)`.
+  * The interpreter defaults to the in-memory columnar DatasetInterpreter. Users opt into Spark via
+  * `given Interpreter = SparkInterpreter(spark)`.
   */
 object DatasetActions {
   extension [T](dataset: Dataset[T]) {
@@ -23,8 +23,7 @@ object DatasetActions {
 
     /** Count the number of elements.
       *
-      * More efficient than collect.map(_.length) as it avoids
-      * materializing individual rows.
+      * More efficient than collect.map(_.length) as it avoids materializing individual rows.
       */
     def count(using interpreter: Interpreter = DatasetInterpreter): Either[ExecutionError, Long] = {
       interpreter.execute(dataset).map(_.rowCount.toLong)
@@ -61,7 +60,8 @@ object DatasetActions {
     def show(n: Int = 20)(using interpreter: Interpreter = DatasetInterpreter): Either[ExecutionError, String] = {
       interpreter.execute(dataset.limit(n)).map { materialized =>
         val header = materialized.schema.columnNames.mkString(" | ")
-        val separator = "-" * (materialized.schema.columnNames.map(_.length).sum + (materialized.schema.columnCount - 1) * 3)
+        val separator =
+          "-" * (materialized.schema.columnNames.map(_.length).sum + (materialized.schema.columnCount - 1) * 3)
         val rows = (0 until materialized.rowCount).map { rowIdx =>
           materialized.columns.map(_.getValue(rowIdx)).mkString(" | ")
         }.mkString("\n")

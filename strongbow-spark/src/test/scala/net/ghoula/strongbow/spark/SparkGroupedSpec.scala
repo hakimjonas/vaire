@@ -139,15 +139,117 @@ class SparkGroupedSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     sparkResult shouldBe inMemory
   }
 
+  "grouped rightJoin" should "produce same results" in {
+    given optSchema: Schema[Option[Int]] = Schema.optionSchema[Int]
+    given tupleSchema: Schema[(Option[Int], Int)] = Schema.tuple2Schema[Option[Int], Int]
+    given pairSchema: Schema[(Int, (Option[Int], Int))] = Schema.tuple2Schema[Int, (Option[Int], Int)]
+    val ds1 = intDataset(1, 2, 3)
+    val ds2 = intDataset(2, 3, 4)
+    val plan = ds1.groupBy(identity).rightJoin(ds2.groupBy(identity)).toPairs
+
+    val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
+  "grouped fullJoin" should "produce same results" in {
+    given optSchema: Schema[Option[Int]] = Schema.optionSchema[Int]
+    given tupleSchema: Schema[(Option[Int], Option[Int])] = Schema.tuple2Schema[Option[Int], Option[Int]]
+    given pairSchema: Schema[(Int, (Option[Int], Option[Int]))] = Schema.tuple2Schema[Int, (Option[Int], Option[Int])]
+    val ds1 = intDataset(1, 2, 3)
+    val ds2 = intDataset(2, 3, 4)
+    val plan = ds1.groupBy(identity).fullJoin(ds2.groupBy(identity)).toPairs
+
+    val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
   "aggregateByKey2" should "produce same results" in {
     given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
     given Schema[(Int, (Int, Int))] = Schema.tuple2Schema[Int, (Int, Int)]
     val ds = intDataset(1, 2, 1, 2, 1)
-    val plan = ds.groupBy(identity)
+    val plan = ds
+      .groupBy(identity)
       .aggregateByKey[Int, Int](
-        identity, _ => 1,
-        _ + _, _ + _
-      ).toPairs
+        identity,
+        _ => 1,
+        _ + _,
+        _ + _
+      )
+      .toPairs
+
+    val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
+  "aggregateByKey3" should "produce same results" in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+    given Schema[(Int, Int, Int)] = Schema.derived
+    given Schema[(Int, (Int, Int, Int))] = Schema.tuple2Schema[Int, (Int, Int, Int)]
+    val ds = intDataset(1, 2, 1, 2, 1)
+    val plan = ds
+      .groupBy(identity)
+      .aggregateByKey[Int, Int, Int](
+        identity,
+        _ => 1,
+        identity,
+        _ + _,
+        _ + _,
+        _ + _
+      )
+      .toPairs
+
+    val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
+  "aggregateByKey4" should "produce same results" in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+    given Schema[(Int, Int, Int, Int)] = Schema.derived
+    given Schema[(Int, (Int, Int, Int, Int))] = Schema.tuple2Schema[Int, (Int, Int, Int, Int)]
+    val ds = intDataset(1, 2, 1, 2, 1)
+    val plan = ds
+      .groupBy(identity)
+      .aggregateByKey[Int, Int, Int, Int](
+        identity,
+        _ => 1,
+        identity,
+        _ => 0,
+        _ + _,
+        _ + _,
+        _ + _,
+        _ + _
+      )
+      .toPairs
+
+    val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
+  "aggregateByKey5" should "produce same results" in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+    given Schema[(Int, Int, Int, Int, Int)] = Schema.derived
+    given Schema[(Int, (Int, Int, Int, Int, Int))] = Schema.tuple2Schema[Int, (Int, Int, Int, Int, Int)]
+    val ds = intDataset(1, 2, 1, 2, 1)
+    val plan = ds
+      .groupBy(identity)
+      .aggregateByKey[Int, Int, Int, Int, Int](
+        identity,
+        _ => 1,
+        identity,
+        _ => 0,
+        _ => 10,
+        _ + _,
+        _ + _,
+        _ + _,
+        _ + _,
+        _ + _
+      )
+      .toPairs
 
     val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
     val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)

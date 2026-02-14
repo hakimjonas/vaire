@@ -66,11 +66,12 @@ final case class MaterializedDataset[T](
     val newColumnsOrError = if (encodedRows.isEmpty) {
       Right(Vector.empty)
     } else {
-      (0 until schemaU.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, colIdx) =>
-        acc.flatMap { cols =>
-          val values = encodedRows.map(_(colIdx))
-          Column.fromValues(values, schemaU.columnTypes(colIdx)).map(cols :+ _)
-        }
+      (0 until schemaU.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+        (acc, colIdx) =>
+          acc.flatMap { cols =>
+            val values = encodedRows.map(_(colIdx))
+            Column.fromValues(values, schemaU.columnTypes(colIdx)).map(cols :+ _)
+          }
       }
     }
 
@@ -112,11 +113,12 @@ object MaterializedDataset {
     val columnsOrError = if (encodedRows.isEmpty) {
       Right(Vector.fill(schema.columnCount)(Column.empty(schema.columnTypes.head)))
     } else {
-      (0 until schema.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, colIdx) =>
-        acc.flatMap { cols =>
-          val colValues = encodedRows.map(_(colIdx))
-          Column.fromValues(colValues, schema.columnTypes(colIdx)).map(cols :+ _)
-        }
+      (0 until schema.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+        (acc, colIdx) =>
+          acc.flatMap { cols =>
+            val colValues = encodedRows.map(_(colIdx))
+            Column.fromValues(colValues, schema.columnTypes(colIdx)).map(cols :+ _)
+          }
       }
     }
 

@@ -6,8 +6,8 @@ import org.scalatest.matchers.should.Matchers
 import net.ghoula.strongbow.{Column, ColumnType, Dataset, DatasetInterpreter, Expr, Schema}
 import net.ghoula.strongbow.types.ColumnIndex
 
-/** Parity tests: every Dataset operation should produce the same result via SparkInterpreter
-  * as via DatasetInterpreter (in-memory columnar).
+/** Parity tests: every Dataset operation should produce the same result via SparkInterpreter as via
+  * DatasetInterpreter (in-memory columnar).
   *
   * Results are compared as sorted sets since Spark doesn't guarantee order.
   */
@@ -31,12 +31,17 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
 
   "Filter" should "produce same results via Expr" in {
     val col = Column.int(Array(10, 20, 30, 40, 50))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
-      .filter(Expr.Gt(
-        Expr.Cell("value", ColumnIndex(0)),
-        Expr.Const(25),
-        summon[Ordering[Int]]
-      ))
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
+      .filter(
+        Expr.Gt(
+          Expr.Cell("value", ColumnIndex(0)),
+          Expr.Const(25),
+          summon[Ordering[Int]]
+        )
+      )
     assertParity(ds)
   }
 
@@ -44,7 +49,10 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
 
   "Map" should "produce same results" in {
     val col = Column.int(Array(1, 2, 3))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
       .map(_ * 10)
     assertParity(ds)
   }
@@ -53,7 +61,10 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
 
   "FlatMap" should "produce same results" in {
     val col = Column.int(Array(1, 2, 3))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
       .flatMap(x => List(x, x * 10))
     assertParity(ds)
   }
@@ -122,7 +133,10 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
 
   "SortBy" should "produce same results" in {
     val col = Column.int(Array(5, 3, 1, 4, 2))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
       .sortBy(identity)
     val inMemory = DatasetInterpreter.execute(ds).map(_.toVectorUnsafe)
     val sparkResult = sparkInterpreter.execute(ds).map(_.toVectorUnsafe)
@@ -209,10 +223,16 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     val col = Column.int(Array(1, 2, 3))
     val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
     val selected = ds.select(
-      ("doubled", Expr.Mul(
-        Expr.Cell("value", ColumnIndex(0)),
-        Expr.Const(2)
-      ).asInstanceOf[Expr[Int, Any]], ColumnType.IntType)
+      (
+        "doubled",
+        Expr
+          .Mul(
+            Expr.Cell("value", ColumnIndex(0)),
+            Expr.Const(2)
+          )
+          .asInstanceOf[Expr[Int, Any]],
+        ColumnType.IntType
+      )
     )
     val inMemory = DatasetInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
     val sparkResult = sparkInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
@@ -223,12 +243,17 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
 
   "Chained operations" should "filter then map" in {
     val col = Column.int(Array(1, 2, 3, 4, 5))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
-      .filter(Expr.Gt(
-        Expr.Cell("value", ColumnIndex(0)),
-        Expr.Const(2),
-        summon[Ordering[Int]]
-      ))
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
+      .filter(
+        Expr.Gt(
+          Expr.Cell("value", ColumnIndex(0)),
+          Expr.Const(2),
+          summon[Ordering[Int]]
+        )
+      )
       .map(_ * 10)
     assertParity(ds)
   }

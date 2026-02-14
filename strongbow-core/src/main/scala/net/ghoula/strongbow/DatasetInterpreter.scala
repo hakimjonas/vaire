@@ -129,19 +129,25 @@ object DatasetInterpreter extends Interpreter {
         given Schema[v] = grp.schemaV
         val tupleSchema: Schema[(k, v)] = summon[Schema[(k, v)]]
 
-        MaterializedDataset.fromVector(pairs)(using tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+        MaterializedDataset.fromVector(pairs)(using
+          tupleSchema.asInstanceOf[Schema[T]]
+        ) // scalafix:ok DisableSyntax.asInstanceOf
 
       case keys: Dataset.GroupedKeys[k, v] =>
         val pairs: Vector[(k, v)] = GroupByInterpreter.execute(keys.grouped)
         val keyValues: Vector[k] = pairs.map(_._1)
 
-        MaterializedDataset.fromVector(keyValues)(using keys.schemaK.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+        MaterializedDataset.fromVector(keyValues)(using
+          keys.schemaK.asInstanceOf[Schema[T]]
+        ) // scalafix:ok DisableSyntax.asInstanceOf
 
       case values: Dataset.GroupedValues[k, v] =>
         val pairs: Vector[(k, v)] = GroupByInterpreter.execute(values.grouped)
         val valueValues: Vector[v] = pairs.map(_._2)
 
-        MaterializedDataset.fromVector(valueValues)(using values.schemaV.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+        MaterializedDataset.fromVector(valueValues)(using
+          values.schemaV.asInstanceOf[Schema[T]]
+        ) // scalafix:ok DisableSyntax.asInstanceOf
     }
   }
 
@@ -178,14 +184,18 @@ object DatasetInterpreter extends Interpreter {
       }
     }
 
-    dataset.columns.foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, col) =>
-      acc.flatMap { cols =>
-        Column.fromValues(
-          rowIndices.map(idx => col.getValue(idx)).toVector,
-          col.columnType
-        ).map(cols :+ _)
+    dataset.columns
+      .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, col) =>
+        acc.flatMap { cols =>
+          Column
+            .fromValues(
+              rowIndices.map(idx => col.getValue(idx)).toVector,
+              col.columnType
+            )
+            .map(cols :+ _)
+        }
       }
-    }.map(cols => MaterializedDataset(cols, dataset.schema))
+      .map(cols => MaterializedDataset(cols, dataset.schema))
   }
 
   /** Limit result to first n rows. */
@@ -193,14 +203,18 @@ object DatasetInterpreter extends Interpreter {
     if (n >= dataset.rowCount) {
       Right(dataset)
     } else {
-      dataset.columns.foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, col) =>
-        acc.flatMap { cols =>
-          Column.fromValues(
-            (0 until n).map(idx => col.getValue(idx)).toVector,
-            col.columnType
-          ).map(cols :+ _)
+      dataset.columns
+        .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { (acc, col) =>
+          acc.flatMap { cols =>
+            Column
+              .fromValues(
+                (0 until n).map(idx => col.getValue(idx)).toVector,
+                col.columnType
+              )
+              .map(cols :+ _)
+          }
         }
-      }.map(cols => MaterializedDataset(cols, dataset.schema))
+        .map(cols => MaterializedDataset(cols, dataset.schema))
     }
   }
 
@@ -210,17 +224,22 @@ object DatasetInterpreter extends Interpreter {
     right: MaterializedDataset[T]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
     if (left.columnCount != right.columnCount) {
-      Left(ExecutionError.PreconditionViolation(
-        "Cannot union datasets with different column counts"
-      ))
+      Left(
+        ExecutionError.PreconditionViolation(
+          "Cannot union datasets with different column counts"
+        )
+      )
     } else {
-      left.columns.zip(right.columns).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
-        case (acc, (leftCol, rightCol)) =>
+      left.columns
+        .zip(right.columns)
+        .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { case (acc, (leftCol, rightCol)) =>
           acc.flatMap { cols =>
             if (leftCol.columnType != rightCol.columnType) {
-              Left(ExecutionError.PreconditionViolation(
-                s"Cannot union columns with different types: ${leftCol.columnType} vs ${rightCol.columnType}"
-              ))
+              Left(
+                ExecutionError.PreconditionViolation(
+                  s"Cannot union columns with different types: ${leftCol.columnType} vs ${rightCol.columnType}"
+                )
+              )
             } else {
               val leftValues = (0 until leftCol.length).map(leftCol.getValue)
               val rightValues = (0 until rightCol.length).map(rightCol.getValue)
@@ -228,7 +247,8 @@ object DatasetInterpreter extends Interpreter {
               Column.fromValues((leftValues ++ rightValues).toVector, leftCol.columnType).map(cols :+ _)
             }
           }
-      }.map(cols => MaterializedDataset(cols, left.schema))
+        }
+        .map(cols => MaterializedDataset(cols, left.schema))
     }
   }
 
@@ -446,19 +466,16 @@ object DatasetInterpreter extends Interpreter {
       (Some(leftVal), Some(rightVal))
     }
 
-    val unmatchedLeft = leftRows.filterNot(leftMatches.contains).map(leftVal =>
-      (Some(leftVal), None)
-    )
+    val unmatchedLeft = leftRows.filterNot(leftMatches.contains).map(leftVal => (Some(leftVal), None))
 
-    val unmatchedRight = rightRows.filterNot(rightMatches.contains).map(rightVal =>
-      (None, Some(rightVal))
-    )
+    val unmatchedRight = rightRows.filterNot(rightMatches.contains).map(rightVal => (None, Some(rightVal)))
 
     val resultRows = innerResults ++ unmatchedLeft ++ unmatchedRight
 
     given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
     given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
-    given resultSchema: Schema[(Option[A], Option[B])] = Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
+    given resultSchema: Schema[(Option[A], Option[B])] =
+      Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
     MaterializedDataset.fromVector(resultRows)
   }
 

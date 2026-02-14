@@ -1,14 +1,14 @@
 package net.ghoula.strongbow.bench
 
-import scala.collection.immutable.BitSet
 import java.lang.management.ManagementFactory
+import scala.collection.immutable.BitSet
 import scala.jdk.CollectionConverters.*
 
 /** Benchmark different ways to build BitSet:
-  * 1. BitSet.newBuilder with while loop + var
-  * 2. mutable.BitSet with while loop + var
-  * 3. mutable.BitSet with foreach (no var)
-  * 4. mutable.BitSet with indices.foreach (no var, like Eru pattern)
+  *   1. BitSet.newBuilder with while loop + var
+  *   2. mutable.BitSet with while loop + var
+  *   3. mutable.BitSet with foreach (no var)
+  *   4. mutable.BitSet with indices.foreach (no var, like Eru pattern)
   */
 object MutableBitSetBench {
 
@@ -53,11 +53,11 @@ object MutableBitSetBench {
   }
 
   case class BenchResult(
-      impl: String,
-      size: Int,
-      medianMs: Double,
-      memoryMB: Double,
-      gcCount: Long
+    impl: String,
+    size: Int,
+    medianMs: Double,
+    memoryMB: Double,
+    gcCount: Long
   )
 
   def benchmark(name: String, size: Int, warmups: Int, iterations: Int)(f: => BitSet): BenchResult = {
@@ -104,7 +104,9 @@ object MutableBitSetBench {
 
     val nullPercentages = Seq(0.0, 0.1, 0.5)
 
-    println(f"\n${"Size"}%-10s ${"Nulls%"}%-8s ${"Implementation"}%-25s ${"Time(ms)"}%-12s ${"Mem(MB)"}%-10s ${"GC"}%-5s")
+    println(
+      f"\n${"Size"}%-10s ${"Nulls%"}%-8s ${"Implementation"}%-25s ${"Time(ms)"}%-12s ${"Mem(MB)"}%-10s ${"GC"}%-5s"
+    )
     println("=" * 90)
 
     for {
@@ -135,10 +137,18 @@ object MutableBitSetBench {
         withMutableIndicesForeach(nulls, indices)
       }
 
-      println(f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${builderResult.impl}%-25s ${builderResult.medianMs}%-12.4f ${builderResult.memoryMB}%-10.2f ${builderResult.gcCount}%-5d")
-      println(f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${mutableWhileResult.impl}%-25s ${mutableWhileResult.medianMs}%-12.4f ${mutableWhileResult.memoryMB}%-10.2f ${mutableWhileResult.gcCount}%-5d")
-      println(f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${mutableForeachResult.impl}%-25s ${mutableForeachResult.medianMs}%-12.4f ${mutableForeachResult.memoryMB}%-10.2f ${mutableForeachResult.gcCount}%-5d")
-      println(f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${mutableIndicesResult.impl}%-25s ${mutableIndicesResult.medianMs}%-12.4f ${mutableIndicesResult.memoryMB}%-10.2f ${mutableIndicesResult.gcCount}%-5d")
+      println(
+        f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${builderResult.impl}%-25s ${builderResult.medianMs}%-12.4f ${builderResult.memoryMB}%-10.2f ${builderResult.gcCount}%-5d"
+      )
+      println(
+        f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${mutableWhileResult.impl}%-25s ${mutableWhileResult.medianMs}%-12.4f ${mutableWhileResult.memoryMB}%-10.2f ${mutableWhileResult.gcCount}%-5d"
+      )
+      println(
+        f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${mutableForeachResult.impl}%-25s ${mutableForeachResult.medianMs}%-12.4f ${mutableForeachResult.memoryMB}%-10.2f ${mutableForeachResult.gcCount}%-5d"
+      )
+      println(
+        f"${sliceSize}%-10d ${(nullPct * 100).toInt}%-8d ${mutableIndicesResult.impl}%-25s ${mutableIndicesResult.medianMs}%-12.4f ${mutableIndicesResult.memoryMB}%-10.2f ${mutableIndicesResult.gcCount}%-5d"
+      )
 
       // Show comparison
       val foreachVsBuilder = mutableForeachResult.medianMs / builderResult.medianMs

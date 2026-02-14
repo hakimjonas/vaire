@@ -222,9 +222,11 @@ object LongbowVsCrossbow {
     val results = measureMultipleRuns(5, 50, 200) {
       val valCell = Expr.Cell[(String, Int), Int]("value", ColumnIndex(1))
       val filtered = dataset.filter(valCell > Expr.lit(500))
-      val materialized = DatasetInterpreter.execute(filtered).getOrElse(
-        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
-      )
+      val materialized = DatasetInterpreter
+        .execute(filtered)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
       materialized.rowCount // Force evaluation
     }
 
@@ -255,9 +257,11 @@ object LongbowVsCrossbow {
 
     val results = measureMultipleRuns(5, 50, 200) {
       val sorted = dataset.sortBy(_._2)(using Ordering[Int])
-      val materialized = DatasetInterpreter.execute(sorted).getOrElse(
-        throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
-      )
+      val materialized = DatasetInterpreter
+        .execute(sorted)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
       materialized.rowCount // Force evaluation
     }
 

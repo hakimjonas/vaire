@@ -20,7 +20,9 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
       if (values.length != 3) {
         Left(errors.DecodeError.WrongArity(3, values.length))
       } else {
-        Right(Employee(values(0).asInstanceOf[Int], values(1).asInstanceOf[String], values(2).asInstanceOf[Int])) // scalafix:ok DisableSyntax.asInstanceOf
+        Right(
+          Employee(values(0).asInstanceOf[Int], values(1).asInstanceOf[String], values(2).asInstanceOf[Int])
+        ) // scalafix:ok DisableSyntax.asInstanceOf
       }
     }
   }
@@ -34,23 +36,29 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
       if (values.length != 2) {
         Left(errors.DecodeError.WrongArity(2, values.length))
       } else {
-        Right(Department(values(0).asInstanceOf[Int], values(1).asInstanceOf[String])) // scalafix:ok DisableSyntax.asInstanceOf
+        Right(
+          Department(values(0).asInstanceOf[Int], values(1).asInstanceOf[String])
+        ) // scalafix:ok DisableSyntax.asInstanceOf
       }
     }
   }
 
   "inner join" should "return only matching rows" in {
-    val employees = createDataset(Vector(
-      Employee(1, "Alice", 10),
-      Employee(2, "Bob", 20),
-      Employee(3, "Charlie", 10),
-      Employee(4, "Dave", 30)
-    ))
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 10),
+        Employee(4, "Dave", 30)
+      )
+    )
 
-    val departments = createDataset(Vector(
-      Department(10, "Engineering"),
-      Department(20, "Sales")
-    ))
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales")
+      )
+    )
 
     val joined = employees.join(departments, (e, d) => e.deptId == d.id)
     val result = joined.collect.getOrElse(fail("Join failed"))
@@ -81,16 +89,20 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
   }
 
   "left join" should "include all left rows with None for unmatched" in {
-    val employees = createDataset(Vector(
-      Employee(1, "Alice", 10),
-      Employee(2, "Bob", 20),
-      Employee(3, "Charlie", 30)
-    ))
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 30)
+      )
+    )
 
-    val departments = createDataset(Vector(
-      Department(10, "Engineering"),
-      Department(20, "Sales")
-    ))
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales")
+      )
+    )
 
     val joined = employees.leftJoin(departments, (e, d) => e.deptId == d.id)
     val result = joined.collect.getOrElse(fail("Left join failed"))
@@ -106,16 +118,20 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
   }
 
   "right join" should "include all right rows with None for unmatched" in {
-    val employees = createDataset(Vector(
-      Employee(1, "Alice", 10),
-      Employee(2, "Bob", 20)
-    ))
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20)
+      )
+    )
 
-    val departments = createDataset(Vector(
-      Department(10, "Engineering"),
-      Department(20, "Sales"),
-      Department(30, "Marketing")
-    ))
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales"),
+        Department(30, "Marketing")
+      )
+    )
 
     val joined = employees.rightJoin(departments, (e, d) => e.deptId == d.id)
     val result = joined.collect.getOrElse(fail("Right join failed"))
@@ -131,16 +147,20 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
   }
 
   "full join" should "include all rows with None for unmatched" in {
-    val employees = createDataset(Vector(
-      Employee(1, "Alice", 10),
-      Employee(2, "Bob", 20),
-      Employee(3, "Charlie", 40)
-    ))
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 40)
+      )
+    )
 
-    val departments = createDataset(Vector(
-      Department(10, "Engineering"),
-      Department(30, "Marketing")
-    ))
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(30, "Marketing")
+      )
+    )
 
     val joined = employees.fullJoin(departments, (e, d) => e.deptId == d.id)
     val result = joined.collect.getOrElse(fail("Full join failed"))
@@ -166,17 +186,21 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
   }
 
   "anti join" should "return left rows with no match in right" in {
-    val employees = createDataset(Vector(
-      Employee(1, "Alice", 10),
-      Employee(2, "Bob", 20),
-      Employee(3, "Charlie", 30),
-      Employee(4, "Dave", 40)
-    ))
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 30),
+        Employee(4, "Dave", 40)
+      )
+    )
 
-    val departments = createDataset(Vector(
-      Department(10, "Engineering"),
-      Department(20, "Sales")
-    ))
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales")
+      )
+    )
 
     val joined = employees.antiJoin(departments, (e, d) => e.deptId == d.id)
     val result = joined.collect.getOrElse(fail("Anti join failed"))

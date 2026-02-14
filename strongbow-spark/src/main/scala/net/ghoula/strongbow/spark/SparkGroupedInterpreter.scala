@@ -68,11 +68,33 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
           .asInstanceOf[Vector[(K, V)]] // scalafix:ok DisableSyntax.asInstanceOf
 
       case agg: Grouped.AggregateByKey4[_, _, _, _, _, _] =>
-        aggregateByKey4(execute(agg.parent), agg.agg1, agg.agg2, agg.agg3, agg.agg4, agg.reduce1, agg.reduce2, agg.reduce3, agg.reduce4)
+        aggregateByKey4(
+          execute(agg.parent),
+          agg.agg1,
+          agg.agg2,
+          agg.agg3,
+          agg.agg4,
+          agg.reduce1,
+          agg.reduce2,
+          agg.reduce3,
+          agg.reduce4
+        )
           .asInstanceOf[Vector[(K, V)]] // scalafix:ok DisableSyntax.asInstanceOf
 
       case agg: Grouped.AggregateByKey5[_, _, _, _, _, _, _] =>
-        aggregateByKey5(execute(agg.parent), agg.agg1, agg.agg2, agg.agg3, agg.agg4, agg.agg5, agg.reduce1, agg.reduce2, agg.reduce3, agg.reduce4, agg.reduce5)
+        aggregateByKey5(
+          execute(agg.parent),
+          agg.agg1,
+          agg.agg2,
+          agg.agg3,
+          agg.agg4,
+          agg.agg5,
+          agg.reduce1,
+          agg.reduce2,
+          agg.reduce3,
+          agg.reduce4,
+          agg.reduce5
+        )
           .asInstanceOf[Vector[(K, V)]] // scalafix:ok DisableSyntax.asInstanceOf
     }
   }
@@ -81,7 +103,8 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
   private def executeDataset[T](dataset: Dataset[T]): Vector[T] = {
     sparkInterpreter.execute(dataset) match {
       case Right(ds) => ds.toVectorUnsafe
-      case Left(err) => throw new RuntimeException(s"Spark grouped execution failed: $err") // scalafix:ok DisableSyntax.throw
+      case Left(err) =>
+        throw new RuntimeException(s"Spark grouped execution failed: $err") // scalafix:ok DisableSyntax.throw
     }
   }
 
@@ -178,8 +201,10 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
 
   private def aggregateByKey2[K, V, A, B](
     pairs: Vector[(K, V)],
-    agg1: V => A, agg2: V => B,
-    reduce1: (A, A) => A, reduce2: (B, B) => B
+    agg1: V => A,
+    agg2: V => B,
+    reduce1: (A, A) => A,
+    reduce2: (B, B) => B
   ): Vector[(K, (A, B))] = {
     val builder = mutable.HashMap.empty[K, (A, B)]
     pairs.foreach { case (k, v) =>
@@ -194,8 +219,12 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
 
   private def aggregateByKey3[K, V, A, B, C](
     pairs: Vector[(K, V)],
-    agg1: V => A, agg2: V => B, agg3: V => C,
-    reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C
+    agg1: V => A,
+    agg2: V => B,
+    agg3: V => C,
+    reduce1: (A, A) => A,
+    reduce2: (B, B) => B,
+    reduce3: (C, C) => C
   ): Vector[(K, (A, B, C))] = {
     val builder = mutable.HashMap.empty[K, (A, B, C)]
     pairs.foreach { case (k, v) =>
@@ -210,8 +239,14 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
 
   private def aggregateByKey4[K, V, A, B, C, D](
     pairs: Vector[(K, V)],
-    agg1: V => A, agg2: V => B, agg3: V => C, agg4: V => D,
-    reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C, reduce4: (D, D) => D
+    agg1: V => A,
+    agg2: V => B,
+    agg3: V => C,
+    agg4: V => D,
+    reduce1: (A, A) => A,
+    reduce2: (B, B) => B,
+    reduce3: (C, C) => C,
+    reduce4: (D, D) => D
   ): Vector[(K, (A, B, C, D))] = {
     val builder = mutable.HashMap.empty[K, (A, B, C, D)]
     pairs.foreach { case (k, v) =>
@@ -226,14 +261,23 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
 
   private def aggregateByKey5[K, V, A, B, C, D, E](
     pairs: Vector[(K, V)],
-    agg1: V => A, agg2: V => B, agg3: V => C, agg4: V => D, agg5: V => E,
-    reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C, reduce4: (D, D) => D, reduce5: (E, E) => E
+    agg1: V => A,
+    agg2: V => B,
+    agg3: V => C,
+    agg4: V => D,
+    agg5: V => E,
+    reduce1: (A, A) => A,
+    reduce2: (B, B) => B,
+    reduce3: (C, C) => C,
+    reduce4: (D, D) => D,
+    reduce5: (E, E) => E
   ): Vector[(K, (A, B, C, D, E))] = {
     val builder = mutable.HashMap.empty[K, (A, B, C, D, E)]
     pairs.foreach { case (k, v) =>
       val a = agg1(v); val b = agg2(v); val c = agg3(v); val d = agg4(v); val e = agg5(v)
       builder.get(k) match {
-        case Some((ea, eb, ec, ed, ee)) => builder(k) = (reduce1(ea, a), reduce2(eb, b), reduce3(ec, c), reduce4(ed, d), reduce5(ee, e))
+        case Some((ea, eb, ec, ed, ee)) =>
+          builder(k) = (reduce1(ea, a), reduce2(eb, b), reduce3(ec, c), reduce4(ed, d), reduce5(ee, e))
         case None => builder(k) = (a, b, c, d, e)
       }
     }

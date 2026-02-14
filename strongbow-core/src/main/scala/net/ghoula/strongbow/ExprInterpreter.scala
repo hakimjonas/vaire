@@ -189,9 +189,8 @@ object ExprInterpreter {
         }
 
       // Aggregations - not supported at row level
-      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] |
-          _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
-          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
+      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] |
+          _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] | _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
     }
   }

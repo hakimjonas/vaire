@@ -6,7 +6,8 @@ import org.scalatest.{BeforeAndAfterAll, Suite}
 /** Shared test trait providing a singleton SparkSession for all Spark tests. */
 trait SparkTestBase extends BeforeAndAfterAll { self: Suite =>
 
-  protected lazy val spark: SparkSession = SparkSession.builder()
+  protected lazy val spark: SparkSession = SparkSession
+    .builder()
     .master("local[2]")
     .appName("strongbow-test")
     .config("spark.sql.shuffle.partitions", "2")

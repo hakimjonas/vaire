@@ -188,24 +188,24 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
   }
 
   "leftAntiJoin" should "exclude matching keys" in {
-    val users = createDataset(Vector(
-      User(1, "Alice", 25),
-      User(2, "Bob", 30),
-      User(3, "Charlie", 35)
-    ))
+    val users = createDataset(
+      Vector(
+        User(1, "Alice", 25),
+        User(2, "Bob", 30),
+        User(3, "Charlie", 35)
+      )
+    )
 
-    val toExclude = createDataset(Vector(
-      User(2, "Bob", 30)
-    ))
+    val toExclude = createDataset(
+      Vector(
+        User(2, "Bob", 30)
+      )
+    )
 
     val usersGrouped = users.groupBy(_.id)
     val excludeGrouped = toExclude.groupBy(_.id)
 
-    val result = usersGrouped.leftAntiJoin(excludeGrouped)
-      .toPairs
-      .collect
-      .toOption
-      .get
+    val result = usersGrouped.leftAntiJoin(excludeGrouped).toPairs.collect.toOption.get
 
     result.map(_._2.name) should contain theSameElementsAs Vector("Alice", "Charlie")
   }

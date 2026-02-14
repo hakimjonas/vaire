@@ -140,12 +140,12 @@ object Schema {
 
   /** Generic tuple schema for tuples of arity 3+.
     *
-    * Uses Schema.derived macro to auto-generate schema for any Tuple type.
-    * Scala 3 tuples are product types with Mirror.ProductOf, so the derivation
-    * macro handles field access via _1, _2, etc. automatically.
+    * Uses Schema.derived macro to auto-generate schema for any Tuple type. Scala 3 tuples are
+    * product types with Mirror.ProductOf, so the derivation macro handles field access via _1, _2,
+    * etc. automatically.
     *
-    * tuple2Schema takes priority for Tuple2 (more specific match).
-    * This covers Tuple3 through Tuple22.
+    * tuple2Schema takes priority for Tuple2 (more specific match). This covers Tuple3 through
+    * Tuple22.
     */
   inline given derivedTupleSchema[T <: Tuple](using mirror: Mirror.ProductOf[T]): Schema[T] = Schema.derived
 
@@ -239,7 +239,9 @@ object Schema {
       } else {
         // Named tuple: use productElement (matches Scala 3.7.4 stdlib pattern)
         val indexExpr = Expr(index)
-        '{ $aExpr.asInstanceOf[Product].productElement($indexExpr).asInstanceOf[H] } // scalafix:ok DisableSyntax.asInstanceOf
+        '{
+          $aExpr.asInstanceOf[Product].productElement($indexExpr).asInstanceOf[H]
+        } // scalafix:ok DisableSyntax.asInstanceOf
       }
     }
   }
@@ -300,7 +302,7 @@ object Schema {
     val schemas = summonSchemas[Elems]
 
     // Generate column count
-    val columnCountExpr = schemas.foldLeft[Expr[Int]]('{0}) { (acc, schema) =>
+    val columnCountExpr = schemas.foldLeft[Expr[Int]]('{ 0 }) { (acc, schema) =>
       '{ $acc + $schema.columnCount }
     }
 
@@ -308,15 +310,15 @@ object Schema {
     val columnNamesExpr = {
       val nameExprs = fieldLabels.zip(schemas).map { case (label, schema) =>
         val labelExpr = Expr(label)
-        '{ $schema.columnNames.map(name => ${labelExpr} + "_" + name) }
+        '{ $schema.columnNames.map(name => ${ labelExpr } + "_" + name) }
       }
-      nameExprs.foldLeft[Expr[Vector[String]]]('{Vector.empty}) { (acc, names) =>
+      nameExprs.foldLeft[Expr[Vector[String]]]('{ Vector.empty }) { (acc, names) =>
         '{ $acc ++ $names }
       }
     }
 
     // Generate column types
-    val columnTypesExpr = schemas.foldLeft[Expr[Vector[ColumnType]]]('{Vector.empty}) { (acc, schema) =>
+    val columnTypesExpr = schemas.foldLeft[Expr[Vector[ColumnType]]]('{ Vector.empty }) { (acc, schema) =>
       '{ $acc ++ $schema.columnTypes }
     }
 
@@ -328,7 +330,7 @@ object Schema {
       schemas: List[Expr[Schema[?]]]
     ): Expr[Vector[Any]] =
       Type.of[E] match {
-        case '[EmptyTuple] => '{Vector.empty}
+        case '[EmptyTuple] => '{ Vector.empty }
         case '[h *: t] =>
           val label = labels.head
           val schema = schemas.head.asExprOf[Schema[h]]
@@ -343,14 +345,14 @@ object Schema {
       schemas: List[Expr[Schema[?]]]
     ): Expr[Either[DecodeError, List[Any]]] =
       Type.of[E] match {
-        case '[EmptyTuple] => '{Right(Nil)}
+        case '[EmptyTuple] => '{ Right(Nil) }
         case '[h *: t] =>
           val schema = schemas.head.asExprOf[Schema[h]]
           '{
             val (headValues, tailValues) = $valuesExpr.splitAt($schema.columnCount)
             for {
               head <- $schema.decode(headValues)
-              tail <- ${generateDecode[t]('tailValues, schemas.tail)}
+              tail <- ${ generateDecode[t]('tailValues, schemas.tail) }
             } yield head :: tail
           }
       }
@@ -369,7 +371,7 @@ object Schema {
           if (values.length != columnCount) {
             Left(DecodeError.WrongArity(columnCount, values.length))
           } else {
-            ${generateDecode[Elems]('values, schemas)}.map { decodedFields =>
+            ${ generateDecode[Elems]('values, schemas) }.map { decodedFields =>
               $m.fromProduct(Tuple.fromArray(decodedFields.toArray))
             }
           }

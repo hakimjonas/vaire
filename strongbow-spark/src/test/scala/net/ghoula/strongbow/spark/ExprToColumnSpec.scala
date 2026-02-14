@@ -98,6 +98,47 @@ class ExprToColumnSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     sparkResult shouldBe inMemory
   }
 
+  "Div" should "filter correctly via Spark" in {
+    assertFilterParity(intDataset(10, 20, 30), (cell / Expr.const(10)) > Expr.const(1))
+  }
+
+  "When" should "work in select expressions" in {
+    val ds = intDataset(1, 2, 3, 4, 5)
+    val whenExpr = Expr.When(
+      cell > Expr.const(3),
+      Expr.const(100),
+      Expr.const(0)
+    )
+    val selected = ds.select(
+      ("result", whenExpr.asInstanceOf[Expr[Int, Any]], ColumnType.IntType)
+    )
+    val inMemory = DatasetInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
+  "Concat" should "work via Spark on string datasets" in {
+    val col = Column.string(Array("hello", "world", "test"))
+    val ds = Dataset.fromColumns(Vector(col), Schema.stringSchema).toOption.get
+    val strCell: Expr[String, String] = Expr.Cell("value", ColumnIndex(0))
+    val selected = ds.select(
+      ("result", (strCell ++ Expr.const("!")).asInstanceOf[Expr[String, Any]], ColumnType.StringType)
+    )
+    val inMemory = DatasetInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(selected).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
+  "Length" should "filter correctly via Spark on string datasets" in {
+    val col = Column.string(Array("hi", "hello", "greetings"))
+    val ds = Dataset.fromColumns(Vector(col), Schema.stringSchema).toOption.get
+    val strCell: Expr[String, String] = Expr.Cell("value", ColumnIndex(0))
+    val filtered = ds.filter(strCell.length > Expr.const(3))
+    val inMemory = DatasetInterpreter.execute(filtered).map(_.toVectorUnsafe.sorted)
+    val sparkResult = sparkInterpreter.execute(filtered).map(_.toVectorUnsafe.sorted)
+    sparkResult shouldBe inMemory
+  }
+
   "Const" should "convert correctly" in {
     ExprToColumn.convert[Int, Int](Expr.Const(42)).isRight shouldBe true
   }
@@ -109,12 +150,14 @@ class ExprToColumnSpec extends AnyFlatSpec with Matchers with SparkTestBase {
   "ExprToColumn.convert" should "handle all non-aggregation cases" in {
     // Verify conversion doesn't error for basic cases
     ExprToColumn.convert[Int, Int](Expr.Cell("value", ColumnIndex(0))).isRight shouldBe true
-    ExprToColumn.convert[Int, Boolean](
-      Expr.When(
-        Expr.Gt(Expr.Cell("value", ColumnIndex(0)), Expr.Const(5), summon[Ordering[Int]]),
-        Expr.Const(true),
-        Expr.Const(false)
+    ExprToColumn
+      .convert[Int, Boolean](
+        Expr.When(
+          Expr.Gt(Expr.Cell("value", ColumnIndex(0)), Expr.Const(5), summon[Ordering[Int]]),
+          Expr.Const(true),
+          Expr.Const(false)
+        )
       )
-    ).isRight shouldBe true
+      .isRight shouldBe true
   }
 }

@@ -11,12 +11,17 @@ class SparkWorkflowSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   "filter -> map -> sort -> limit" should "produce same results" in {
     val col = Column.int(Array(5, 3, 8, 1, 9, 2, 7, 4, 6, 10))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
-      .filter(Expr.Gt(
-        Expr.Cell("value", ColumnIndex(0)),
-        Expr.Const(3),
-        summon[Ordering[Int]]
-      ))
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
+      .filter(
+        Expr.Gt(
+          Expr.Cell("value", ColumnIndex(0)),
+          Expr.Const(3),
+          summon[Ordering[Int]]
+        )
+      )
       .map(_ * 2)
       .sort
       .limit(3)
@@ -28,7 +33,10 @@ class SparkWorkflowSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   "groupBy -> reduceByKey -> values -> sort" should "produce same results" in {
     val col = Column.int(Array(1, 2, 3, 1, 2, 3, 1))
-    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
       .groupBy(identity)
       .reduceByKey(_ + _)
       .values

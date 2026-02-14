@@ -2,15 +2,7 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-import net.ghoula.strongbow.{
-  Column => SBColumn,
-  Dataset,
-  Expr,
-  Grouped,
-  Interpreter,
-  MaterializedDataset,
-  Schema
-}
+import net.ghoula.strongbow.{Column => SBColumn, Dataset, Expr, Grouped, Interpreter, MaterializedDataset, Schema}
 import net.ghoula.strongbow.errors.ExecutionError
 
 /** Spark-based interpreter for Strongbow Dataset plans.
@@ -22,7 +14,8 @@ import net.ghoula.strongbow.errors.ExecutionError
   */
 class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
-  /** Internal plan representation: a Spark DataFrame paired with the Strongbow Schema for decoding. */
+  /** Internal plan representation: a Spark DataFrame paired with the Strongbow Schema for decoding.
+    */
   private case class SparkPlan[T](df: DataFrame, schema: Schema[T])
 
   override def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
@@ -70,7 +63,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val columns = selectExprs.exprs.map { case (name, expr, _) =>
           ExprToColumn.convert(expr) match {
             case Right(sparkCol) => sparkCol.as(name)
-            case Left(err) => throw new RuntimeException(s"Expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+            case Left(err) =>
+              throw new RuntimeException(s"Expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
           }
         }
         val newSchema = new Schema[T] {
@@ -189,7 +183,11 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     SparkPlan(createDataFrame(mapped, schema), schema)
   }
 
-  private def applyFlatMapFunction[A, B](parent: SparkPlan[A], func: A => Iterable[B], schema: Schema[B]): SparkPlan[B] = {
+  private def applyFlatMapFunction[A, B](
+    parent: SparkPlan[A],
+    func: A => Iterable[B],
+    schema: Schema[B]
+  ): SparkPlan[B] = {
     val values = collectValues(parent)
     val mapped = values.flatMap(func)
     SparkPlan(createDataFrame(mapped, schema), schema)

@@ -268,12 +268,10 @@ object ExprInterpreter {
           .asInstanceOf[Option[Any]]
           .isDefined // scalafix:ok DisableSyntax.asInstanceOf
 
-      case when: Expr.When[Row, _] =>
+      case when: Expr.When[Row, Boolean] =>
         val cond = evalBoolean(when.condition, columns, rowIdx)
-        if (cond)
-          evalAny(when.thenExpr, columns, rowIdx).asInstanceOf[Boolean]
-        else
-          evalAny(when.elseExpr, columns, rowIdx).asInstanceOf[Boolean]
+        if (cond) evalBoolean(when.thenExpr, columns, rowIdx)
+        else evalBoolean(when.elseExpr, columns, rowIdx)
     }
   }
 

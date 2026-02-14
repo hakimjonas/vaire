@@ -557,14 +557,12 @@ object DatasetInterpreter extends Interpreter {
   /** Build a hash index: key value → list of row indices. */
   private def buildKeyIndex(keyCol: Column, rowCount: Int): scala.collection.mutable.HashMap[Any, Vector[Int]] = {
     val index = scala.collection.mutable.HashMap.empty[Any, Vector[Int]]
-    var i = 0
-    while (i < rowCount) {
+    (0 until rowCount).foreach { i =>
       val key = keyCol.getValue(i)
       index.updateWith(key) {
         case Some(existing) => Some(existing :+ i)
         case None => Some(Vector(i))
       }
-      i += 1
     }
     index
   }
@@ -603,8 +601,7 @@ object DatasetInterpreter extends Interpreter {
       val leftIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
       val rightIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
 
-      var ri = 0
-      while (ri < right.rowCount) {
+      (0 until right.rowCount).foreach { ri =>
         val rKey = rightKeyCol.getValue(ri)
         leftIndex.get(rKey).foreach { leftRows =>
           leftRows.foreach { li =>
@@ -612,7 +609,6 @@ object DatasetInterpreter extends Interpreter {
             rightIdxBuf += ri
           }
         }
-        ri += 1
       }
 
       val (cols, schema) = assembleJoinColumns(left, right, leftIdxBuf.toArray, rightIdxBuf.toArray)
@@ -756,10 +752,8 @@ object DatasetInterpreter extends Interpreter {
     } yield {
       // Build set of all right key values
       val rightKeys = scala.collection.mutable.HashSet.empty[Any]
-      var ri = 0
-      while (ri < right.rowCount) {
+      (0 until right.rowCount).foreach { ri =>
         rightKeys += rightKeyCol.getValue(ri)
-        ri += 1
       }
 
       // Filter left rows whose key is not in right keys

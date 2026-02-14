@@ -244,11 +244,6 @@ enum Column {
       AnyColumn(sliceArray(data, indices, nulls, null), buildNullSet(nulls, indices)) // scalafix:ok DisableSyntax.null
   }
 
-  /** Generic array slicing with null handling.
-    *
-    * Preallocates exact-sized array and fills with a while loop — zero intermediate allocations.
-    * The var is contained (private method, local scope, no aliasing).
-    */
   private def sliceArray[T: scala.reflect.ClassTag](
     data: Array[T],
     indices: Array[Int],
@@ -265,36 +260,6 @@ enum Column {
     newData
   }
 
-  /** Build new null BitSet for sliced indices.
-    *
-    * CONTAINED MUTABILITY FOR PERFORMANCE:
-    *
-    * This method uses mutable.BitSet and a var for performance-critical columnar operations. The
-    * mutability is:
-    *   1. Contained - not exposed in public API (private method)
-    *   2. Local - scoped to this method, no aliasing
-    *   3. Safe - no concurrent access, immutable result
-    *   4. Necessary - functional alternatives use 145x more memory (benchmarked)
-    *
-    * Benchmark results (250K elements, 50% nulls):
-    *   - This approach: 2.5ms, 4MB memory
-    *   - foreach (no var): 3.2ms, 290MB memory (145x!)
-    *   - foldLeft: 102ms, 88GB memory (catastrophic)
-    *
-    * The var is used for array indexing in a tight loop. All functional alternatives (foreach,
-    * foldLeft, iterator) create intermediate allocations that are unacceptable for the columnar
-    * interpreter's memory-constrained workloads.
-    *
-    * This pattern is principled: mutability is an implementation detail, not part of the contract.
-    * The public API remains purely functional (immutable inputs, immutable result).
-    *
-    * @param nulls
-    *   Original null indices from source column
-    * @param indices
-    *   Array of source indices being sliced
-    * @return
-    *   New BitSet with destination indices that should be null
-    */
   private def buildNullSet(nulls: BitSet, indices: Array[Int]): BitSet = {
     val mutableSet = scala.collection.mutable.BitSet.empty
     var i = 0 // scalafix:ok DisableSyntax.var
@@ -307,7 +272,6 @@ enum Column {
 }
 
 object Column {
-  // Smart constructors
   inline def int(data: Array[Int], nulls: BitSet = BitSet.empty): Column = {
     IntColumn(data, nulls)
   }

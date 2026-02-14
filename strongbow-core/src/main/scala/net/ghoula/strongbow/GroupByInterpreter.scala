@@ -27,7 +27,6 @@ object GroupByInterpreter {
           case Left(err) =>
             throw new RuntimeException(s"GroupByExpr execution failed: $err") // scalafix:ok DisableSyntax.throw
         }
-        // Evaluate key expression to a column, read keys directly from typed array
         val keyCol = ExprInterpreter.evalColumn(keyExpr, parentResult.columns, keyType) match {
           case Right(col) => col
           case Left(err) =>
@@ -121,7 +120,6 @@ object GroupByInterpreter {
     }
   }
 
-  /** Inner join: only keys present in both sides. */
   private def innerJoin[K, V, U](
     left: Vector[(K, V)],
     right: Vector[(K, U)]
@@ -133,7 +131,6 @@ object GroupByInterpreter {
     }
   }
 
-  /** Left join: all keys from left, matching keys from right (or None). */
   private def leftJoin[K, V, U](
     left: Vector[(K, V)],
     right: Vector[(K, U)]
@@ -148,7 +145,6 @@ object GroupByInterpreter {
     }
   }
 
-  /** Right join: all keys from right, matching keys from left (or None). */
   private def rightJoin[K, V, U](
     left: Vector[(K, V)],
     right: Vector[(K, U)]
@@ -163,7 +159,6 @@ object GroupByInterpreter {
     }
   }
 
-  /** Full join: all keys from both sides, None where missing. */
   private def fullJoin[K, V, U](
     left: Vector[(K, V)],
     right: Vector[(K, U)]
@@ -189,7 +184,6 @@ object GroupByInterpreter {
     }
   }
 
-  /** Reduce values by key using binary function. */
   private def reduceByKey[K, V](
     pairs: Vector[(K, V)],
     reduce: (V, V) => V
@@ -206,7 +200,6 @@ object GroupByInterpreter {
     builder.toVector
   }
 
-  /** Build a multi-map from key-value pairs (one key -> multiple values). */
   private def buildMultiMap[K, V](pairs: Vector[(K, V)]): Map[K, Vector[V]] = {
     val builder = mutable.HashMap.empty[K, mutable.ArrayBuffer[V]]
 
@@ -217,7 +210,6 @@ object GroupByInterpreter {
     builder.view.mapValues(_.toVector).toMap
   }
 
-  /** Left anti join: returns keys from left not in right. */
   private def leftAntiJoin[K, V, U](
     left: Vector[(K, V)],
     right: Vector[(K, U)]
@@ -226,7 +218,6 @@ object GroupByInterpreter {
     left.filterNot { case (k, _) => rightKeys.contains(k) }
   }
 
-  /** Sort by key using provided ordering. */
   private def sortByKey[K, V](
     pairs: Vector[(K, V)],
     ordering: Ordering[K]
@@ -234,7 +225,6 @@ object GroupByInterpreter {
     pairs.sortBy(_._1)(using ordering)
   }
 
-  /** Aggregate by key with 2 functions. */
   private def aggregateByKey2[K, V, A, B](
     pairs: Vector[(K, V)],
     agg1: V => A,
@@ -257,7 +247,6 @@ object GroupByInterpreter {
     builder.toVector
   }
 
-  /** Aggregate by key with 3 functions. */
   private def aggregateByKey3[K, V, A, B, C](
     pairs: Vector[(K, V)],
     agg1: V => A,
@@ -283,7 +272,6 @@ object GroupByInterpreter {
     builder.toVector
   }
 
-  /** Aggregate by key with 4 functions. */
   private def aggregateByKey4[K, V, A, B, C, D](
     pairs: Vector[(K, V)],
     agg1: V => A,
@@ -312,7 +300,6 @@ object GroupByInterpreter {
     builder.toVector
   }
 
-  /** Aggregate by key with 5 functions. */
   private def aggregateByKey5[K, V, A, B, C, D, E](
     pairs: Vector[(K, V)],
     agg1: V => A,

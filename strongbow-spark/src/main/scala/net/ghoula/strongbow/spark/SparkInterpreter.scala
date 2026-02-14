@@ -14,8 +14,6 @@ import net.ghoula.strongbow.errors.ExecutionError
   */
 class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
-  /** Internal plan representation: a Spark DataFrame paired with the Strongbow Schema for decoding.
-    */
   private case class SparkPlan[T](df: DataFrame, schema: Schema[T])
 
   override def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
@@ -102,7 +100,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
       case srtExpr: Dataset.SortByExpr[T, _] =>
         val parent = buildPlan(srtExpr.parent)
-        // Try native Spark column sort first, fall back to collect-sort
         ExprToColumn.convert(srtExpr.keyExpr) match {
           case Right((sparkCol, _)) =>
             SparkPlan(parent.df.sort(sparkCol), parent.schema)
@@ -172,13 +169,9 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
   }
 
-  // --- Helper to collect rows from a DataFrame ---
-
   private def collectValues[T](plan: SparkPlan[T]): Vector[T] = {
     plan.df.collect().iterator.map(r => RowConverter.fromRowUnsafe(r, plan.schema)).toVector
   }
-
-  // --- Function-based operations using collect -> transform -> recreate ---
 
   private def applyFilterViaMap[T](parent: SparkPlan[T], predicate: Expr[T, Boolean]): SparkPlan[T] = {
     val values = collectValues(parent)
@@ -228,7 +221,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     keyType: net.ghoula.strongbow.ColumnType,
     ord: Ordering[K]
   ): SparkPlan[T] = {
-    // Fall back to in-memory: collect, build columns, use DatasetInterpreter's sortByExpr logic
     val values = collectValues(parent)
     import net.ghoula.strongbow.MaterializedDataset
     MaterializedDataset.fromVector(values)(using parent.schema) match {
@@ -242,14 +234,11 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
             val sorted = decoded.indices.sortWith((a, b) => ord.lt(keys(a), keys(b))).map(decoded)
             SparkPlan(createDataFrame(sorted.toVector, parent.schema), parent.schema)
           case Left(_) =>
-            // Last resort: just return unsorted
             parent
         }
       case Left(_) => parent
     }
   }
-
-  // --- Joins (collect both sides, cross-product with condition) ---
 
   private def applyInnerJoin[A, B, T](
     left: SparkPlan[A],
@@ -358,8 +347,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     SparkPlan(df, left.schema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
   }
 
-  // --- Expression-based joins using native Spark equi-join ---
-
   private def applyJoinOnExpr[A, B, T](
     leftDs: Dataset[A],
     rightDs: Dataset[B],
@@ -370,12 +357,9 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val left = buildPlan(leftDs)
     val right = buildPlan(rightDs)
 
-    // Use DataFrame-qualified column references to avoid ambiguity when both sides
-    // have same-named columns (e.g. both have "value")
     val leftColName = getColName(leftKey)
     val rightColName = getColName(rightKey)
 
-    // Alias DataFrames to disambiguate
     val leftAlias = left.df.alias("_l")
     val rightAlias = right.df.alias("_r")
 
@@ -383,13 +367,11 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
     val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
 
-    // Drop the alias prefixes — select original columns by position
     val leftColNames = left.df.columns.map(c => col(s"_l.$c"))
     val rightColNames = right.df.columns.map(c => col(s"_r.$c"))
 
     val selectedDf = joinType match {
       case "left_anti" =>
-        // Anti join only returns left columns
         joinedDf.select(leftColNames*)
       case _ =>
         joinedDf.select((leftColNames ++ rightColNames)*)
@@ -427,8 +409,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     schema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
   }
 
-  // --- ZipWithIndex ---
-
   private def applyZipWithIndex[A, T](parent: SparkPlan[A]): SparkPlan[T] = {
     val values = collectValues(parent)
     val indexed = values.zipWithIndex.map { case (v, i) => (v, i.toLong) }
@@ -437,8 +417,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val df = createDataFrame(indexed, tupleSchema)
     SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
   }
-
-  // --- Grouped operations: delegate to SparkGroupedInterpreter ---
 
   private def applyGroupedToPairs[K, V, T](
     grouped: Grouped[K, V],
@@ -476,8 +454,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val df = createDataFrame(values, schemaV)
     SparkPlan(df, schemaV.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
   }
-
-  // --- Helper: create DataFrame from values ---
 
   private[spark] def createDataFrame[T](values: Vector[T], schema: Schema[T]): DataFrame = {
     val structType = SchemaConverter.toStructType(schema)

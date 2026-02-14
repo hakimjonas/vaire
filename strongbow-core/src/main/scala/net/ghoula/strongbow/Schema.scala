@@ -192,7 +192,6 @@ object Schema {
     deriveSchemaImpl[T, mirror.MirroredElemTypes, mirror.MirroredElemLabels]('mirror)
   }
 
-  /** Extract field labels from Mirror.MirroredElemLabels tuple type. */
   private def getLabels[Labels <: Tuple: Type](using q: Quotes): List[String] = {
     import q.reflect.*
 
@@ -215,7 +214,6 @@ object Schema {
     extract[Labels]
   }
 
-  /** Generate type-safe field access expression. */
   private def fieldAccess[T: Type, H: Type](
     aExpr: Expr[T],
     label: String,
@@ -226,7 +224,6 @@ object Schema {
     val isRegularTuple = TypeRepr.of[T] <:< TypeRepr.of[Tuple]
 
     if (isRegularTuple) {
-      // Regular tuple: use _1, _2, etc. - typed accessors, zero cast
       Select.unique(aExpr.asTerm, s"_${index + 1}").asExprOf[H]
     } else {
       val typeSymbol = TypeRepr.of[T].typeSymbol
@@ -234,10 +231,8 @@ object Schema {
       val hasFieldMember = !fieldMember.isNoSymbol
 
       if (hasFieldMember) {
-        // Case class: direct field access - zero cast
         Select.unique(aExpr.asTerm, label).asExprOf[H]
       } else {
-        // Named tuple: use productElement (matches Scala 3.7.4 stdlib pattern)
         val indexExpr = Expr(index)
         '{
           $aExpr.asInstanceOf[Product].productElement($indexExpr).asInstanceOf[H]
@@ -246,7 +241,6 @@ object Schema {
     }
   }
 
-  /** Check if all fields have available Schema instances at compile time. */
   private def findMissingSchemas[Elems <: Tuple: Type](
     labels: List[String]
   )(using q: Quotes): List[(String, String)] = {
@@ -268,7 +262,6 @@ object Schema {
     collect[Elems](labels, Nil)
   }
 
-  /** Derive Schema[T] implementation using compile-time reflection. */
   private def deriveSchemaImpl[T: Type, Elems <: Tuple: Type, Labels <: Tuple: Type](
     m: Expr[Mirror.ProductOf[T]]
   )(using q: Quotes): Expr[Schema[T]] = {
@@ -276,7 +269,6 @@ object Schema {
 
     val fieldLabels = getLabels[Labels]
 
-    // Validate all fields have schemas before generating code
     val missing = findMissingSchemas[Elems](fieldLabels)
     if (missing.nonEmpty) {
       val header =
@@ -289,8 +281,6 @@ object Schema {
       report.errorAndAbort(header + "\n" + details, Position.ofMacroExpansion)
     }
 
-    // Summon all schemas (safe because we validated above)
-    // We need to keep the schemas untyped to work with them generically
     def summonSchemas[E <: Tuple: Type]: List[Expr[Schema[?]]] =
       Type.of[E] match {
         case '[EmptyTuple] => Nil
@@ -301,12 +291,10 @@ object Schema {
 
     val schemas = summonSchemas[Elems]
 
-    // Generate column count
     val columnCountExpr = schemas.foldLeft[Expr[Int]]('{ 0 }) { (acc, schema) =>
       '{ $acc + $schema.columnCount }
     }
 
-    // Generate column names with prefixes
     val columnNamesExpr = {
       val nameExprs = fieldLabels.zip(schemas).map { case (label, schema) =>
         val labelExpr = Expr(label)
@@ -317,12 +305,10 @@ object Schema {
       }
     }
 
-    // Generate column types
     val columnTypesExpr = schemas.foldLeft[Expr[Vector[ColumnType]]]('{ Vector.empty }) { (acc, schema) =>
       '{ $acc ++ $schema.columnTypes }
     }
 
-    // Generate encode method
     def generateEncode[E <: Tuple: Type](
       valueExpr: Expr[T],
       index: Int,
@@ -339,7 +325,6 @@ object Schema {
           '{ $schema.encode($fieldExpr) ++ $restExpr }
       }
 
-    // Generate decode method
     def generateDecode[E <: Tuple: Type](
       valuesExpr: Expr[Vector[Any]],
       schemas: List[Expr[Schema[?]]]

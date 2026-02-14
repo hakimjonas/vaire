@@ -210,7 +210,6 @@ object Grouped {
     }
   }
 
-  // Conversion from Dataset[(K, V)] to Grouped[K, V]
   extension [K, V](ds: Dataset[(K, V)]) {
     inline def asGrouped: Grouped[K, V] = {
       FromPairs(ds)

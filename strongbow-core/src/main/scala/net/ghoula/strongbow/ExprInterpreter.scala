@@ -25,15 +25,12 @@ object ExprInterpreter {
   ): Either[ExecutionError, A] = {
     (expr: @unchecked) match {
       case Expr.Const(value) =>
-        // GADT refinement: value has type A
         Right(value)
 
       case named: Expr.Named[Row, _] =>
-        // Named is just a wrapper for column naming - evaluate the inner expression
         eval(named.expr, columns, rowIdx)
 
       case cell: Expr.Cell[Row, a] =>
-        // ONE CAST AT BOUNDARY: typed column storage → generic type A
         if (cell.index.toInt >= columns.length) {
           Left(ExecutionError.IndexOutOfBounds(cell.index.toInt, columns.length))
         } else {
@@ -43,16 +40,6 @@ object ExprInterpreter {
           if (idx >= column.length) {
             Left(ExecutionError.IndexOutOfBounds(idx, column.length))
           } else {
-            // ONE-CAST-AT-BOUNDARY PATTERN:
-            // This is the ONLY place in the expression evaluation pipeline where we cast.
-            // We bridge from typed column accessors (getInt: Int, getString: String, etc.)
-            // to the GADT's generic type variable `a`.
-            //
-            // After this cast, all downstream expression logic is zero-cast because GADTs
-            // provide compile-time type refinement (e.g., Add[Row] refines to Int + Int).
-            //
-            // These casts are architecturally fundamental and cannot be eliminated without
-            // losing the zero-cast property in the rest of the interpreter.
             val value: a = column.columnType match {
               case ColumnType.IntType => column.getInt(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.LongType => column.getLong(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
@@ -69,12 +56,11 @@ object ExprInterpreter {
           }
         }
 
-      // Numeric operations - GADT guarantees types, NO CASTS
       case add: Expr.Add[Row] =>
         for {
-          l <- eval(add.left, columns, rowIdx) // l: Int by GADT
-          r <- eval(add.right, columns, rowIdx) // r: Int by GADT
-        } yield l + r // NO CAST NEEDED!
+          l <- eval(add.left, columns, rowIdx)
+          r <- eval(add.right, columns, rowIdx)
+        } yield l + r
 
       case sub: Expr.Sub[Row] =>
         for {
@@ -97,7 +83,6 @@ object ExprInterpreter {
             else Right(l / r)
         } yield result
 
-      // Long arithmetic - GADT guarantees Long types, NO CASTS
       case add: Expr.AddLong[Row] =>
         for {
           l <- eval(add.left, columns, rowIdx)
@@ -125,7 +110,6 @@ object ExprInterpreter {
             else Right(l / r)
         } yield result
 
-      // Double arithmetic - GADT guarantees Double types, NO CASTS
       case add: Expr.AddDouble[Row] =>
         for {
           l <- eval(add.left, columns, rowIdx)
@@ -153,7 +137,6 @@ object ExprInterpreter {
             else Right(l / r)
         } yield result
 
-      // Comparisons - GADT provides Ordering evidence, NO CASTS!
       case eq: Expr.Eq[Row, _] =>
         for {
           l <- eval(eq.left, columns, rowIdx)
@@ -161,14 +144,12 @@ object ExprInterpreter {
         } yield java.util.Objects.equals(l, r)
 
       case gt: Expr.Gt[Row, _] =>
-        // GADT pattern match gives us gt.ordering
         for {
           l <- eval(gt.left, columns, rowIdx)
           r <- eval(gt.right, columns, rowIdx)
         } yield gt.ordering.gt(l, r)
 
       case lt: Expr.Lt[Row, _] =>
-        // GADT pattern match gives us lt.ordering
         for {
           l <- eval(lt.left, columns, rowIdx)
           r <- eval(lt.right, columns, rowIdx)
@@ -192,14 +173,12 @@ object ExprInterpreter {
           r <- eval(neq.right, columns, rowIdx)
         } yield !java.util.Objects.equals(l, r)
 
-      // Conditional logic - NO CASTS!
       case when: Expr.When[Row, _] =>
         eval(when.condition, columns, rowIdx).flatMap { cond =>
           if (cond) eval(when.thenExpr, columns, rowIdx)
           else eval(when.elseExpr, columns, rowIdx)
         }
 
-      // Boolean operations - GADT guarantees Boolean type, NO CASTS!
       case and: Expr.And[Row] =>
         for {
           l <- eval(and.left, columns, rowIdx)
@@ -217,7 +196,6 @@ object ExprInterpreter {
           v <- eval(not.expr, columns, rowIdx)
         } yield !v
 
-      // String operations - NO CASTS!
       case concat: Expr.Concat[Row] =>
         for {
           l <- eval(concat.left, columns, rowIdx)
@@ -229,7 +207,6 @@ object ExprInterpreter {
           v <- eval(length.expr, columns, rowIdx)
         } yield v.length
 
-      // Option operations - NO CASTS!
       case isDefined: Expr.IsDefined[Row, _] =>
         eval(isDefined.expr, columns, rowIdx) match {
           case Right(Some(_)) => Right(true)
@@ -244,7 +221,6 @@ object ExprInterpreter {
           case Left(err) => Left(err)
         }
 
-      // Aggregations - not supported at row level
       case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] |
           _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] | _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
@@ -309,7 +285,6 @@ object ExprInterpreter {
         val r = evalAny(lte.right, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
         lte.ordering.lteq(l, r)
 
-      // Short-circuit And/Or — current eval evaluates both sides unconditionally
       case and: Expr.And[Row] =>
         evalBoolean(and.left, columns, rowIdx) && evalBoolean(and.right, columns, rowIdx)
 
@@ -331,10 +306,6 @@ object ExprInterpreter {
     }
   }
 
-  /** Unboxed evaluation returning Any — internal helper for evalBoolean's sub-expressions.
-    *
-    * Avoids Either wrapping. Throws on errors (programming bugs, not data quality).
-    */
   private def evalAny[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column],
@@ -434,7 +405,6 @@ object ExprInterpreter {
         if (cond) evalAny(when.thenExpr, columns, rowIdx)
         else evalAny(when.elseExpr, columns, rowIdx)
 
-      // Boolean expressions delegate to evalBoolean
       case boolExpr: (Expr.Gt[Row, _] | Expr.Lt[Row, _] | Expr.Gte[Row, _] | Expr.Lte[Row, _] | Expr.Eq[Row, _] |
             Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _]) =>
         evalBoolean(
@@ -445,11 +415,6 @@ object ExprInterpreter {
     }
   }
 
-  /** Infer the ColumnType of an expression's operands by inspecting the expression tree and
-    * columns.
-    *
-    * Used by vectorized evaluation to determine array types for sub-expressions.
-    */
   private def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column]): ColumnType = {
     (expr: @unchecked) match {
       case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
@@ -500,15 +465,12 @@ object ExprInterpreter {
     val rowCount = columns.head.length
 
     (expr: @unchecked) match {
-      // Cell reference — return column directly, zero work
       case cell: Expr.Cell[_, _] =>
         Right(columns(cell.index.toInt))
 
-      // Named — unwrap and recurse
       case named: Expr.Named[_, _] =>
         evalColumn(named.expr, columns, columnType)
 
-      // Constant — fill typed array
       case c: Expr.Const[_, _] =>
         columnType match {
           case ColumnType.IntType =>
@@ -533,7 +495,6 @@ object ExprInterpreter {
             Right(Column.any(Array.fill(rowCount)(c.value.asInstanceOf[Any]))) // scalafix:ok DisableSyntax.asInstanceOf
         }
 
-      // Arithmetic — vectorized int array operations
       case add: Expr.Add[Row] =>
         vectorizedIntBinOp(add.left, add.right, columns, rowCount)(_ + _)
 
@@ -554,7 +515,6 @@ object ExprInterpreter {
           )
         } yield result
 
-      // Long arithmetic — vectorized
       case add: Expr.AddLong[Row] =>
         vectorizedLongBinOp(add.left, add.right, columns, rowCount)(_ + _)
 
@@ -575,7 +535,6 @@ object ExprInterpreter {
           )
         } yield result
 
-      // Double arithmetic — vectorized
       case add: Expr.AddDouble[Row] =>
         vectorizedDoubleBinOp(add.left, add.right, columns, rowCount)(_ + _)
 
@@ -596,7 +555,6 @@ object ExprInterpreter {
           )
         } yield result
 
-      // Comparisons — vectorized, dispatch on operand column type
       case gt: Expr.Gt[Row, _] =>
         vectorizedComparison(gt.left, gt.right, columns, rowCount)(
           gt.ordering.asInstanceOf[Ordering[Any]].gt
@@ -623,7 +581,6 @@ object ExprInterpreter {
       case neq: Expr.Neq[Row, _] =>
         vectorizedComparison(neq.left, neq.right, columns, rowCount)((a, b) => !java.util.Objects.equals(a, b))
 
-      // Boolean ops — vectorized on boolean arrays
       case and: Expr.And[Row] =>
         for {
           leftCol <- evalColumn(and.left, columns, ColumnType.BooleanType)
@@ -659,7 +616,6 @@ object ExprInterpreter {
           Column.boolean(out)
         }
 
-      // String ops — vectorized on string arrays
       case concat: Expr.Concat[Row] =>
         for {
           leftCol <- evalColumn(concat.left, columns, ColumnType.StringType)
@@ -682,7 +638,6 @@ object ExprInterpreter {
           Column.int(out)
         }
 
-      // When — evaluate condition, then pick from then/else columns
       case when: Expr.When[Row, _] =>
         for {
           condCol <- evalColumn(when.condition, columns, ColumnType.BooleanType)
@@ -702,13 +657,11 @@ object ExprInterpreter {
           }
         }
 
-      // Fallback — row-by-row for anything not yet vectorized
       case _ =>
         evalColumnRowByRow(expr, columns, columnType, rowCount)
     }
   }
 
-  /** Vectorized int binary operation helper. */
   private def vectorizedIntBinOp[Row](
     left: Expr[Row, Int],
     right: Expr[Row, Int],
@@ -728,7 +681,6 @@ object ExprInterpreter {
     }
   }
 
-  /** Vectorized division with zero-check. */
   private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column] = {
     val out = new Array[Int](rowCount)
     var i = 0 // scalafix:ok DisableSyntax.var
@@ -740,7 +692,6 @@ object ExprInterpreter {
     Right(Column.int(out))
   }
 
-  /** Vectorized Long binary operation helper. */
   private def vectorizedLongBinOp[Row](
     left: Expr[Row, Long],
     right: Expr[Row, Long],
@@ -760,7 +711,6 @@ object ExprInterpreter {
     }
   }
 
-  /** Vectorized Long division with zero-check. */
   private def vectorizedLongDiv(
     left: Array[Long],
     right: Array[Long],
@@ -776,7 +726,6 @@ object ExprInterpreter {
     Right(Column.long(out))
   }
 
-  /** Vectorized Double binary operation helper. */
   private def vectorizedDoubleBinOp[Row](
     left: Expr[Row, Double],
     right: Expr[Row, Double],
@@ -796,7 +745,6 @@ object ExprInterpreter {
     }
   }
 
-  /** Vectorized Double division with zero-check. */
   private def vectorizedDoubleDiv(
     left: Array[Double],
     right: Array[Double],
@@ -812,7 +760,6 @@ object ExprInterpreter {
     Right(Column.double(out))
   }
 
-  /** Vectorized comparison helper — evaluates operands to columns, compares element-wise. */
   private def vectorizedComparison[Row, A](
     left: Expr[Row, A],
     right: Expr[Row, A],
@@ -834,7 +781,6 @@ object ExprInterpreter {
     }
   }
 
-  /** Row-by-row fallback for expressions not yet vectorized. */
   private def evalColumnRowByRow[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column],
@@ -861,7 +807,6 @@ object ExprInterpreter {
     columns: Vector[Column]
   ): Either[ExecutionError, A] = {
     if (columns.isEmpty || columns.head.length == 0) {
-      // Handle empty datasets - GADT refinement means NO CASTS
       (expr: @unchecked) match {
         case _: Expr.Count[Row] =>
           Right(0L)

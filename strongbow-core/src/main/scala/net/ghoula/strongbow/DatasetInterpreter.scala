@@ -166,7 +166,6 @@ object DatasetInterpreter extends Interpreter {
       case grp: Dataset.GroupedToPairs[k, v] =>
         val pairs: Vector[(k, v)] = GroupByInterpreter.execute(grp.grouped)
 
-        // Use tuple2Schema given instance with captured evidence
         given Schema[k] = grp.schemaK
         given Schema[v] = grp.schemaV
         val tupleSchema: Schema[(k, v)] = summon[Schema[(k, v)]]
@@ -193,31 +192,19 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Filter rows based on predicate expression.
-    *
-    * Uses evalBoolean fast path — no Either allocation per row, short-circuit And/Or.
-    */
   private def filter[T](
     dataset: MaterializedDataset[T],
     predicate: Expr[T, Boolean]
   ): MaterializedDataset[T] = {
-    // Convert to Array for 2x better slice performance (benchmarked at 500K elements)
     val rowIndices = (0 until dataset.rowCount).filter { rowIdx =>
       ExprInterpreter.evalBoolean(predicate, dataset.columns, RowIndex(rowIdx))
     }.toArray
 
-    // Use type-specialized slice instead of getValue + fromValues
-    // This avoids boxing, intermediate Vector[Any], and multiple traversals
     val newColumns = dataset.columns.map(_.slice(rowIndices))
 
     MaterializedDataset(newColumns, dataset.schema)
   }
 
-  /** Remove duplicate rows.
-    *
-    * Keeps the HashSet-based index collection (right algorithm), but uses Column.slice for
-    * reconstruction instead of the boxing getValue/fromValues round-trip.
-    */
   private def distinct[T](dataset: MaterializedDataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
     val seen = scala.collection.mutable.HashSet.empty[Vector[Any]]
     val rowIndices = (0 until dataset.rowCount).filter { rowIdx =>
@@ -234,10 +221,6 @@ object DatasetInterpreter extends Interpreter {
     Right(MaterializedDataset(newColumns, dataset.schema))
   }
 
-  /** Limit result to first n rows.
-    *
-    * Uses Column.take for typed prefix slicing — no boxing round-trip.
-    */
   private def limit[T](dataset: MaterializedDataset[T], n: Int): Either[ExecutionError, MaterializedDataset[T]] = {
     if (n >= dataset.rowCount) {
       Right(dataset)
@@ -247,10 +230,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Union two datasets with the same schema.
-    *
-    * Uses Column.concat for typed array concatenation — no boxing round-trip.
-    */
   private def union[T](
     left: MaterializedDataset[T],
     right: MaterializedDataset[T]
@@ -273,12 +252,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Sort dataset using ordering.
-    *
-    * Index-based sort: decode N rows once, sort an index array, then Column.slice to reorder.
-    * Eliminates the expensive MaterializedDataset.fromVector re-encoding (N encodes + N fromValues
-    * boxing round-trips).
-    */
   private def sort[T](
     dataset: MaterializedDataset[T],
     ord: Ordering[T]
@@ -290,11 +263,6 @@ object DatasetInterpreter extends Interpreter {
     Right(MaterializedDataset(newColumns, dataset.schema))
   }
 
-  /** Sort dataset by key function.
-    *
-    * Index-based sort: decode N rows, apply key function once per row, sort index array by cached
-    * keys, then Column.slice. Eliminates re-encoding.
-    */
   private def sortBy[T, K](
     dataset: MaterializedDataset[T],
     key: T => K,
@@ -308,12 +276,6 @@ object DatasetInterpreter extends Interpreter {
     Right(MaterializedDataset(newColumns, dataset.schema))
   }
 
-  /** Sort dataset by expression — zero decode.
-    *
-    * Evaluates the expression to a key column, then sorts index by reading typed array values
-    * directly. For Cell expressions, this is a column passthrough (zero work). Eliminates the
-    * toVectorUnsafe decode that lambda-based sortBy requires.
-    */
   private def sortByExpr[T, K](
     dataset: MaterializedDataset[T],
     keyExpr: Expr[T, K],
@@ -336,7 +298,6 @@ object DatasetInterpreter extends Interpreter {
           val strOrd = ord.asInstanceOf[Ordering[String]] // scalafix:ok DisableSyntax.asInstanceOf
           (0 until rowCount).sortWith((a, b) => strOrd.lt(data(a), data(b))).toArray
         case _ =>
-          // Fallback: read via getValue
           (0 until rowCount).sortWith { (a, b) =>
             ord.lt(
               keyCol.getValue(a).asInstanceOf[K],
@@ -349,12 +310,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Select columns by evaluating expressions.
-    *
-    * Uses vectorized evaluation — expressions operate on entire columns at once instead of
-    * row-by-row. Cell references return columns directly (zero work), arithmetic and comparisons
-    * use while-loops on typed arrays.
-    */
   private def selectExpressions[In, Out](
     dataset: MaterializedDataset[In],
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
@@ -370,7 +325,6 @@ object DatasetInterpreter extends Interpreter {
     newColumnsOrError.map(cols => MaterializedDataset(cols, outputSchema))
   }
 
-  /** Sample rows using reservoir sampling. */
   private def sample[T](
     dataset: MaterializedDataset[T],
     fraction: Double,
@@ -381,11 +335,9 @@ object DatasetInterpreter extends Interpreter {
     val rowCount = dataset.rowCount
 
     val selectedIndices = if (withReplacement) {
-      // Sample with replacement: allow duplicates
       val n = (rowCount * fraction).toInt
       Vector.fill(n)(rng.nextInt(rowCount))
     } else {
-      // Sample without replacement: filter-based sampling
       (0 until rowCount).filter(_ => rng.nextDouble() < fraction).toVector
     }
 
@@ -393,10 +345,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset(newColumns, dataset.schema)
   }
 
-  /** Set intersection - rows in both datasets, deduplicated.
-    *
-    * Matches Spark's `Dataset.intersect()`: returns distinct rows present in both.
-    */
   private def intersectDatasets[T](
     left: MaterializedDataset[T],
     right: MaterializedDataset[T]
@@ -408,10 +356,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(common)(using left.schema)
   }
 
-  /** Set difference - rows in left but not right, deduplicated.
-    *
-    * Matches Spark's `Dataset.except()`: returns distinct rows in left not present in right.
-    */
   private def exceptDatasets[T](
     left: MaterializedDataset[T],
     right: MaterializedDataset[T]
@@ -423,20 +367,17 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(diff)(using left.schema)
   }
 
-  /** Zip with sequential indices. */
   private def zipWithIndex[T](
     dataset: MaterializedDataset[T]
   ): Either[ExecutionError, MaterializedDataset[(T, Long)]] = {
     val rows = dataset.toVectorUnsafe
     val indexed = rows.zipWithIndex.map { case (value, idx) => (value, idx.toLong) }
 
-    // Need tuple schema
     given Schema[(T, Long)] = Schema.tuple2Schema[T, Long](using dataset.schema, Schema.longSchema)
 
     MaterializedDataset.fromVector(indexed)
   }
 
-  /** Inner join - only matching rows. */
   private def innerJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -455,7 +396,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)
   }
 
-  /** Left outer join - all left rows, with matching right rows or None. */
   private def leftJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -478,7 +418,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)
   }
 
-  /** Right outer join - all right rows, with matching left rows or None. */
   private def rightJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -501,7 +440,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)
   }
 
-  /** Full outer join - all rows from both sides, with None where no match. */
   private def fullJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -536,7 +474,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)
   }
 
-  /** Left anti join - left rows with no match in right. */
   private def leftAntiJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -552,9 +489,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)(using left.schema)
   }
 
-  // --- Expression-based joins using hash join ---
-
-  /** Build a hash index: key value → list of row indices. */
   private def buildKeyIndex(keyCol: Column, rowCount: Int): scala.collection.mutable.HashMap[Any, Vector[Int]] = {
     val index = scala.collection.mutable.HashMap.empty[Any, Vector[Int]]
     (0 until rowCount).foreach { i =>
@@ -567,7 +501,6 @@ object DatasetInterpreter extends Interpreter {
     index
   }
 
-  /** Assemble result columns from matched left/right index pairs. */
   private def assembleJoinColumns[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -580,11 +513,6 @@ object DatasetInterpreter extends Interpreter {
     (leftCols ++ rightCols, schema)
   }
 
-  /** Expression-based inner join using hash join.
-    *
-    * Evaluates key expressions to columns, builds hash index on left keys, probes with right keys.
-    * O(N + M) instead of O(N * M) for the common equi-join case.
-    */
   private def innerJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -616,7 +544,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Expression-based left join using hash join. */
   private def leftJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -652,7 +579,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Expression-based right join using hash join. */
   private def rightJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -688,7 +614,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Expression-based full join using hash join. */
   private def fullJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -737,7 +662,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Expression-based anti join using hash join. */
   private def leftAntiJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -750,13 +674,11 @@ object DatasetInterpreter extends Interpreter {
       leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
       rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
     } yield {
-      // Build set of all right key values
       val rightKeys = scala.collection.mutable.HashSet.empty[Any]
       (0 until right.rowCount).foreach { ri =>
         rightKeys += rightKeyCol.getValue(ri)
       }
 
-      // Filter left rows whose key is not in right keys
       val indices = (0 until left.rowCount).filter { li =>
         !rightKeys.contains(leftKeyCol.getValue(li))
       }.toArray

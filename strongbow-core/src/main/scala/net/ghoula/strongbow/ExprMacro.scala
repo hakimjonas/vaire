@@ -22,10 +22,6 @@ object ExprMacro {
   ): (SExpr[T, A], ColumnType) =
     ${ compileExprImpl[T, A, m.MirroredElemLabels, m.MirroredElemTypes]('f) }
 
-  // ---------------------------------------------------------------------------
-  // Label extraction (reuses Schema pattern)
-  // ---------------------------------------------------------------------------
-
   private def getLabels[Labels <: Tuple: Type](using q: Quotes): List[String] = {
     import q.reflect.*
 
@@ -45,10 +41,6 @@ object ExprMacro {
     extract[Labels]
   }
 
-  // ---------------------------------------------------------------------------
-  // ColumnType inference at compile time
-  // ---------------------------------------------------------------------------
-
   private def inferColumnType[A: Type](using q: Quotes): QExpr[ColumnType] = {
     import q.reflect.*
     Type.of[A] match {
@@ -64,10 +56,6 @@ object ExprMacro {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // column macro implementation
-  // ---------------------------------------------------------------------------
-
   private def columnImpl[T: Type, A: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
     f: QExpr[T => A]
   )(using q: Quotes): QExpr[(SExpr[T, A], ColumnType)] = {
@@ -82,10 +70,6 @@ object ExprMacro {
     '{ (SExpr.Cell[T, A]($nameExpr, ColumnIndex($indexExpr)), $colType) }
   }
 
-  // ---------------------------------------------------------------------------
-  // predicate macro implementation
-  // ---------------------------------------------------------------------------
-
   private def predicateImpl[T: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
     f: QExpr[T => Boolean]
   )(using q: Quotes): QExpr[SExpr[T, Boolean]] = {
@@ -94,14 +78,9 @@ object ExprMacro {
     val labels = getLabels[Labels]
     val term = f.asTerm
 
-    // Extract the lambda body
     val (paramName, body) = extractLambdaBody(term)
     compileBooleanExpr[T](body, paramName, labels)
   }
-
-  // ---------------------------------------------------------------------------
-  // compileExpr macro implementation
-  // ---------------------------------------------------------------------------
 
   private def compileExprImpl[T: Type, A: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
     f: QExpr[T => A]
@@ -115,7 +94,6 @@ object ExprMacro {
 
     if (bodyType =:= TypeRepr.of[Int]) {
       val expr = compileIntExpr[T](body, paramName, labels)
-      // Safe cast: bodyType =:= Int proves A = Int
       '{ ($expr.asInstanceOf[SExpr[T, A]], ColumnType.IntType) } // scalafix:ok DisableSyntax.asInstanceOf
     } else if (bodyType =:= TypeRepr.of[Long]) {
       val expr = compileLongExpr[T](body, paramName, labels)
@@ -136,10 +114,6 @@ object ExprMacro {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Lambda AST helpers
-  // ---------------------------------------------------------------------------
-
   private def extractFieldAccess[T: Type](using
     q: Quotes
   )(
@@ -148,14 +122,12 @@ object ExprMacro {
   ): (String, Int) = {
     import q.reflect.*
 
-    // Drill through Inlined wrappers and Block wrappers
     val unwrapped = unwrapTerm(term)
 
     unwrapped match {
       case Lambda(_, body) =>
         val innerBody = unwrapTerm(body)
         innerBody match {
-          // Nested: _.address.city
           case Select(Select(Ident(_), outerField), innerField) =>
             val outerIdx = labels.indexOf(outerField)
             if (outerIdx < 0)
@@ -175,7 +147,6 @@ object ExprMacro {
               innerFields.take(innerIdx).map(f => columnCountOfTypeRepr(outerFieldType.memberType(f))).sum
             (s"$outerField.$innerField", outerOffset + innerOffset)
 
-          // Flat: _.age
           case Select(Ident(_), fieldName) =>
             val idx = labels.indexOf(fieldName)
             if (idx < 0)
@@ -222,13 +193,6 @@ object ExprMacro {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Nested field access helpers
-  // ---------------------------------------------------------------------------
-
-  /** Count the number of flat columns a type occupies. Primitives = 1, case classes = recursive
-    * sum.
-    */
   private def columnCountOfTypeRepr(using q: Quotes)(tpe: q.reflect.TypeRepr): Int = {
     import q.reflect.*
     val widened = tpe.widen
@@ -248,7 +212,6 @@ object ExprMacro {
     }
   }
 
-  /** Compute the flat column offset for a field at the given index in type T. */
   private def flatColumnOffset[T: Type](using q: Quotes)(fieldIdx: Int): Int = {
     import q.reflect.*
     val tRepr = TypeRepr.of[T]
@@ -256,7 +219,6 @@ object ExprMacro {
     fields.take(fieldIdx).map(f => columnCountOfTypeRepr(tRepr.memberType(f))).sum
   }
 
-  /** Try to compile a term as field access (flat or nested), returning Some(Cell) or None. */
   private def compileFieldAccess[T: Type, A: Type](using
     q: Quotes
   )(
@@ -267,7 +229,6 @@ object ExprMacro {
     import q.reflect.*
 
     term match {
-      // Nested: _.address.city
       case Select(Select(Ident(name), outerField), innerField) if name == paramName =>
         val outerIdx = labels.indexOf(outerField)
         if (outerIdx < 0) None
@@ -293,7 +254,6 @@ object ExprMacro {
           }
         }
 
-      // Flat: _.field
       case Select(Ident(name), fieldName) if name == paramName =>
         val fieldIdx = labels.indexOf(fieldName)
         if (fieldIdx < 0) None
@@ -308,10 +268,6 @@ object ExprMacro {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Boolean expression compiler
-  // ---------------------------------------------------------------------------
-
   private def compileBooleanExpr[T: Type](using
     q: Quotes
   )(
@@ -324,19 +280,16 @@ object ExprMacro {
     val unwrapped = unwrapTerm(body)
 
     unwrapped match {
-      // &&
       case Apply(Select(left, "&&"), List(right)) =>
         val l = compileBooleanExpr[T](left, paramName, labels)
         val r = compileBooleanExpr[T](right, paramName, labels)
         '{ SExpr.And($l, $r) }
 
-      // ||
       case Apply(Select(left, "||"), List(right)) =>
         val l = compileBooleanExpr[T](left, paramName, labels)
         val r = compileBooleanExpr[T](right, paramName, labels)
         '{ SExpr.Or($l, $r) }
 
-      // unary_! (prefix not)
       case Apply(Select(inner, "unary_!"), Nil) =>
         val i = compileBooleanExpr[T](inner, paramName, labels)
         '{ SExpr.Not($i) }
@@ -344,11 +297,9 @@ object ExprMacro {
         val i = compileBooleanExpr[T](inner, paramName, labels)
         '{ SExpr.Not($i) }
 
-      // Comparisons: >, >=, <, <=, ==, !=
       case Apply(Select(left, op), List(right)) if Set(">", ">=", "<", "<=", "==", "!=").contains(op) =>
         compileComparison[T](left, op, right, paramName, labels)
 
-      // Boolean field access (flat or nested): _.isActive, _.address.isValid
       case other =>
         compileFieldAccess[T, Boolean](other, paramName, labels).getOrElse {
           report.errorAndAbort(
@@ -357,10 +308,6 @@ object ExprMacro {
         }
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Comparison compiler — dispatches to type-specific compilers
-  // ---------------------------------------------------------------------------
 
   private def compileComparison[T: Type](using
     q: Quotes
@@ -373,7 +320,6 @@ object ExprMacro {
   ): QExpr[SExpr[T, Boolean]] = {
     import q.reflect.*
 
-    // Determine operand type from left side
     val leftType = left.tpe.widen
 
     if (leftType =:= TypeRepr.of[Int]) {
@@ -445,10 +391,6 @@ object ExprMacro {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Type-specific expression compilers
-  // ---------------------------------------------------------------------------
-
   private def compileIntExpr[T: Type](using
     q: Quotes
   )(
@@ -462,22 +404,18 @@ object ExprMacro {
 
     compileFieldAccess[T, Int](unwrapped, paramName, labels).getOrElse {
       unwrapped match {
-        // Int literal
         case Literal(IntConstant(v)) =>
           val vExpr = QExpr(v)
           '{ SExpr.Const[T, Int]($vExpr) }
 
-        // String length: _.name.length (Apply form)
         case Apply(Select(inner, "length"), Nil) if inner.tpe.widen =:= TypeRepr.of[String] =>
           val s = compileStringExpr[T](inner, paramName, labels)
           '{ SExpr.Length($s) }
 
-        // String length: _.name.length (Select form — no args)
         case Select(inner, "length") if inner.tpe.widen =:= TypeRepr.of[String] =>
           val s = compileStringExpr[T](inner, paramName, labels)
           '{ SExpr.Length($s) }
 
-        // Arithmetic: +, -, *, /
         case Apply(Select(left, "+"), List(right)) =>
           val l = compileIntExpr[T](left, paramName, labels)
           val r = compileIntExpr[T](right, paramName, labels)
@@ -521,7 +459,6 @@ object ExprMacro {
           val vExpr = QExpr(v)
           '{ SExpr.Const[T, Long]($vExpr) }
 
-        // Arithmetic: +, -, *, /
         case Apply(Select(left, "+"), List(right)) =>
           val l = compileLongExpr[T](left, paramName, labels)
           val r = compileLongExpr[T](right, paramName, labels)
@@ -565,7 +502,6 @@ object ExprMacro {
           val vExpr = QExpr(v)
           '{ SExpr.Const[T, Double]($vExpr) }
 
-        // Arithmetic: +, -, *, /
         case Apply(Select(left, "+"), List(right)) =>
           val l = compileDoubleExpr[T](left, paramName, labels)
           val r = compileDoubleExpr[T](right, paramName, labels)
@@ -609,7 +545,6 @@ object ExprMacro {
           val vExpr = QExpr(v)
           '{ SExpr.Const[T, String]($vExpr) }
 
-        // String concatenation: _.name + "!"
         case Apply(Select(left, "+"), List(right)) =>
           val l = compileStringExpr[T](left, paramName, labels)
           val r = compileStringExpr[T](right, paramName, labels)
@@ -644,10 +579,6 @@ object ExprMacro {
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Dataset convenience extensions using ExprMacro
-// ---------------------------------------------------------------------------
 
 extension [T](ds: Dataset[T]) {
 

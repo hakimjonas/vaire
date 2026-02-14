@@ -31,7 +31,6 @@ enum Dataset[+T] {
   case FullJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean)
       extends Dataset[(Option[A], Option[B])]
   case LeftAntiJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[A]
-  // Expression-based joins — enable hash join in-memory and native equi-join in Spark
   case InnerJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -120,7 +119,6 @@ object Dataset {
     Root(cols, schema)
   }
 
-  // Extension methods on Dataset
   extension [T](ds: Dataset[T]) {
     inline def filter(predicate: Expr[T, Boolean]): Dataset[T] = {
       Filter(ds, predicate)
@@ -350,7 +348,6 @@ object Dataset {
     }
   }
 
-  // Validation helpers (return Option[List[Error]])
   private def validateColumnCount[T](
     cols: Vector[Column],
     schema: Schema[T]

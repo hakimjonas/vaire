@@ -15,30 +15,25 @@ import net.ghoula.strongbow.types.ColumnIndex
   *   The result type of evaluating this expression
   */
 enum Expr[Row, +A] {
-  // Leaf nodes
   case Cell[Row, A](name: String, index: ColumnIndex) extends Expr[Row, A]
   case Const[Row, A](value: A) extends Expr[Row, A]
   case Named[Row, A](expr: Expr[Row, A], name: String) extends Expr[Row, A]
 
-  // Numeric operations (Int)
   case Add[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Sub[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Mul[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Div[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
 
-  // Numeric operations (Long)
   case AddLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
   case SubLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
   case MulLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
   case DivLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
 
-  // Numeric operations (Double)
   case AddDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
   case SubDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
   case MulDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
   case DivDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
 
-  // Comparisons (GADT carries Ordering evidence as field)
   case Gt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
   case Gte[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
   case Lt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
@@ -46,23 +41,18 @@ enum Expr[Row, +A] {
   case Eq[Row, A](left: Expr[Row, A], right: Expr[Row, A]) extends Expr[Row, Boolean]
   case Neq[Row, A](left: Expr[Row, A], right: Expr[Row, A]) extends Expr[Row, Boolean]
 
-  // Boolean operations
   case And[Row](left: Expr[Row, Boolean], right: Expr[Row, Boolean]) extends Expr[Row, Boolean]
   case Or[Row](left: Expr[Row, Boolean], right: Expr[Row, Boolean]) extends Expr[Row, Boolean]
   case Not[Row](expr: Expr[Row, Boolean]) extends Expr[Row, Boolean]
 
-  // Conditional logic
   case When[Row, A](condition: Expr[Row, Boolean], thenExpr: Expr[Row, A], elseExpr: Expr[Row, A]) extends Expr[Row, A]
 
-  // String operations
   case Concat[Row](left: Expr[Row, String], right: Expr[Row, String]) extends Expr[Row, String]
   case Length[Row](expr: Expr[Row, String]) extends Expr[Row, Int]
 
-  // Option operations
   case IsDefined[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Boolean]
   case GetOrElse[Row, A](expr: Expr[Row, Option[A]], default: A) extends Expr[Row, A]
 
-  // Aggregations (special handling in interpreter)
   case Sum[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
   case Count[Row]() extends Expr[Row, Long]
   case Max[Row, A](expr: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Option[A]]
@@ -75,7 +65,6 @@ enum Expr[Row, +A] {
 }
 
 object Expr {
-  // Smart constructors
   def cell[Row, A](name: String, index: ColumnIndex): Expr[Row, A] = {
     Cell(name, index)
   }
@@ -118,7 +107,6 @@ object Expr {
     StdDevPop(expr)
   }
 
-  // Extension methods for fluent syntax
   extension [Row, A](left: Expr[Row, A]) {
 
     /** Rename this expression for output. */

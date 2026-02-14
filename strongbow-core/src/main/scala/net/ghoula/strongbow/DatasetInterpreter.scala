@@ -8,7 +8,7 @@ import net.ghoula.strongbow.types.RowIndex
   * Walks the Dataset AST and produces MaterializedDataset results. Delegates to ExprInterpreter for
   * expression evaluation and uses columnar operations for efficiency.
   */
-object DatasetInterpreter {
+object DatasetInterpreter extends Interpreter {
 
   /** Execute a Dataset plan to produce a MaterializedDataset. */
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {

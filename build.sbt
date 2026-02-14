@@ -25,11 +25,11 @@ lazy val testScalacOptions = Seq(
 val valarVersion = "0.1.0-SNAPSHOT"
 val rumilVersion = "0.1.0-SNAPSHOT"
 val eruVersion = "0.1.0-SNAPSHOT"
-val sparkVersion = "4.2.0"
+val sparkVersion = "4.1.0"
 
 lazy val root = project
   .in(file("."))
-  .aggregate(core, columnar, bench)
+  .aggregate(core, columnar, spark, bench)
   .settings(
     name := "strongbow",
     publish / skip := true
@@ -56,17 +56,35 @@ lazy val columnar = project
     // No extra dependencies—just core
   )
 
+lazy val spark = project
+  .in(file("strongbow-spark"))
+  .dependsOn(core)
+  .settings(
+    name := "strongbow-spark",
+    scalacOptions ++= sharedScalacOptions.filterNot(o => o == "-language:strictEquality" || o == "-Wunused:all"),
+    scalacOptions += "-Wunused:imports",
+    libraryDependencies ++= Seq(
+      ("org.apache.spark" %% "spark-sql" % sparkVersion % Provided)
+        .cross(CrossVersion.for3Use2_13)
+        .exclude("org.scala-lang.modules", "scala-xml_2.13"),
+      ("org.apache.spark" %% "spark-sql" % sparkVersion % Test)
+        .cross(CrossVersion.for3Use2_13)
+        .exclude("org.scala-lang.modules", "scala-xml_2.13"),
+      "org.scala-lang.modules" %% "scala-xml" % "2.3.0" % Test,
+      "org.scalatest" %% "scalatest" % "3.2.18" % Test
+    ),
+    Test / fork := true,
+    Test / javaOptions ++= Seq(
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+      "--add-opens=java.base/java.io=ALL-UNNAMED",
+      "--add-opens=java.base/java.util=ALL-UNNAMED",
+      "--add-opens=java.base/java.nio=ALL-UNNAMED"
+    )
+  )
+
 // Optional integration modules (commented out until dependencies are published):
-// lazy val spark = project
-//   .in(file("strongbow-spark"))
-//   .dependsOn(core)
-//   .settings(
-//     name := "strongbow-spark",
-//     scalacOptions ++= sharedScalacOptions,
-//     libraryDependencies ++= Seq(
-//       "org.apache.spark" %% "spark-sql" % sparkVersion % Provided
-//     )
-//   )
 //
 // lazy val validation = project
 //   .in(file("strongbow-validation"))

@@ -1,0 +1,52 @@
+package net.ghoula.strongbow.spark
+
+import org.apache.spark.sql.types.{
+  BooleanType => SparkBooleanType,
+  DataType => SparkDataType,
+  DoubleType => SparkDoubleType,
+  IntegerType => SparkIntegerType,
+  LongType => SparkLongType,
+  StringType => SparkStringType,
+  StructField,
+  StructType
+}
+
+import net.ghoula.strongbow.{ColumnType, Schema}
+
+/** Bidirectional conversion between Strongbow Schema/ColumnType and Spark StructType/DataType. */
+object SchemaConverter {
+
+  /** Convert a Strongbow Schema[T] to a Spark StructType. */
+  def toStructType[T](schema: Schema[T]): StructType = {
+    val fields = schema.columnNames.zip(schema.columnTypes).map { case (name, ct) =>
+      ct match {
+        case ColumnType.OptionType(inner) =>
+          StructField(name, toSparkType(inner), nullable = true)
+        case _ =>
+          StructField(name, toSparkType(ct), nullable = false)
+      }
+    }
+    StructType(fields.toArray)
+  }
+
+  /** Convert a Strongbow ColumnType to a Spark DataType. */
+  def toSparkType(ct: ColumnType): SparkDataType = ct match {
+    case ColumnType.IntType => SparkIntegerType
+    case ColumnType.LongType => SparkLongType
+    case ColumnType.DoubleType => SparkDoubleType
+    case ColumnType.StringType => SparkStringType
+    case ColumnType.BooleanType => SparkBooleanType
+    case ColumnType.OptionType(inner) => toSparkType(inner)
+    case ColumnType.AnyType => SparkStringType // fallback
+  }
+
+  /** Convert a Spark DataType to a Strongbow ColumnType. */
+  def fromSparkType(dt: SparkDataType): ColumnType = dt match {
+    case SparkIntegerType => ColumnType.IntType
+    case SparkLongType => ColumnType.LongType
+    case SparkDoubleType => ColumnType.DoubleType
+    case SparkStringType => ColumnType.StringType
+    case SparkBooleanType => ColumnType.BooleanType
+    case _ => ColumnType.AnyType
+  }
+}

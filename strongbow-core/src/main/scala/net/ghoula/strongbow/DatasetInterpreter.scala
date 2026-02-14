@@ -56,6 +56,20 @@ object DatasetInterpreter {
           result <- union(left, right)
         } yield result
 
+      case inter: Dataset.Intersect[T] =>
+        for {
+          left <- execute(inter.left)
+          right <- execute(inter.right)
+          result <- intersectDatasets(left, right)
+        } yield result
+
+      case exc: Dataset.Except[T] =>
+        for {
+          left <- execute(exc.left)
+          right <- execute(exc.right)
+          result <- exceptDatasets(left, right)
+        } yield result
+
       case jn: Dataset.InnerJoin[?, ?] =>
         for {
           left <- execute(jn.left)
@@ -300,6 +314,36 @@ object DatasetInterpreter {
 
     val newColumns = dataset.columns.map(_.slice(selectedIndices.toArray))
     MaterializedDataset(newColumns, dataset.schema)
+  }
+
+  /** Set intersection - rows in both datasets, deduplicated.
+    *
+    * Matches Spark's `Dataset.intersect()`: returns distinct rows present in both.
+    */
+  private def intersectDatasets[T](
+    left: MaterializedDataset[T],
+    right: MaterializedDataset[T]
+  ): Either[ExecutionError, MaterializedDataset[T]] = {
+    val leftRows = left.toVectorUnsafe
+    val rightSet = right.toVectorUnsafe.toSet
+    val common = leftRows.filter(rightSet.contains).distinct
+
+    MaterializedDataset.fromVector(common)(using left.schema)
+  }
+
+  /** Set difference - rows in left but not right, deduplicated.
+    *
+    * Matches Spark's `Dataset.except()`: returns distinct rows in left not present in right.
+    */
+  private def exceptDatasets[T](
+    left: MaterializedDataset[T],
+    right: MaterializedDataset[T]
+  ): Either[ExecutionError, MaterializedDataset[T]] = {
+    val leftRows = left.toVectorUnsafe
+    val rightSet = right.toVectorUnsafe.toSet
+    val diff = leftRows.filterNot(rightSet.contains).distinct
+
+    MaterializedDataset.fromVector(diff)(using left.schema)
   }
 
   /** Zip with sequential indices. */

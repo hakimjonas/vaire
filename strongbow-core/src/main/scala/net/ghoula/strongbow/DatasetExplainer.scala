@@ -33,6 +33,12 @@ object DatasetExplainer {
       case Dataset.Union(left, right) =>
         s"Union\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
 
+      case Dataset.Intersect(left, right) =>
+        s"Intersect\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
+      case Dataset.Except(left, right) =>
+        s"Except\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
       case Dataset.InnerJoin(left, right, _) =>
         s"InnerJoin\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
 

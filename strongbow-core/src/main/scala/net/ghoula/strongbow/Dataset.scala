@@ -25,6 +25,8 @@ enum Dataset[+T] {
   case RightJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(Option[A], B)]
   case FullJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(Option[A], Option[B])]
   case LeftAntiJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[A]
+  case Intersect[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
+  case Except[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
   case Sort[T](parent: Dataset[T], ordering: Ordering[T]) extends Dataset[T]
   case SortBy[T, K](parent: Dataset[T], key: T => K, ordering: Ordering[K]) extends Dataset[T]
   case Sample[T](
@@ -93,6 +95,22 @@ object Dataset {
 
     inline def union(other: Dataset[T]): Dataset[T] = {
       Union(ds, other)
+    }
+
+    /** Set intersection - rows present in both datasets (deduplicated).
+      *
+      * Matches Spark's `Dataset.intersect()` semantics.
+      */
+    inline def intersect(other: Dataset[T]): Dataset[T] = {
+      Intersect(ds, other)
+    }
+
+    /** Set difference - rows in this dataset but not in other (deduplicated).
+      *
+      * Matches Spark's `Dataset.except()` semantics.
+      */
+    inline def except(other: Dataset[T]): Dataset[T] = {
+      Except(ds, other)
     }
 
     inline def sort(using ord: Ordering[T]): Dataset[T] = {

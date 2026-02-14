@@ -13,15 +13,27 @@ import net.ghoula.strongbow.errors.{NonEmptyList, SchemaError}
 enum Dataset[+T] {
   case Root[T](columns: Vector[Column], schema: Schema[T]) extends Dataset[T]
   case Filter[T](parent: Dataset[T], predicate: Expr[T, Boolean]) extends Dataset[T]
-  case Map[A, B](parent: Dataset[A], func: A => B) extends Dataset[B]
-  case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B]) extends Dataset[B]
-  case Select[T, U](parent: Dataset[T], projection: T => U) extends Dataset[U]
+  case Map[A, B](parent: Dataset[A], func: A => B, schema: Schema[B]) extends Dataset[B]
+  case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B], schema: Schema[B]) extends Dataset[B]
+  case Select[T, U](parent: Dataset[T], projection: T => U, schema: Schema[U]) extends Dataset[U]
   case SelectExprs[T](parent: Dataset[T], exprs: Vector[(String, Expr[T, Any], ColumnType)]) extends Dataset[T]
   case Distinct[T](parent: Dataset[T]) extends Dataset[T]
   case Limit[T](parent: Dataset[T], n: Int) extends Dataset[T]
   case Union[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
+  case InnerJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(A, B)]
+  case LeftJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(A, Option[B])]
+  case RightJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(Option[A], B)]
+  case FullJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(Option[A], Option[B])]
+  case LeftAntiJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[A]
   case Sort[T](parent: Dataset[T], ordering: Ordering[T]) extends Dataset[T]
   case SortBy[T, K](parent: Dataset[T], key: T => K, ordering: Ordering[K]) extends Dataset[T]
+  case Sample[T](
+    parent: Dataset[T],
+    fraction: Double,
+    seed: Long,
+    withReplacement: Boolean
+  ) extends Dataset[T]
+  case ZipWithIndex[T](parent: Dataset[T]) extends Dataset[(T, Long)]
   case GroupedToPairs[K, V](grouped: Grouped[K, V], schemaK: Schema[K], schemaV: Schema[V]) extends Dataset[(K, V)]
   case GroupedKeys[K, V](grouped: Grouped[K, V], schemaK: Schema[K]) extends Dataset[K]
   case GroupedValues[K, V](grouped: Grouped[K, V], schemaV: Schema[V]) extends Dataset[V]
@@ -63,12 +75,12 @@ object Dataset {
       Filter(ds, predicate)
     }
 
-    inline def map[U](f: T => U): Dataset[U] = {
-      Map(ds, f)
+    inline def map[U](f: T => U)(using schema: Schema[U]): Dataset[U] = {
+      Map(ds, f, schema)
     }
 
-    inline def flatMap[U](f: T => Iterable[U]): Dataset[U] = {
-      FlatMap(ds, f)
+    inline def flatMap[U](f: T => Iterable[U])(using schema: Schema[U]): Dataset[U] = {
+      FlatMap(ds, f, schema)
     }
 
     inline def distinct: Dataset[T] = {
@@ -104,15 +116,82 @@ object Dataset {
       SelectExprs(ds, exprs.toVector)
     }
 
-    /** Join with another dataset on a condition.
+    /** Sample fraction of rows.
       *
-      * TODO: Implement join logic. For now throws to indicate unimplemented feature.
+      * @param fraction Sampling fraction 0.0 to 1.0
+      * @param seed Random seed for reproducibility
+      * @param withReplacement Allow duplicate samples
       */
-    inline def join[U](
-      other: Dataset[U],
-      condition: (Dataset[T], Dataset[U]) => Expr[(T, U), Boolean]
-    ): Dataset[(T, U)] = {
-      throw new UnsupportedOperationException("Dataset joins not yet implemented") // scalafix:ok DisableSyntax.throw
+    inline def sample(
+      fraction: Double,
+      seed: Long = scala.util.Random.nextLong(),
+      withReplacement: Boolean = false
+    ): Dataset[T] = {
+      require(fraction >= 0.0 && fraction <= 1.0, "fraction must be between 0 and 1")
+      Sample(ds, fraction, seed, withReplacement)
+    }
+
+    /** Zip dataset with sequential indices.
+      *
+      * For deterministic results, sort before zipping.
+      */
+    inline def zipWithIndex: Dataset[(T, Long)] = {
+      ZipWithIndex(ds)
+    }
+
+    /** Alias for union. */
+    inline def ++(other: Dataset[T]): Dataset[T] = {
+      union(other)
+    }
+
+    /** Inner join with another dataset on a condition.
+      *
+      * @param other The right dataset to join with
+      * @param condition Join predicate evaluated on pairs of rows
+      * @return Dataset of tuples (T, U) for matching rows
+      */
+    inline def join[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(T, U)] = {
+      InnerJoin(ds, other, condition)
+    }
+
+    /** Left outer join with another dataset.
+      *
+      * @param other The right dataset to join with
+      * @param condition Join predicate evaluated on pairs of rows
+      * @return Dataset of tuples (T, Option[U]) where U is None for unmatched left rows
+      */
+    inline def leftJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(T, Option[U])] = {
+      LeftJoin(ds, other, condition)
+    }
+
+    /** Right outer join with another dataset.
+      *
+      * @param other The right dataset to join with
+      * @param condition Join predicate evaluated on pairs of rows
+      * @return Dataset of tuples (Option[T], U) where T is None for unmatched right rows
+      */
+    inline def rightJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(Option[T], U)] = {
+      RightJoin(ds, other, condition)
+    }
+
+    /** Full outer join with another dataset.
+      *
+      * @param other The right dataset to join with
+      * @param condition Join predicate evaluated on pairs of rows
+      * @return Dataset of tuples (Option[T], Option[U]) where either side may be None for unmatched rows
+      */
+    inline def fullJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(Option[T], Option[U])] = {
+      FullJoin(ds, other, condition)
+    }
+
+    /** Left anti join - returns rows from left with no match in right.
+      *
+      * @param other The right dataset to join with
+      * @param condition Join predicate evaluated on pairs of rows
+      * @return Dataset of T rows from left that have no matching right rows
+      */
+    inline def antiJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[T] = {
+      LeftAntiJoin(ds, other, condition)
     }
   }
 

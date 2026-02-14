@@ -189,7 +189,9 @@ object ExprInterpreter {
         }
 
       // Aggregations - not supported at row level
-      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] =>
+      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] |
+          _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
+          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
     }
   }
@@ -240,6 +242,14 @@ object ExprInterpreter {
           Right(None)
         case _: Expr.Min[Row, ?] =>
           Right(None)
+        case _: Expr.CountDistinct[Row, ?] =>
+          Right(0L)
+        case _: Expr.CountIf[Row] =>
+          Right(0L)
+        case _: Expr.StdDev[Row] =>
+          Right(0.0)
+        case _: Expr.StdDevPop[Row] =>
+          Right(0.0)
       }
     } else {
       (expr: @unchecked) match {
@@ -287,6 +297,46 @@ object ExprInterpreter {
                 }
               }
             }
+          }
+
+        case countDist: Expr.CountDistinct[Row, _] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(countDist.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          Right(values.distinct.size.toLong.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case countIf: Expr.CountIf[Row] =>
+          val rowCount = columns.head.length
+          val count = (0 until rowCount).count { rowIdx =>
+            eval(countIf.predicate, columns, RowIndex(rowIdx)) == Right(true)
+          }
+          Right(count.toLong.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case stddev: Expr.StdDev[Row] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(stddev.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          if (values.isEmpty || values.length == 1) {
+            Right(0.0.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          } else {
+            val mean = values.sum / values.length
+            val variance = values.map(v => math.pow(v - mean, 2)).sum / (values.length - 1)
+            Right(math.sqrt(variance).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          }
+
+        case stddevPop: Expr.StdDevPop[Row] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(stddevPop.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          if (values.isEmpty) {
+            Right(0.0.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          } else {
+            val mean = values.sum / values.length
+            val variance = values.map(v => math.pow(v - mean, 2)).sum / values.length
+            Right(math.sqrt(variance).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
           }
       }
     }

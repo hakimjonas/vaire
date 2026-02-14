@@ -21,6 +21,29 @@ enum Grouped[K, +V] {
   case RightJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, (Option[V], U)]
   case FullJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, (Option[V], Option[U])]
   case ReduceByKey[K, V](parent: Grouped[K, V], reduce: (V, V) => V) extends Grouped[K, V]
+  case LeftAntiJoin[K, V, U](left: Grouped[K, V], right: Grouped[K, U]) extends Grouped[K, V]
+  case SortByKey[K, V](parent: Grouped[K, V], ordering: Ordering[K]) extends Grouped[K, V]
+  case UnionGrouped[K, V](left: Grouped[K, V], right: Grouped[K, V]) extends Grouped[K, V]
+  case AggregateByKey2[K, V, A, B](
+    parent: Grouped[K, V],
+    agg1: V => A, agg2: V => B,
+    reduce1: (A, A) => A, reduce2: (B, B) => B
+  ) extends Grouped[K, (A, B)]
+  case AggregateByKey3[K, V, A, B, C](
+    parent: Grouped[K, V],
+    agg1: V => A, agg2: V => B, agg3: V => C,
+    reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C
+  ) extends Grouped[K, (A, B, C)]
+  case AggregateByKey4[K, V, A, B, C, D](
+    parent: Grouped[K, V],
+    agg1: V => A, agg2: V => B, agg3: V => C, agg4: V => D,
+    reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C, reduce4: (D, D) => D
+  ) extends Grouped[K, (A, B, C, D)]
+  case AggregateByKey5[K, V, A, B, C, D, E](
+    parent: Grouped[K, V],
+    agg1: V => A, agg2: V => B, agg3: V => C, agg4: V => D, agg5: V => E,
+    reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C, reduce4: (D, D) => D, reduce5: (E, E) => E
+  ) extends Grouped[K, (A, B, C, D, E)]
 }
 
 object Grouped {
@@ -82,6 +105,67 @@ object Grouped {
     /** Reduce values for each key using binary function. */
     inline def reduceByKey(f: (V, V) => V): Grouped[K, V] = {
       ReduceByKey(grouped, f)
+    }
+
+    /** Left anti join: keep rows from left where key not in right.
+      *
+      * Opposite of inner join - filters out matching keys.
+      */
+    inline def leftAntiJoin[U](other: Grouped[K, U]): Grouped[K, V] = {
+      LeftAntiJoin(grouped, other)
+    }
+
+    /** Sort grouped dataset by key.
+      *
+      * Preserves grouping while ordering keys.
+      */
+    inline def sortByKey(using ord: Ordering[K]): Grouped[K, V] = {
+      SortByKey(grouped, ord)
+    }
+
+    /** Union this grouped dataset with another.
+      *
+      * Combines all (key, value) pairs from both.
+      */
+    inline def union(other: Grouped[K, V]): Grouped[K, V] = {
+      UnionGrouped(grouped, other)
+    }
+
+    /** Alias for union. */
+    inline def ++(other: Grouped[K, V]): Grouped[K, V] = {
+      union(other)
+    }
+
+    /** Aggregate by key with 2 aggregation functions. */
+    inline def aggregateByKey[A, B](
+      agg1: V => A, agg2: V => B,
+      reduce1: (A, A) => A, reduce2: (B, B) => B
+    ): Grouped[K, (A, B)] = {
+      AggregateByKey2(grouped, agg1, agg2, reduce1, reduce2)
+    }
+
+    /** Aggregate by key with 3 aggregation functions. */
+    inline def aggregateByKey[A, B, C](
+      agg1: V => A, agg2: V => B, agg3: V => C,
+      reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C
+    ): Grouped[K, (A, B, C)] = {
+      AggregateByKey3(grouped, agg1, agg2, agg3, reduce1, reduce2, reduce3)
+    }
+
+    /** Aggregate by key with 4 aggregation functions. */
+    inline def aggregateByKey[A, B, C, D](
+      agg1: V => A, agg2: V => B, agg3: V => C, agg4: V => D,
+      reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C, reduce4: (D, D) => D
+    ): Grouped[K, (A, B, C, D)] = {
+      AggregateByKey4(grouped, agg1, agg2, agg3, agg4, reduce1, reduce2, reduce3, reduce4)
+    }
+
+    /** Aggregate by key with 5 aggregation functions. */
+    inline def aggregateByKey[A, B, C, D, E](
+      agg1: V => A, agg2: V => B, agg3: V => C, agg4: V => D, agg5: V => E,
+      reduce1: (A, A) => A, reduce2: (B, B) => B, reduce3: (C, C) => C, reduce4: (D, D) => D, reduce5: (E, E) => E
+    ): Grouped[K, (A, B, C, D, E)] = {
+      AggregateByKey5(grouped, agg1, agg2, agg3, agg4, agg5, reduce1, reduce2, reduce3, reduce4, reduce5)
     }
   }
 

@@ -54,6 +54,10 @@ enum Expr[Row, +A] {
   case Max[Row, A](expr: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Option[A]]
   case Min[Row, A](expr: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Option[A]]
   case Avg[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case CountDistinct[Row, A](expr: Expr[Row, A]) extends Expr[Row, Long]
+  case CountIf[Row](predicate: Expr[Row, Boolean]) extends Expr[Row, Long]
+  case StdDev[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case StdDevPop[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
 }
 
 object Expr {
@@ -78,6 +82,26 @@ object Expr {
     elseExpr: Expr[Row, A]
   ): Expr[Row, A] = {
     When(condition, thenExpr, elseExpr)
+  }
+
+  /** Count distinct values. */
+  def countDistinct[Row, A](expr: Expr[Row, A]): Expr[Row, Long] = {
+    CountDistinct(expr)
+  }
+
+  /** Count rows where predicate is true. */
+  def countIf[Row](predicate: Expr[Row, Boolean]): Expr[Row, Long] = {
+    CountIf(predicate)
+  }
+
+  /** Sample standard deviation. */
+  def stddev[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
+    StdDev(expr)
+  }
+
+  /** Population standard deviation. */
+  def stddevPop[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
+    StdDevPop(expr)
   }
 
   // Extension methods for fluent syntax

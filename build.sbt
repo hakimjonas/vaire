@@ -110,8 +110,10 @@ lazy val bench = project
     scalacOptions ++= testScalacOptions,
     publish / skip := true,
     fork := true,
-    javaOptions ++= Seq("-Xms8G", "-Xmx128G", "-Xss4M", "-XX:+UseZGC")
+    javaOptions ++= Seq("-Xms8G", "-Xmx48G", "-Xss4M", "-XX:+UseZGC"),
+    // Benchmarks excluded from scalafix - performance code may use vars/unsafe patterns
+    scalafixOnCompile := false
   )
 
 // Command aliases
-addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; scalafixAll; Test/compile")
+addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; columnar/scalafixAll; Test/compile")

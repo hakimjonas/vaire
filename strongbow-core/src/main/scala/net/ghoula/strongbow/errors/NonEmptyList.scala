@@ -19,11 +19,22 @@ final case class NonEmptyList[+A](head: A, tail: List[A]) {
 object NonEmptyList {
   def one[A](a: A): NonEmptyList[A] = NonEmptyList(a, Nil)
 
+  /** Create NonEmptyList from List, throwing if empty.
+    *
+    * This is the unsafe version. Prefer `fromList` which returns Option.
+    */
   def fromListUnsafe[A](list: List[A]): NonEmptyList[A] = list match {
     case h :: t => NonEmptyList(h, t)
-    case Nil => throw new IllegalArgumentException("Cannot create NonEmptyList from empty list")
+    case Nil =>
+      throw new IllegalArgumentException(
+        "Cannot create NonEmptyList from empty list"
+      ) // scalafix:ok DisableSyntax.throw
   }
 
+  /** Create NonEmptyList from List, returning None if empty.
+    *
+    * This is the safe version.
+    */
   def fromList[A](list: List[A]): Option[NonEmptyList[A]] = list match {
     case h :: t => Some(NonEmptyList(h, t))
     case Nil => None

@@ -10,23 +10,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
 
   // Test data: users with (id, name, age)
   case class User(id: Int, name: String, age: Int)
-
-  given Schema[User] with {
-    def columnCount: Int = 3
-    def columnNames: Vector[String] = Vector("id", "name", "age")
-    def columnTypes: Vector[ColumnType] = Vector(ColumnType.IntType, ColumnType.StringType, ColumnType.IntType)
-    def encode(user: User): Vector[Any] = Vector(user.id, user.name, user.age)
-    def decode(values: Vector[Any]): Either[DecodeError, User] = {
-      if (values.length != 3) {
-        Left(DecodeError.WrongArity(3, values.length))
-      } else {
-        (values(0), values(1), values(2)) match {
-          case (id: Int, name: String, age: Int) => Right(User(id, name, age))
-          case _ => Left(DecodeError.TypeMismatch("User", "unexpected types"))
-        }
-      }
-    }
-  }
+  given Schema[User] = Schema.derived
 
   given Schema[Int] = Schema.intSchema
   given Schema[String] = Schema.stringSchema
@@ -201,6 +185,47 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     }
 
     result.toVectorUnsafe should contain theSameElementsAs Vector(false, true, false, true)
+  }
+
+  "leftAntiJoin" should "exclude matching keys" in {
+    val users = createDataset(Vector(
+      User(1, "Alice", 25),
+      User(2, "Bob", 30),
+      User(3, "Charlie", 35)
+    ))
+
+    val toExclude = createDataset(Vector(
+      User(2, "Bob", 30)
+    ))
+
+    val usersGrouped = users.groupBy(_.id)
+    val excludeGrouped = toExclude.groupBy(_.id)
+
+    val result = usersGrouped.leftAntiJoin(excludeGrouped)
+      .toPairs
+      .collect
+      .toOption
+      .get
+
+    result.map(_._2.name) should contain theSameElementsAs Vector("Alice", "Charlie")
+  }
+
+  "sortByKey" should "order by key" in {
+    val dataset = createIntDataset(Vector(3, 1, 4, 1, 5))
+    val grouped = dataset.groupBy(identity)
+
+    val sorted = grouped.sortByKey.keys.collect.toOption.get
+
+    sorted shouldBe Vector(1, 1, 3, 4, 5)
+  }
+
+  "union on Grouped" should "combine key-value pairs" in {
+    val g1 = createIntDataset(Vector(1, 2)).groupBy(identity)
+    val g2 = createIntDataset(Vector(3, 4)).groupBy(identity)
+
+    val unioned = (g1 ++ g2).keys.collect.toOption.get
+
+    unioned should contain theSameElementsAs Vector(1, 2, 3, 4)
   }
 
   // Helper methods

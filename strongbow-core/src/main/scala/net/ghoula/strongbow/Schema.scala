@@ -1,5 +1,8 @@
 package net.ghoula.strongbow
 
+import scala.deriving.Mirror
+import scala.quoted.{Expr, Quotes, Type}
+
 import net.ghoula.strongbow.errors.DecodeError
 
 /** Type-level schema representation.
@@ -135,5 +138,243 @@ object Schema {
     }
   }
 
-  // TODO: Add derivation for case classes using Scala 3 Mirror
+  /** Generic tuple schema for tuples of arity 3+.
+    *
+    * Uses Schema.derived macro to auto-generate schema for any Tuple type.
+    * Scala 3 tuples are product types with Mirror.ProductOf, so the derivation
+    * macro handles field access via _1, _2, etc. automatically.
+    *
+    * tuple2Schema takes priority for Tuple2 (more specific match).
+    * This covers Tuple3 through Tuple22.
+    */
+  inline given derivedTupleSchema[T <: Tuple](using mirror: Mirror.ProductOf[T]): Schema[T] = Schema.derived
+
+  /** Schema for Option[A] - nullable columns with presence bit */
+  given optionSchema[A](using inner: Schema[A]): Schema[Option[A]] with {
+    def columnCount: Int = inner.columnCount + 1 // Extra column for presence bit
+
+    def columnNames: Vector[String] =
+      Vector("_isDefined") ++ inner.columnNames.map("_value_" + _)
+
+    def columnTypes: Vector[ColumnType] =
+      Vector(ColumnType.BooleanType) ++ inner.columnTypes
+
+    def encode(value: Option[A]): Vector[Any] = value match {
+      case Some(a) => Vector(true) ++ inner.encode(a)
+      case None => Vector(false) ++ Vector.fill(inner.columnCount)(null) // scalafix:ok DisableSyntax.null
+    }
+
+    def decode(values: Vector[Any]): Either[DecodeError, Option[A]] = {
+      val expectedCount = columnCount
+      if (values.length != expectedCount) {
+        Left(DecodeError.WrongArity(expectedCount, values.length))
+      } else {
+        val isDefined = values.head.asInstanceOf[Boolean] // scalafix:ok DisableSyntax.asInstanceOf
+        if (isDefined) {
+          val innerValues = values.tail
+          inner.decode(innerValues).map(Some(_))
+        } else {
+          Right(None)
+        }
+      }
+    }
+  }
+
+  /** Automatic schema derivation for case classes using Scala 3 Mirror.
+    *
+    * Usage:
+    * {{{
+    * case class User(id: Int, name: String, age: Int)
+    * given Schema[User] = Schema.derived
+    * }}}
+    */
+  inline def derived[T](using mirror: Mirror.ProductOf[T]): Schema[T] = ${
+    deriveSchemaImpl[T, mirror.MirroredElemTypes, mirror.MirroredElemLabels]('mirror)
+  }
+
+  /** Extract field labels from Mirror.MirroredElemLabels tuple type. */
+  private def getLabels[Labels <: Tuple: Type](using q: Quotes): List[String] = {
+    import q.reflect.*
+
+    def extract[L <: Tuple: Type]: List[String] = Type.of[L] match {
+      case '[EmptyTuple] => Nil
+      case '[label *: rest] =>
+        Type.of[label] match {
+          case '[l] =>
+            TypeRepr.of[l] match {
+              case ConstantType(StringConstant(s)) => s :: extract[rest]
+              case other =>
+                report.errorAndAbort(
+                  s"Invalid field label type: expected string literal, found ${other.show}",
+                  Position.ofMacroExpansion
+                )
+            }
+        }
+    }
+
+    extract[Labels]
+  }
+
+  /** Generate type-safe field access expression. */
+  private def fieldAccess[T: Type, H: Type](
+    aExpr: Expr[T],
+    label: String,
+    index: Int
+  )(using q: Quotes): Expr[H] = {
+    import q.reflect.*
+
+    val isRegularTuple = TypeRepr.of[T] <:< TypeRepr.of[Tuple]
+
+    if (isRegularTuple) {
+      // Regular tuple: use _1, _2, etc. - typed accessors, zero cast
+      Select.unique(aExpr.asTerm, s"_${index + 1}").asExprOf[H]
+    } else {
+      val typeSymbol = TypeRepr.of[T].typeSymbol
+      val fieldMember = typeSymbol.fieldMember(label)
+      val hasFieldMember = !fieldMember.isNoSymbol
+
+      if (hasFieldMember) {
+        // Case class: direct field access - zero cast
+        Select.unique(aExpr.asTerm, label).asExprOf[H]
+      } else {
+        // Named tuple: use productElement (matches Scala 3.7.4 stdlib pattern)
+        val indexExpr = Expr(index)
+        '{ $aExpr.asInstanceOf[Product].productElement($indexExpr).asInstanceOf[H] } // scalafix:ok DisableSyntax.asInstanceOf
+      }
+    }
+  }
+
+  /** Check if all fields have available Schema instances at compile time. */
+  private def findMissingSchemas[Elems <: Tuple: Type](
+    labels: List[String]
+  )(using q: Quotes): List[(String, String)] = {
+
+    def collect[E <: Tuple: Type](
+      remainingLabels: List[String],
+      acc: List[(String, String)]
+    ): List[(String, String)] =
+      Type.of[E] match {
+        case '[EmptyTuple] => acc.reverse
+        case '[h *: t] =>
+          val label = remainingLabels.head
+          val fieldTypeStr = Type.show[h]
+          val hasSchema = Expr.summon[Schema[h]].isDefined
+          val newAcc = if (hasSchema) acc else (label, fieldTypeStr) :: acc
+          collect[t](remainingLabels.tail, newAcc)
+      }
+
+    collect[Elems](labels, Nil)
+  }
+
+  /** Derive Schema[T] implementation using compile-time reflection. */
+  private def deriveSchemaImpl[T: Type, Elems <: Tuple: Type, Labels <: Tuple: Type](
+    m: Expr[Mirror.ProductOf[T]]
+  )(using q: Quotes): Expr[Schema[T]] = {
+    import q.reflect.*
+
+    val fieldLabels = getLabels[Labels]
+
+    // Validate all fields have schemas before generating code
+    val missing = findMissingSchemas[Elems](fieldLabels)
+    if (missing.nonEmpty) {
+      val header =
+        s"Cannot derive Schema for ${Type.show[T]}: missing schemas for ${missing.length} field(s).\n"
+      val details = missing.zipWithIndex.map { case ((name, tpe), i) =>
+        s"  ${i + 1}. Field '$name' of type $tpe\n" +
+          s"     Add: given Schema[$tpe] = ..."
+      }.mkString("\n\n")
+
+      report.errorAndAbort(header + "\n" + details, Position.ofMacroExpansion)
+    }
+
+    // Summon all schemas (safe because we validated above)
+    // We need to keep the schemas untyped to work with them generically
+    def summonSchemas[E <: Tuple: Type]: List[Expr[Schema[?]]] =
+      Type.of[E] match {
+        case '[EmptyTuple] => Nil
+        case '[h *: t] =>
+          val schema = Expr.summon[Schema[h]].get
+          schema :: summonSchemas[t]
+      }
+
+    val schemas = summonSchemas[Elems]
+
+    // Generate column count
+    val columnCountExpr = schemas.foldLeft[Expr[Int]]('{0}) { (acc, schema) =>
+      '{ $acc + $schema.columnCount }
+    }
+
+    // Generate column names with prefixes
+    val columnNamesExpr = {
+      val nameExprs = fieldLabels.zip(schemas).map { case (label, schema) =>
+        val labelExpr = Expr(label)
+        '{ $schema.columnNames.map(name => ${labelExpr} + "_" + name) }
+      }
+      nameExprs.foldLeft[Expr[Vector[String]]]('{Vector.empty}) { (acc, names) =>
+        '{ $acc ++ $names }
+      }
+    }
+
+    // Generate column types
+    val columnTypesExpr = schemas.foldLeft[Expr[Vector[ColumnType]]]('{Vector.empty}) { (acc, schema) =>
+      '{ $acc ++ $schema.columnTypes }
+    }
+
+    // Generate encode method
+    def generateEncode[E <: Tuple: Type](
+      valueExpr: Expr[T],
+      index: Int,
+      labels: List[String],
+      schemas: List[Expr[Schema[?]]]
+    ): Expr[Vector[Any]] =
+      Type.of[E] match {
+        case '[EmptyTuple] => '{Vector.empty}
+        case '[h *: t] =>
+          val label = labels.head
+          val schema = schemas.head.asExprOf[Schema[h]]
+          val fieldExpr = fieldAccess[T, h](valueExpr, label, index)
+          val restExpr = generateEncode[t](valueExpr, index + 1, labels.tail, schemas.tail)
+          '{ $schema.encode($fieldExpr) ++ $restExpr }
+      }
+
+    // Generate decode method
+    def generateDecode[E <: Tuple: Type](
+      valuesExpr: Expr[Vector[Any]],
+      schemas: List[Expr[Schema[?]]]
+    ): Expr[Either[DecodeError, List[Any]]] =
+      Type.of[E] match {
+        case '[EmptyTuple] => '{Right(Nil)}
+        case '[h *: t] =>
+          val schema = schemas.head.asExprOf[Schema[h]]
+          '{
+            val (headValues, tailValues) = $valuesExpr.splitAt($schema.columnCount)
+            for {
+              head <- $schema.decode(headValues)
+              tail <- ${generateDecode[t]('tailValues, schemas.tail)}
+            } yield head :: tail
+          }
+      }
+
+    '{
+      new Schema[T] {
+        def columnCount: Int = $columnCountExpr
+        def columnNames: Vector[String] = $columnNamesExpr
+        def columnTypes: Vector[ColumnType] = $columnTypesExpr
+
+        def encode(value: T): Vector[Any] = ${
+          generateEncode[Elems]('value, 0, fieldLabels, schemas)
+        }
+
+        def decode(values: Vector[Any]): Either[DecodeError, T] = {
+          if (values.length != columnCount) {
+            Left(DecodeError.WrongArity(columnCount, values.length))
+          } else {
+            ${generateDecode[Elems]('values, schemas)}.map { decodedFields =>
+              $m.fromProduct(Tuple.fromArray(decodedFields.toArray))
+            }
+          }
+        }
+      }
+    }
+  }
 }

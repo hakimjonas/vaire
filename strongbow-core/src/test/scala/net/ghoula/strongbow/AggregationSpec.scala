@@ -140,4 +140,64 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     sumResult shouldBe Right(60)
     maxResult shouldBe Right(Some(30))
   }
+
+  "countDistinct" should "count unique values" in {
+    val intColumn = Column.IntColumn(Array(1, 2, 2, 3, 3, 3), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+
+    val expr = Expr.countDistinct(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
+
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+
+    result shouldBe Right(3L) // 1, 2, 3 distinct values
+  }
+
+  "countIf" should "count matching rows" in {
+    val intColumn = Column.IntColumn(Array(1, 5, 10, 15, 20), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+
+    val expr = Expr.countIf(
+      Expr.Cell[Int, Int]("value", ColumnIndex(0)) > Expr.Const(10)
+    )
+
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+
+    result shouldBe Right(2L) // 15, 20 are > 10
+  }
+
+  "stddev" should "compute sample standard deviation" in {
+    val doubleColumn = Column.DoubleColumn(
+      Array(2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val columns = Vector(doubleColumn)
+
+    val expr = Expr.stddev(Expr.Cell[Double, Double]("value", ColumnIndex(0)))
+
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+
+    // stddev should be approximately 2.0
+    result match {
+      case Right(value) => math.abs(value - 2.0) should be < 0.2
+      case Left(err) => fail(s"Stddev failed: $err")
+    }
+  }
+
+  "stddevPop" should "compute population standard deviation" in {
+    val doubleColumn = Column.DoubleColumn(
+      Array(2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val columns = Vector(doubleColumn)
+
+    val expr = Expr.stddevPop(Expr.Cell[Double, Double]("value", ColumnIndex(0)))
+
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+
+    // stddevPop should be approximately 1.87
+    result match {
+      case Right(value) => math.abs(value - 1.87) should be < 0.2
+      case Left(err) => fail(s"StddevPop failed: $err")
+    }
+  }
 }

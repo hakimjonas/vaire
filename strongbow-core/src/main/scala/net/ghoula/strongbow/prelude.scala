@@ -41,4 +41,10 @@ object prelude {
 
   // Error types
   export net.ghoula.strongbow.errors.{SchemaError, DecodeError, ExecutionError, NonEmptyList}
+
+  // Action methods
+  export net.ghoula.strongbow.DatasetActions.*
+
+  // Debug/explain utilities
+  export net.ghoula.strongbow.DatasetExplainer
 }

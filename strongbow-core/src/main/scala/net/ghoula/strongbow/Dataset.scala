@@ -33,29 +33,44 @@ enum Dataset[+T] {
   case LeftAntiJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[A]
   // Expression-based joins — enable hash join in-memory and native equi-join in Spark
   case InnerJoinOn[A, B, K](
-    left: Dataset[A], right: Dataset[B],
-    leftKey: Expr[A, K], rightKey: Expr[B, K],
-    leftKeyType: ColumnType, rightKeyType: ColumnType
+    left: Dataset[A],
+    right: Dataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
   ) extends Dataset[(A, B)]
   case LeftJoinOn[A, B, K](
-    left: Dataset[A], right: Dataset[B],
-    leftKey: Expr[A, K], rightKey: Expr[B, K],
-    leftKeyType: ColumnType, rightKeyType: ColumnType
+    left: Dataset[A],
+    right: Dataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
   ) extends Dataset[(A, Option[B])]
   case RightJoinOn[A, B, K](
-    left: Dataset[A], right: Dataset[B],
-    leftKey: Expr[A, K], rightKey: Expr[B, K],
-    leftKeyType: ColumnType, rightKeyType: ColumnType
+    left: Dataset[A],
+    right: Dataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
   ) extends Dataset[(Option[A], B)]
   case FullJoinOn[A, B, K](
-    left: Dataset[A], right: Dataset[B],
-    leftKey: Expr[A, K], rightKey: Expr[B, K],
-    leftKeyType: ColumnType, rightKeyType: ColumnType
+    left: Dataset[A],
+    right: Dataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
   ) extends Dataset[(Option[A], Option[B])]
   case LeftAntiJoinOn[A, B, K](
-    left: Dataset[A], right: Dataset[B],
-    leftKey: Expr[A, K], rightKey: Expr[B, K],
-    leftKeyType: ColumnType, rightKeyType: ColumnType
+    left: Dataset[A],
+    right: Dataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
   ) extends Dataset[A]
   case Intersect[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
   case Except[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
@@ -280,27 +295,57 @@ object Dataset {
     }
 
     /** Expression-based inner join — enables hash join in-memory and native equi-join in Spark. */
-    inline def joinOn[U, K](other: Dataset[U], leftKey: Expr[T, K], rightKey: Expr[U, K], leftKeyType: ColumnType, rightKeyType: ColumnType): Dataset[(T, U)] = {
+    inline def joinOn[U, K](
+      other: Dataset[U],
+      leftKey: Expr[T, K],
+      rightKey: Expr[U, K],
+      leftKeyType: ColumnType,
+      rightKeyType: ColumnType
+    ): Dataset[(T, U)] = {
       InnerJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
     }
 
     /** Expression-based left join. */
-    inline def leftJoinOn[U, K](other: Dataset[U], leftKey: Expr[T, K], rightKey: Expr[U, K], leftKeyType: ColumnType, rightKeyType: ColumnType): Dataset[(T, Option[U])] = {
+    inline def leftJoinOn[U, K](
+      other: Dataset[U],
+      leftKey: Expr[T, K],
+      rightKey: Expr[U, K],
+      leftKeyType: ColumnType,
+      rightKeyType: ColumnType
+    ): Dataset[(T, Option[U])] = {
       LeftJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
     }
 
     /** Expression-based right join. */
-    inline def rightJoinOn[U, K](other: Dataset[U], leftKey: Expr[T, K], rightKey: Expr[U, K], leftKeyType: ColumnType, rightKeyType: ColumnType): Dataset[(Option[T], U)] = {
+    inline def rightJoinOn[U, K](
+      other: Dataset[U],
+      leftKey: Expr[T, K],
+      rightKey: Expr[U, K],
+      leftKeyType: ColumnType,
+      rightKeyType: ColumnType
+    ): Dataset[(Option[T], U)] = {
       RightJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
     }
 
     /** Expression-based full join. */
-    inline def fullJoinOn[U, K](other: Dataset[U], leftKey: Expr[T, K], rightKey: Expr[U, K], leftKeyType: ColumnType, rightKeyType: ColumnType): Dataset[(Option[T], Option[U])] = {
+    inline def fullJoinOn[U, K](
+      other: Dataset[U],
+      leftKey: Expr[T, K],
+      rightKey: Expr[U, K],
+      leftKeyType: ColumnType,
+      rightKeyType: ColumnType
+    ): Dataset[(Option[T], Option[U])] = {
       FullJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
     }
 
     /** Expression-based anti join. */
-    inline def antiJoinOn[U, K](other: Dataset[U], leftKey: Expr[T, K], rightKey: Expr[U, K], leftKeyType: ColumnType, rightKeyType: ColumnType): Dataset[T] = {
+    inline def antiJoinOn[U, K](
+      other: Dataset[U],
+      leftKey: Expr[T, K],
+      rightKey: Expr[U, K],
+      leftKeyType: ColumnType,
+      rightKeyType: ColumnType
+    ): Dataset[T] = {
       LeftAntiJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
     }
   }

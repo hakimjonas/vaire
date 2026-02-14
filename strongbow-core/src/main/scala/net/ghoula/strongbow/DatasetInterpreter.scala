@@ -149,7 +149,9 @@ object DatasetInterpreter extends Interpreter {
         execute(srtBy.parent).flatMap(parent => sortBy(parent, srtBy.key, srtBy.ordering))
 
       case srtExpr: Dataset.SortByExpr[T, _] =>
-        execute(srtExpr.parent).flatMap(parent => sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType, srtExpr.ordering))
+        execute(srtExpr.parent).flatMap(parent =>
+          sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType, srtExpr.ordering)
+        )
 
       case samp: Dataset.Sample[T] =>
         execute(samp.parent).map { parent =>
@@ -336,7 +338,10 @@ object DatasetInterpreter extends Interpreter {
         case _ =>
           // Fallback: read via getValue
           (0 until rowCount).sortWith { (a, b) =>
-            ord.lt(keyCol.getValue(a).asInstanceOf[K], keyCol.getValue(b).asInstanceOf[K]) // scalafix:ok DisableSyntax.asInstanceOf
+            ord.lt(
+              keyCol.getValue(a).asInstanceOf[K],
+              keyCol.getValue(b).asInstanceOf[K]
+            ) // scalafix:ok DisableSyntax.asInstanceOf
           }.toArray
       }
       val newColumns = dataset.columns.map(_.slice(indices))
@@ -641,10 +646,13 @@ object DatasetInterpreter extends Interpreter {
       }
 
       given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
-      given resultSchema: Schema[(A, Option[B])] = Schema.tuple2Schema[A, Option[B]](using left.schema, rightOptionSchema)
-      MaterializedDataset.fromVector(resultRows).getOrElse(
-        throw new RuntimeException("leftJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
-      )
+      given resultSchema: Schema[(A, Option[B])] =
+        Schema.tuple2Schema[A, Option[B]](using left.schema, rightOptionSchema)
+      MaterializedDataset
+        .fromVector(resultRows)
+        .getOrElse(
+          throw new RuntimeException("leftJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
+        )
     }
   }
 
@@ -674,10 +682,13 @@ object DatasetInterpreter extends Interpreter {
       }
 
       given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
-      given resultSchema: Schema[(Option[A], B)] = Schema.tuple2Schema[Option[A], B](using leftOptionSchema, right.schema)
-      MaterializedDataset.fromVector(resultRows).getOrElse(
-        throw new RuntimeException("rightJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
-      )
+      given resultSchema: Schema[(Option[A], B)] =
+        Schema.tuple2Schema[Option[A], B](using leftOptionSchema, right.schema)
+      MaterializedDataset
+        .fromVector(resultRows)
+        .getOrElse(
+          throw new RuntimeException("rightJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
+        )
     }
   }
 
@@ -722,9 +733,11 @@ object DatasetInterpreter extends Interpreter {
       given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
       given resultSchema: Schema[(Option[A], Option[B])] =
         Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
-      MaterializedDataset.fromVector(resultRows).getOrElse(
-        throw new RuntimeException("fullJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
-      )
+      MaterializedDataset
+        .fromVector(resultRows)
+        .getOrElse(
+          throw new RuntimeException("fullJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
+        )
     }
   }
 

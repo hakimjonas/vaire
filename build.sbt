@@ -75,7 +75,10 @@ lazy val spark = project
     ),
     Test / fork := true,
     Test / javaOptions ++= Seq(
-      "-Xms8G", "-Xmx48G", "-Xss4M", "-XX:+UseZGC",
+      "-Xms8G",
+      "-Xmx48G",
+      "-Xss4M",
+      "-XX:+UseZGC",
       "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
       "--add-opens=java.base/java.lang=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",

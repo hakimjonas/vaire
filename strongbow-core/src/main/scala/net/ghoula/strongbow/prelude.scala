@@ -47,4 +47,7 @@ object prelude {
 
   // Debug/explain utilities
   export net.ghoula.strongbow.DatasetExplainer
+
+  // Compile-time expression macro
+  export net.ghoula.strongbow.ExprMacro
 }

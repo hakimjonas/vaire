@@ -34,7 +34,9 @@ object GroupByInterpreter {
             throw new RuntimeException(s"GroupByExpr key eval failed: $err") // scalafix:ok DisableSyntax.throw
         }
         val rows = parentResult.toVectorUnsafe
-        rows.indices.iterator.map(i => (keyCol.getValue(i).asInstanceOf[K], rows(i))).toVector // scalafix:ok DisableSyntax.asInstanceOf
+        rows.indices.iterator
+          .map(i => (keyCol.getValue(i).asInstanceOf[K], rows(i)))
+          .toVector // scalafix:ok DisableSyntax.asInstanceOf
 
       case Grouped.FromPairs(parent) =>
         val parentResult = DatasetInterpreter.execute(parent) match {

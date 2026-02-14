@@ -232,8 +232,8 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
 
   // --- Expression-based join tests ---
 
-  val empDeptIdExpr = Expr.Cell[Employee, Int]("deptId", types.ColumnIndex(2))
-  val deptIdExpr = Expr.Cell[Department, Int]("id", types.ColumnIndex(0))
+  val empDeptIdExpr: Expr[Employee, Int] = Expr.Cell[Employee, Int]("deptId", types.ColumnIndex(2))
+  val deptIdExpr: Expr[Department, Int] = Expr.Cell[Department, Int]("id", types.ColumnIndex(0))
 
   "expression-based inner join" should "produce same results as lambda-based" in {
     val employees = createDataset(

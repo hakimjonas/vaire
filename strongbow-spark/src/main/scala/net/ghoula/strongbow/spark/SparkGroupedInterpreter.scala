@@ -35,7 +35,9 @@ class SparkGroupedInterpreter(sparkInterpreter: SparkInterpreter) {
             throw new RuntimeException(s"GroupByExpr key eval failed: $err") // scalafix:ok DisableSyntax.throw
         }
         val rows = mat.toVectorUnsafe
-        rows.indices.iterator.map(i => (keyCol.getValue(i).asInstanceOf[K], rows(i))).toVector // scalafix:ok DisableSyntax.asInstanceOf
+        rows.indices.iterator
+          .map(i => (keyCol.getValue(i).asInstanceOf[K], rows(i)))
+          .toVector // scalafix:ok DisableSyntax.asInstanceOf
 
       case Grouped.FromPairs(parent) =>
         executeDataset(parent)

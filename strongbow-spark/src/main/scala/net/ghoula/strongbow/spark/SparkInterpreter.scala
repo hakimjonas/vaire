@@ -237,7 +237,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           case Right(keyCol) =>
             val rowCount = materialized.rowCount
             val decoded = materialized.toVectorUnsafe
-            val keys = (0 until rowCount).map(i => keyCol.getValue(i).asInstanceOf[K]) // scalafix:ok DisableSyntax.asInstanceOf
+            val keys =
+              (0 until rowCount).map(i => keyCol.getValue(i).asInstanceOf[K]) // scalafix:ok DisableSyntax.asInstanceOf
             val sorted = decoded.indices.sortWith((a, b) => ord.lt(keys(a), keys(b))).map(decoded)
             SparkPlan(createDataFrame(sorted.toVector, parent.schema), parent.schema)
           case Left(_) =>

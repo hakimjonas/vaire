@@ -90,12 +90,22 @@ class DualBackendBenchmark extends AnyFlatSpec with Matchers with SparkTestBase 
     }
   }
 
-  it should "compare Sort" in {
+  it should "compare Sort (lambda)" in {
     for (n <- scales) {
       println(s"\n  --- Scale: $n rows ---")
       val ds = generatePairDataset(n)
       val plan = ds.sortBy(_._2)(using Ordering[Int])
-      runComparison(s"Sort($n)", plan)
+      runComparison(s"SortLambda($n)", plan)
+    }
+  }
+
+  it should "compare Sort (expr-based, native Spark pushdown)" in {
+    for (n <- scales) {
+      println(s"\n  --- Scale: $n rows ---")
+      val ds = generatePairDataset(n)
+      val valCell = Expr.Cell[(String, Int), Int]("value", ColumnIndex(1))
+      val plan = ds.sortByExpr(valCell, ColumnType.IntType)(using Ordering[Int])
+      runComparison(s"SortExpr($n)", plan)
     }
   }
 

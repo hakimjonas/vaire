@@ -56,6 +56,56 @@ object ExprToColumn {
           (r, _) <- convert(d.right)
         } yield ((l / r).cast("int"), ColumnType.IntType)
 
+      // Long arithmetic
+      case add: Expr.AddLong[Row] =>
+        for {
+          (l, _) <- convert(add.left)
+          (r, _) <- convert(add.right)
+        } yield (l + r, ColumnType.LongType)
+
+      case sub: Expr.SubLong[Row] =>
+        for {
+          (l, _) <- convert(sub.left)
+          (r, _) <- convert(sub.right)
+        } yield (l - r, ColumnType.LongType)
+
+      case mul: Expr.MulLong[Row] =>
+        for {
+          (l, _) <- convert(mul.left)
+          (r, _) <- convert(mul.right)
+        } yield (l * r, ColumnType.LongType)
+
+      case d: Expr.DivLong[Row] =>
+        for {
+          (l, _) <- convert(d.left)
+          (r, _) <- convert(d.right)
+        } yield ((l / r).cast("long"), ColumnType.LongType)
+
+      // Double arithmetic
+      case add: Expr.AddDouble[Row] =>
+        for {
+          (l, _) <- convert(add.left)
+          (r, _) <- convert(add.right)
+        } yield (l + r, ColumnType.DoubleType)
+
+      case sub: Expr.SubDouble[Row] =>
+        for {
+          (l, _) <- convert(sub.left)
+          (r, _) <- convert(sub.right)
+        } yield (l - r, ColumnType.DoubleType)
+
+      case mul: Expr.MulDouble[Row] =>
+        for {
+          (l, _) <- convert(mul.left)
+          (r, _) <- convert(mul.right)
+        } yield (l * r, ColumnType.DoubleType)
+
+      case d: Expr.DivDouble[Row] =>
+        for {
+          (l, _) <- convert(d.left)
+          (r, _) <- convert(d.right)
+        } yield (l / r, ColumnType.DoubleType)
+
       // Comparisons
       case gt: Expr.Gt[Row, _] =>
         for {

@@ -1,5 +1,7 @@
 package net.ghoula.strongbow
 
+import scala.annotation.targetName
+
 import net.ghoula.strongbow.types.ColumnIndex
 
 /** Type-safe expression language for dataset operations.
@@ -18,11 +20,23 @@ enum Expr[Row, +A] {
   case Const[Row, A](value: A) extends Expr[Row, A]
   case Named[Row, A](expr: Expr[Row, A], name: String) extends Expr[Row, A]
 
-  // Numeric operations
+  // Numeric operations (Int)
   case Add[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Sub[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Mul[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Div[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
+
+  // Numeric operations (Long)
+  case AddLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case SubLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case MulLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case DivLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+
+  // Numeric operations (Double)
+  case AddDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case SubDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case MulDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case DivDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
 
   // Comparisons (GADT carries Ordering evidence as field)
   case Gt[Row, A](left: Expr[Row, A], right: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Boolean]
@@ -146,6 +160,28 @@ object Expr {
     inline def /(right: Expr[Row, Int]): Expr[Row, Int] = Div(left, right)
   }
 
+  extension [Row](left: Expr[Row, Long]) {
+    @targetName("addLong")
+    inline def +(right: Expr[Row, Long]): Expr[Row, Long] = AddLong(left, right)
+    @targetName("subLong")
+    inline def -(right: Expr[Row, Long]): Expr[Row, Long] = SubLong(left, right)
+    @targetName("mulLong")
+    inline def *(right: Expr[Row, Long]): Expr[Row, Long] = MulLong(left, right)
+    @targetName("divLong")
+    inline def /(right: Expr[Row, Long]): Expr[Row, Long] = DivLong(left, right)
+  }
+
+  extension [Row](left: Expr[Row, Double]) {
+    @targetName("addDouble")
+    inline def +(right: Expr[Row, Double]): Expr[Row, Double] = AddDouble(left, right)
+    @targetName("subDouble")
+    inline def -(right: Expr[Row, Double]): Expr[Row, Double] = SubDouble(left, right)
+    @targetName("mulDouble")
+    inline def *(right: Expr[Row, Double]): Expr[Row, Double] = MulDouble(left, right)
+    @targetName("divDouble")
+    inline def /(right: Expr[Row, Double]): Expr[Row, Double] = DivDouble(left, right)
+  }
+
   extension [Row](left: Expr[Row, Boolean]) {
     inline def &&(right: Expr[Row, Boolean]): Expr[Row, Boolean] = And(left, right)
     inline def ||(right: Expr[Row, Boolean]): Expr[Row, Boolean] = Or(left, right)
@@ -170,6 +206,10 @@ object Expr {
       case n: Expr.Named[_, _] => n.expr.outputType
       case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Sum[_] =>
         Some(ColumnType.IntType)
+      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] =>
+        Some(ColumnType.LongType)
+      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] =>
+        Some(ColumnType.DoubleType)
       case _: Expr.Gt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lt[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
           _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] =>
         Some(ColumnType.BooleanType)

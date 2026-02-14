@@ -16,6 +16,12 @@ object ExprMacro {
   inline def predicate[T](inline f: T => Boolean)(using m: Mirror.ProductOf[T]): SExpr[T, Boolean] =
     ${ predicateImpl[T, m.MirroredElemLabels, m.MirroredElemTypes]('f) }
 
+  /** Compile an arbitrary T => A expression, dispatching on the return type. */
+  inline def compileExpr[T, A](inline f: T => A)(using
+    m: Mirror.ProductOf[T]
+  ): (SExpr[T, A], ColumnType) =
+    ${ compileExprImpl[T, A, m.MirroredElemLabels, m.MirroredElemTypes]('f) }
+
   // ---------------------------------------------------------------------------
   // Label extraction (reuses Schema pattern)
   // ---------------------------------------------------------------------------
@@ -68,7 +74,7 @@ object ExprMacro {
     import q.reflect.*
 
     val labels = getLabels[Labels]
-    val (fieldName, fieldIndex) = extractFieldAccess(f.asTerm, labels)
+    val (fieldName, fieldIndex) = extractFieldAccess[T](f.asTerm, labels)
     val colType = inferColumnType[A]
     val nameExpr = QExpr(fieldName)
     val indexExpr = QExpr(fieldIndex)
@@ -94,10 +100,47 @@ object ExprMacro {
   }
 
   // ---------------------------------------------------------------------------
+  // compileExpr macro implementation
+  // ---------------------------------------------------------------------------
+
+  private def compileExprImpl[T: Type, A: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
+    f: QExpr[T => A]
+  )(using q: Quotes): QExpr[(SExpr[T, A], ColumnType)] = {
+    import q.reflect.*
+
+    val labels = getLabels[Labels]
+    val term = f.asTerm
+    val (paramName, body) = extractLambdaBody(term)
+    val bodyType = body.tpe.widen
+
+    if (bodyType =:= TypeRepr.of[Int]) {
+      val expr = compileIntExpr[T](body, paramName, labels)
+      // Safe cast: bodyType =:= Int proves A = Int
+      '{ ($expr.asInstanceOf[SExpr[T, A]], ColumnType.IntType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (bodyType =:= TypeRepr.of[Long]) {
+      val expr = compileLongExpr[T](body, paramName, labels)
+      '{ ($expr.asInstanceOf[SExpr[T, A]], ColumnType.LongType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (bodyType =:= TypeRepr.of[Double]) {
+      val expr = compileDoubleExpr[T](body, paramName, labels)
+      '{ ($expr.asInstanceOf[SExpr[T, A]], ColumnType.DoubleType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (bodyType =:= TypeRepr.of[String]) {
+      val expr = compileStringExpr[T](body, paramName, labels)
+      '{ ($expr.asInstanceOf[SExpr[T, A]], ColumnType.StringType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (bodyType =:= TypeRepr.of[Boolean]) {
+      val expr = compileBooleanExpr[T](body, paramName, labels)
+      '{ ($expr.asInstanceOf[SExpr[T, A]], ColumnType.BooleanType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else {
+      report.errorAndAbort(
+        s"Unsupported expression return type: ${bodyType.show}. Only Int, Long, Double, String, Boolean are supported."
+      )
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Lambda AST helpers
   // ---------------------------------------------------------------------------
 
-  private def extractFieldAccess(using
+  private def extractFieldAccess[T: Type](using
     q: Quotes
   )(
     term: q.reflect.Term,
@@ -109,20 +152,41 @@ object ExprMacro {
     val unwrapped = unwrapTerm(term)
 
     unwrapped match {
-      // Lambda(params, Select(Ident(paramName), fieldName))
       case Lambda(_, body) =>
         val innerBody = unwrapTerm(body)
         innerBody match {
+          // Nested: _.address.city
+          case Select(Select(Ident(_), outerField), innerField) =>
+            val outerIdx = labels.indexOf(outerField)
+            if (outerIdx < 0)
+              report.errorAndAbort(
+                s"Field '$outerField' not found. Available fields: ${labels.mkString(", ")}"
+              )
+            val outerFieldSym = TypeRepr.of[T].typeSymbol.caseFields(outerIdx)
+            val outerFieldType = TypeRepr.of[T].memberType(outerFieldSym)
+            val innerFields = outerFieldType.typeSymbol.caseFields
+            val innerIdx = innerFields.indexWhere(_.name == innerField)
+            if (innerIdx < 0)
+              report.errorAndAbort(
+                s"Field '$innerField' not found in ${outerFieldType.show}."
+              )
+            val outerOffset = flatColumnOffset[T](outerIdx)
+            val innerOffset =
+              innerFields.take(innerIdx).map(f => columnCountOfTypeRepr(outerFieldType.memberType(f))).sum
+            (s"$outerField.$innerField", outerOffset + innerOffset)
+
+          // Flat: _.age
           case Select(Ident(_), fieldName) =>
             val idx = labels.indexOf(fieldName)
             if (idx < 0)
               report.errorAndAbort(
                 s"Field '$fieldName' not found. Available fields: ${labels.mkString(", ")}"
               )
-            (fieldName, idx)
+            (fieldName, flatColumnOffset[T](idx))
+
           case other =>
             report.errorAndAbort(
-              s"Expected simple field access (e.g. _.age), got: ${other.show}"
+              s"Expected field access (e.g. _.age or _.address.city), got: ${other.show}"
             )
         }
       case other =>
@@ -155,6 +219,92 @@ object ExprMacro {
       case Inlined(_, _, inner) => unwrapTerm(inner)
       case Block(Nil, inner) => unwrapTerm(inner)
       case other => other
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Nested field access helpers
+  // ---------------------------------------------------------------------------
+
+  /** Count the number of flat columns a type occupies. Primitives = 1, case classes = recursive
+    * sum.
+    */
+  private def columnCountOfTypeRepr(using q: Quotes)(tpe: q.reflect.TypeRepr): Int = {
+    import q.reflect.*
+    val widened = tpe.widen
+    if (
+      widened =:= TypeRepr.of[Int] || widened =:= TypeRepr.of[Long] ||
+      widened =:= TypeRepr.of[Double] || widened =:= TypeRepr.of[String] ||
+      widened =:= TypeRepr.of[Boolean]
+    ) {
+      1
+    } else {
+      val sym = widened.typeSymbol
+      val fields = sym.caseFields
+      if (fields.isEmpty) {
+        report.errorAndAbort(s"Type ${widened.show} is not a supported primitive or case class")
+      }
+      fields.map(f => columnCountOfTypeRepr(widened.memberType(f))).sum
+    }
+  }
+
+  /** Compute the flat column offset for a field at the given index in type T. */
+  private def flatColumnOffset[T: Type](using q: Quotes)(fieldIdx: Int): Int = {
+    import q.reflect.*
+    val tRepr = TypeRepr.of[T]
+    val fields = tRepr.typeSymbol.caseFields
+    fields.take(fieldIdx).map(f => columnCountOfTypeRepr(tRepr.memberType(f))).sum
+  }
+
+  /** Try to compile a term as field access (flat or nested), returning Some(Cell) or None. */
+  private def compileFieldAccess[T: Type, A: Type](using
+    q: Quotes
+  )(
+    term: q.reflect.Term,
+    paramName: String,
+    labels: List[String]
+  ): Option[QExpr[SExpr[T, A]]] = {
+    import q.reflect.*
+
+    term match {
+      // Nested: _.address.city
+      case Select(Select(Ident(name), outerField), innerField) if name == paramName =>
+        val outerIdx = labels.indexOf(outerField)
+        if (outerIdx < 0) None
+        else {
+          val outerFieldSym = TypeRepr.of[T].typeSymbol.caseFields(outerIdx)
+          val outerFieldType = TypeRepr.of[T].memberType(outerFieldSym)
+          val innerFields = outerFieldType.typeSymbol.caseFields
+          val innerIdx = innerFields.indexWhere(_.name == innerField)
+          if (innerIdx < 0) None
+          else {
+            val innerFieldType = outerFieldType.memberType(innerFields(innerIdx))
+            if (!(innerFieldType.widen =:= TypeRepr.of[A])) None
+            else {
+              val outerOffset = flatColumnOffset[T](outerIdx)
+              val innerOffset =
+                innerFields.take(innerIdx).map(f => columnCountOfTypeRepr(outerFieldType.memberType(f))).sum
+              val totalIdx = outerOffset + innerOffset
+              val nameStr = s"$outerField.$innerField"
+              val nameExpr = QExpr(nameStr)
+              val indexExpr = QExpr(totalIdx)
+              Some('{ SExpr.Cell[T, A]($nameExpr, ColumnIndex($indexExpr)) })
+            }
+          }
+        }
+
+      // Flat: _.field
+      case Select(Ident(name), fieldName) if name == paramName =>
+        val fieldIdx = labels.indexOf(fieldName)
+        if (fieldIdx < 0) None
+        else {
+          val idx = flatColumnOffset[T](fieldIdx)
+          val nameExpr = QExpr(fieldName)
+          val indexExpr = QExpr(idx)
+          Some('{ SExpr.Cell[T, A]($nameExpr, ColumnIndex($indexExpr)) })
+        }
+
+      case _ => None
     }
   }
 
@@ -198,27 +348,13 @@ object ExprMacro {
       case Apply(Select(left, op), List(right)) if Set(">", ">=", "<", "<=", "==", "!=").contains(op) =>
         compileComparison[T](left, op, right, paramName, labels)
 
-      // Boolean field access: _.isActive
-      case sel @ Select(Ident(name), fieldName) if name == paramName =>
-        val idx = labels.indexOf(fieldName)
-        if (idx < 0)
-          report.errorAndAbort(
-            s"Field '$fieldName' not found. Available fields: ${labels.mkString(", ")}"
-          )
-        // Verify field type is Boolean using AST type info
-        val fieldType = sel.tpe.widen
-        if (!(fieldType =:= TypeRepr.of[Boolean]))
-          report.errorAndAbort(
-            s"Field '$fieldName' is ${fieldType.show}, not Boolean"
-          )
-        val nameExpr = QExpr(fieldName)
-        val indexExpr = QExpr(idx)
-        '{ SExpr.Cell[T, Boolean]($nameExpr, ColumnIndex($indexExpr)) }
-
+      // Boolean field access (flat or nested): _.isActive, _.address.isValid
       case other =>
-        report.errorAndAbort(
-          s"Unsupported boolean expression: ${other.show}"
-        )
+        compileFieldAccess[T, Boolean](other, paramName, labels).getOrElse {
+          report.errorAndAbort(
+            s"Unsupported boolean expression: ${other.show}"
+          )
+        }
     }
   }
 
@@ -324,43 +460,47 @@ object ExprMacro {
 
     val unwrapped = unwrapTerm(term)
 
-    unwrapped match {
-      // Field access: _.age
-      case Select(Ident(name), fieldName) if name == paramName =>
-        val idx = labels.indexOf(fieldName)
-        if (idx < 0) report.errorAndAbort(s"Field '$fieldName' not found.")
-        val nameExpr = QExpr(fieldName)
-        val indexExpr = QExpr(idx)
-        '{ SExpr.Cell[T, Int]($nameExpr, ColumnIndex($indexExpr)) }
+    compileFieldAccess[T, Int](unwrapped, paramName, labels).getOrElse {
+      unwrapped match {
+        // Int literal
+        case Literal(IntConstant(v)) =>
+          val vExpr = QExpr(v)
+          '{ SExpr.Const[T, Int]($vExpr) }
 
-      // Int literal
-      case Literal(IntConstant(v)) =>
-        val vExpr = QExpr(v)
-        '{ SExpr.Const[T, Int]($vExpr) }
+        // String length: _.name.length (Apply form)
+        case Apply(Select(inner, "length"), Nil) if inner.tpe.widen =:= TypeRepr.of[String] =>
+          val s = compileStringExpr[T](inner, paramName, labels)
+          '{ SExpr.Length($s) }
 
-      // Arithmetic: +, -, *, /
-      case Apply(Select(left, "+"), List(right)) =>
-        val l = compileIntExpr[T](left, paramName, labels)
-        val r = compileIntExpr[T](right, paramName, labels)
-        '{ SExpr.Add($l, $r) }
+        // String length: _.name.length (Select form — no args)
+        case Select(inner, "length") if inner.tpe.widen =:= TypeRepr.of[String] =>
+          val s = compileStringExpr[T](inner, paramName, labels)
+          '{ SExpr.Length($s) }
 
-      case Apply(Select(left, "-"), List(right)) =>
-        val l = compileIntExpr[T](left, paramName, labels)
-        val r = compileIntExpr[T](right, paramName, labels)
-        '{ SExpr.Sub($l, $r) }
+        // Arithmetic: +, -, *, /
+        case Apply(Select(left, "+"), List(right)) =>
+          val l = compileIntExpr[T](left, paramName, labels)
+          val r = compileIntExpr[T](right, paramName, labels)
+          '{ SExpr.Add($l, $r) }
 
-      case Apply(Select(left, "*"), List(right)) =>
-        val l = compileIntExpr[T](left, paramName, labels)
-        val r = compileIntExpr[T](right, paramName, labels)
-        '{ SExpr.Mul($l, $r) }
+        case Apply(Select(left, "-"), List(right)) =>
+          val l = compileIntExpr[T](left, paramName, labels)
+          val r = compileIntExpr[T](right, paramName, labels)
+          '{ SExpr.Sub($l, $r) }
 
-      case Apply(Select(left, "/"), List(right)) =>
-        val l = compileIntExpr[T](left, paramName, labels)
-        val r = compileIntExpr[T](right, paramName, labels)
-        '{ SExpr.Div($l, $r) }
+        case Apply(Select(left, "*"), List(right)) =>
+          val l = compileIntExpr[T](left, paramName, labels)
+          val r = compileIntExpr[T](right, paramName, labels)
+          '{ SExpr.Mul($l, $r) }
 
-      case other =>
-        report.errorAndAbort(s"Unsupported Int expression: ${other.show}")
+        case Apply(Select(left, "/"), List(right)) =>
+          val l = compileIntExpr[T](left, paramName, labels)
+          val r = compileIntExpr[T](right, paramName, labels)
+          '{ SExpr.Div($l, $r) }
+
+        case other =>
+          report.errorAndAbort(s"Unsupported Int expression: ${other.show}")
+      }
     }
   }
 
@@ -375,20 +515,36 @@ object ExprMacro {
 
     val unwrapped = unwrapTerm(term)
 
-    unwrapped match {
-      case Select(Ident(name), fieldName) if name == paramName =>
-        val idx = labels.indexOf(fieldName)
-        if (idx < 0) report.errorAndAbort(s"Field '$fieldName' not found.")
-        val nameExpr = QExpr(fieldName)
-        val indexExpr = QExpr(idx)
-        '{ SExpr.Cell[T, Long]($nameExpr, ColumnIndex($indexExpr)) }
+    compileFieldAccess[T, Long](unwrapped, paramName, labels).getOrElse {
+      unwrapped match {
+        case Literal(LongConstant(v)) =>
+          val vExpr = QExpr(v)
+          '{ SExpr.Const[T, Long]($vExpr) }
 
-      case Literal(LongConstant(v)) =>
-        val vExpr = QExpr(v)
-        '{ SExpr.Const[T, Long]($vExpr) }
+        // Arithmetic: +, -, *, /
+        case Apply(Select(left, "+"), List(right)) =>
+          val l = compileLongExpr[T](left, paramName, labels)
+          val r = compileLongExpr[T](right, paramName, labels)
+          '{ SExpr.AddLong($l, $r) }
 
-      case other =>
-        report.errorAndAbort(s"Unsupported Long expression: ${other.show}")
+        case Apply(Select(left, "-"), List(right)) =>
+          val l = compileLongExpr[T](left, paramName, labels)
+          val r = compileLongExpr[T](right, paramName, labels)
+          '{ SExpr.SubLong($l, $r) }
+
+        case Apply(Select(left, "*"), List(right)) =>
+          val l = compileLongExpr[T](left, paramName, labels)
+          val r = compileLongExpr[T](right, paramName, labels)
+          '{ SExpr.MulLong($l, $r) }
+
+        case Apply(Select(left, "/"), List(right)) =>
+          val l = compileLongExpr[T](left, paramName, labels)
+          val r = compileLongExpr[T](right, paramName, labels)
+          '{ SExpr.DivLong($l, $r) }
+
+        case other =>
+          report.errorAndAbort(s"Unsupported Long expression: ${other.show}")
+      }
     }
   }
 
@@ -403,20 +559,36 @@ object ExprMacro {
 
     val unwrapped = unwrapTerm(term)
 
-    unwrapped match {
-      case Select(Ident(name), fieldName) if name == paramName =>
-        val idx = labels.indexOf(fieldName)
-        if (idx < 0) report.errorAndAbort(s"Field '$fieldName' not found.")
-        val nameExpr = QExpr(fieldName)
-        val indexExpr = QExpr(idx)
-        '{ SExpr.Cell[T, Double]($nameExpr, ColumnIndex($indexExpr)) }
+    compileFieldAccess[T, Double](unwrapped, paramName, labels).getOrElse {
+      unwrapped match {
+        case Literal(DoubleConstant(v)) =>
+          val vExpr = QExpr(v)
+          '{ SExpr.Const[T, Double]($vExpr) }
 
-      case Literal(DoubleConstant(v)) =>
-        val vExpr = QExpr(v)
-        '{ SExpr.Const[T, Double]($vExpr) }
+        // Arithmetic: +, -, *, /
+        case Apply(Select(left, "+"), List(right)) =>
+          val l = compileDoubleExpr[T](left, paramName, labels)
+          val r = compileDoubleExpr[T](right, paramName, labels)
+          '{ SExpr.AddDouble($l, $r) }
 
-      case other =>
-        report.errorAndAbort(s"Unsupported Double expression: ${other.show}")
+        case Apply(Select(left, "-"), List(right)) =>
+          val l = compileDoubleExpr[T](left, paramName, labels)
+          val r = compileDoubleExpr[T](right, paramName, labels)
+          '{ SExpr.SubDouble($l, $r) }
+
+        case Apply(Select(left, "*"), List(right)) =>
+          val l = compileDoubleExpr[T](left, paramName, labels)
+          val r = compileDoubleExpr[T](right, paramName, labels)
+          '{ SExpr.MulDouble($l, $r) }
+
+        case Apply(Select(left, "/"), List(right)) =>
+          val l = compileDoubleExpr[T](left, paramName, labels)
+          val r = compileDoubleExpr[T](right, paramName, labels)
+          '{ SExpr.DivDouble($l, $r) }
+
+        case other =>
+          report.errorAndAbort(s"Unsupported Double expression: ${other.show}")
+      }
     }
   }
 
@@ -431,20 +603,21 @@ object ExprMacro {
 
     val unwrapped = unwrapTerm(term)
 
-    unwrapped match {
-      case Select(Ident(name), fieldName) if name == paramName =>
-        val idx = labels.indexOf(fieldName)
-        if (idx < 0) report.errorAndAbort(s"Field '$fieldName' not found.")
-        val nameExpr = QExpr(fieldName)
-        val indexExpr = QExpr(idx)
-        '{ SExpr.Cell[T, String]($nameExpr, ColumnIndex($indexExpr)) }
+    compileFieldAccess[T, String](unwrapped, paramName, labels).getOrElse {
+      unwrapped match {
+        case Literal(StringConstant(v)) =>
+          val vExpr = QExpr(v)
+          '{ SExpr.Const[T, String]($vExpr) }
 
-      case Literal(StringConstant(v)) =>
-        val vExpr = QExpr(v)
-        '{ SExpr.Const[T, String]($vExpr) }
+        // String concatenation: _.name + "!"
+        case Apply(Select(left, "+"), List(right)) =>
+          val l = compileStringExpr[T](left, paramName, labels)
+          val r = compileStringExpr[T](right, paramName, labels)
+          '{ SExpr.Concat($l, $r) }
 
-      case other =>
-        report.errorAndAbort(s"Unsupported String expression: ${other.show}")
+        case other =>
+          report.errorAndAbort(s"Unsupported String expression: ${other.show}")
+      }
     }
   }
 
@@ -459,20 +632,15 @@ object ExprMacro {
 
     val unwrapped = unwrapTerm(term)
 
-    unwrapped match {
-      case Select(Ident(name), fieldName) if name == paramName =>
-        val idx = labels.indexOf(fieldName)
-        if (idx < 0) report.errorAndAbort(s"Field '$fieldName' not found.")
-        val nameExpr = QExpr(fieldName)
-        val indexExpr = QExpr(idx)
-        '{ SExpr.Cell[T, Boolean]($nameExpr, ColumnIndex($indexExpr)) }
+    compileFieldAccess[T, Boolean](unwrapped, paramName, labels).getOrElse {
+      unwrapped match {
+        case Literal(BooleanConstant(v)) =>
+          val vExpr = QExpr(v)
+          '{ SExpr.Const[T, Boolean]($vExpr) }
 
-      case Literal(BooleanConstant(v)) =>
-        val vExpr = QExpr(v)
-        '{ SExpr.Const[T, Boolean]($vExpr) }
-
-      case other =>
-        report.errorAndAbort(s"Unsupported Boolean expression: ${other.show}")
+        case other =>
+          report.errorAndAbort(s"Unsupported Boolean expression: ${other.show}")
+      }
     }
   }
 }

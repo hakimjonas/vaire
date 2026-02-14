@@ -97,6 +97,62 @@ object ExprInterpreter {
             else Right(l / r)
         } yield result
 
+      // Long arithmetic - GADT guarantees Long types, NO CASTS
+      case add: Expr.AddLong[Row] =>
+        for {
+          l <- eval(add.left, columns, rowIdx)
+          r <- eval(add.right, columns, rowIdx)
+        } yield l + r
+
+      case sub: Expr.SubLong[Row] =>
+        for {
+          l <- eval(sub.left, columns, rowIdx)
+          r <- eval(sub.right, columns, rowIdx)
+        } yield l - r
+
+      case mul: Expr.MulLong[Row] =>
+        for {
+          l <- eval(mul.left, columns, rowIdx)
+          r <- eval(mul.right, columns, rowIdx)
+        } yield l * r
+
+      case div: Expr.DivLong[Row] =>
+        for {
+          l <- eval(div.left, columns, rowIdx)
+          r <- eval(div.right, columns, rowIdx)
+          result <-
+            if (r == 0L) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
+            else Right(l / r)
+        } yield result
+
+      // Double arithmetic - GADT guarantees Double types, NO CASTS
+      case add: Expr.AddDouble[Row] =>
+        for {
+          l <- eval(add.left, columns, rowIdx)
+          r <- eval(add.right, columns, rowIdx)
+        } yield l + r
+
+      case sub: Expr.SubDouble[Row] =>
+        for {
+          l <- eval(sub.left, columns, rowIdx)
+          r <- eval(sub.right, columns, rowIdx)
+        } yield l - r
+
+      case mul: Expr.MulDouble[Row] =>
+        for {
+          l <- eval(mul.left, columns, rowIdx)
+          r <- eval(mul.right, columns, rowIdx)
+        } yield l * r
+
+      case div: Expr.DivDouble[Row] =>
+        for {
+          l <- eval(div.left, columns, rowIdx)
+          r <- eval(div.right, columns, rowIdx)
+          result <-
+            if (r == 0.0) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
+            else Right(l / r)
+        } yield result
+
       // Comparisons - GADT provides Ordering evidence, NO CASTS!
       case eq: Expr.Eq[Row, _] =>
         for {
@@ -321,6 +377,44 @@ object ExprInterpreter {
           throw new ArithmeticException(s"Division by zero at row ${rowIdx.toInt}") // scalafix:ok DisableSyntax.throw
         l / r
 
+      case add: Expr.AddLong[Row] =>
+        evalAny(add.left, columns, rowIdx).asInstanceOf[Long] + evalAny(add.right, columns, rowIdx)
+          .asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case sub: Expr.SubLong[Row] =>
+        evalAny(sub.left, columns, rowIdx).asInstanceOf[Long] - evalAny(sub.right, columns, rowIdx)
+          .asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case mul: Expr.MulLong[Row] =>
+        evalAny(mul.left, columns, rowIdx).asInstanceOf[Long] * evalAny(mul.right, columns, rowIdx)
+          .asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case div: Expr.DivLong[Row] =>
+        val l = evalAny(div.left, columns, rowIdx).asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(div.right, columns, rowIdx).asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+        if (r == 0L)
+          throw new ArithmeticException(s"Division by zero at row ${rowIdx.toInt}") // scalafix:ok DisableSyntax.throw
+        l / r
+
+      case add: Expr.AddDouble[Row] =>
+        evalAny(add.left, columns, rowIdx).asInstanceOf[Double] + evalAny(add.right, columns, rowIdx)
+          .asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case sub: Expr.SubDouble[Row] =>
+        evalAny(sub.left, columns, rowIdx).asInstanceOf[Double] - evalAny(sub.right, columns, rowIdx)
+          .asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case mul: Expr.MulDouble[Row] =>
+        evalAny(mul.left, columns, rowIdx).asInstanceOf[Double] * evalAny(mul.right, columns, rowIdx)
+          .asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case div: Expr.DivDouble[Row] =>
+        val l = evalAny(div.left, columns, rowIdx).asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(div.right, columns, rowIdx).asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+        if (r == 0.0)
+          throw new ArithmeticException(s"Division by zero at row ${rowIdx.toInt}") // scalafix:ok DisableSyntax.throw
+        l / r
+
       case concat: Expr.Concat[Row] =>
         evalAny(concat.left, columns, rowIdx).asInstanceOf[String] + evalAny(concat.right, columns, rowIdx)
           .asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
@@ -371,6 +465,10 @@ object ExprInterpreter {
       case n: Expr.Named[_, _] => inferExprColumnType(n.expr, columns)
       case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Length[_] =>
         ColumnType.IntType
+      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] =>
+        ColumnType.LongType
+      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] =>
+        ColumnType.DoubleType
       case _: Expr.Concat[_] => ColumnType.StringType
       case _: Expr.Gt[_, _] | _: Expr.Lt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
           _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] =>
@@ -452,6 +550,48 @@ object ExprInterpreter {
           result <- vectorizedDiv(
             leftCol.asInstanceOf[Column.IntColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
             rightCol.asInstanceOf[Column.IntColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
+            rowCount
+          )
+        } yield result
+
+      // Long arithmetic — vectorized
+      case add: Expr.AddLong[Row] =>
+        vectorizedLongBinOp(add.left, add.right, columns, rowCount)(_ + _)
+
+      case sub: Expr.SubLong[Row] =>
+        vectorizedLongBinOp(sub.left, sub.right, columns, rowCount)(_ - _)
+
+      case mul: Expr.MulLong[Row] =>
+        vectorizedLongBinOp(mul.left, mul.right, columns, rowCount)(_ * _)
+
+      case div: Expr.DivLong[Row] =>
+        for {
+          leftCol <- evalColumn(div.left, columns, ColumnType.LongType)
+          rightCol <- evalColumn(div.right, columns, ColumnType.LongType)
+          result <- vectorizedLongDiv(
+            leftCol.asInstanceOf[Column.LongColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
+            rightCol.asInstanceOf[Column.LongColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
+            rowCount
+          )
+        } yield result
+
+      // Double arithmetic — vectorized
+      case add: Expr.AddDouble[Row] =>
+        vectorizedDoubleBinOp(add.left, add.right, columns, rowCount)(_ + _)
+
+      case sub: Expr.SubDouble[Row] =>
+        vectorizedDoubleBinOp(sub.left, sub.right, columns, rowCount)(_ - _)
+
+      case mul: Expr.MulDouble[Row] =>
+        vectorizedDoubleBinOp(mul.left, mul.right, columns, rowCount)(_ * _)
+
+      case div: Expr.DivDouble[Row] =>
+        for {
+          leftCol <- evalColumn(div.left, columns, ColumnType.DoubleType)
+          rightCol <- evalColumn(div.right, columns, ColumnType.DoubleType)
+          result <- vectorizedDoubleDiv(
+            leftCol.asInstanceOf[Column.DoubleColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
+            rightCol.asInstanceOf[Column.DoubleColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
             rowCount
           )
         } yield result
@@ -598,6 +738,78 @@ object ExprInterpreter {
       i += 1
     }
     Right(Column.int(out))
+  }
+
+  /** Vectorized Long binary operation helper. */
+  private def vectorizedLongBinOp[Row](
+    left: Expr[Row, Long],
+    right: Expr[Row, Long],
+    columns: Vector[Column],
+    rowCount: Int
+  )(op: (Long, Long) => Long): Either[ExecutionError, Column] = {
+    for {
+      leftCol <- evalColumn(left, columns, ColumnType.LongType)
+      rightCol <- evalColumn(right, columns, ColumnType.LongType)
+    } yield {
+      val ld = leftCol.asInstanceOf[Column.LongColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+      val rd = rightCol.asInstanceOf[Column.LongColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+      val out = new Array[Long](rowCount)
+      var i = 0 // scalafix:ok DisableSyntax.var
+      while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
+      Column.long(out)
+    }
+  }
+
+  /** Vectorized Long division with zero-check. */
+  private def vectorizedLongDiv(
+    left: Array[Long],
+    right: Array[Long],
+    rowCount: Int
+  ): Either[ExecutionError, Column] = {
+    val out = new Array[Long](rowCount)
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
+      if (right(i) == 0L) return Left(ExecutionError.DivisionByZero(i)) // scalafix:ok DisableSyntax.return
+      out(i) = left(i) / right(i)
+      i += 1
+    }
+    Right(Column.long(out))
+  }
+
+  /** Vectorized Double binary operation helper. */
+  private def vectorizedDoubleBinOp[Row](
+    left: Expr[Row, Double],
+    right: Expr[Row, Double],
+    columns: Vector[Column],
+    rowCount: Int
+  )(op: (Double, Double) => Double): Either[ExecutionError, Column] = {
+    for {
+      leftCol <- evalColumn(left, columns, ColumnType.DoubleType)
+      rightCol <- evalColumn(right, columns, ColumnType.DoubleType)
+    } yield {
+      val ld = leftCol.asInstanceOf[Column.DoubleColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+      val rd = rightCol.asInstanceOf[Column.DoubleColumn].data // scalafix:ok DisableSyntax.asInstanceOf
+      val out = new Array[Double](rowCount)
+      var i = 0 // scalafix:ok DisableSyntax.var
+      while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
+      Column.double(out)
+    }
+  }
+
+  /** Vectorized Double division with zero-check. */
+  private def vectorizedDoubleDiv(
+    left: Array[Double],
+    right: Array[Double],
+    rowCount: Int
+  ): Either[ExecutionError, Column] = {
+    val out = new Array[Double](rowCount)
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
+      if (right(i) == 0.0) return Left(ExecutionError.DivisionByZero(i)) // scalafix:ok DisableSyntax.return
+      out(i) = left(i) / right(i)
+      i += 1
+    }
+    Right(Column.double(out))
   }
 
   /** Vectorized comparison helper — evaluates operands to columns, compares element-wise. */

@@ -107,6 +107,41 @@ object DatasetInterpreter extends Interpreter {
           result <- leftAntiJoinDatasets(left, right, jn.condition)
         } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
 
+      case jn: Dataset.InnerJoinOn[?, ?, ?] =>
+        for {
+          left <- execute(jn.left)
+          right <- execute(jn.right)
+          result <- innerJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
+        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case jn: Dataset.LeftJoinOn[?, ?, ?] =>
+        for {
+          left <- execute(jn.left)
+          right <- execute(jn.right)
+          result <- leftJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
+        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case jn: Dataset.RightJoinOn[?, ?, ?] =>
+        for {
+          left <- execute(jn.left)
+          right <- execute(jn.right)
+          result <- rightJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
+        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case jn: Dataset.FullJoinOn[?, ?, ?] =>
+        for {
+          left <- execute(jn.left)
+          right <- execute(jn.right)
+          result <- fullJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
+        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case jn: Dataset.LeftAntiJoinOn[?, ?, ?] =>
+        for {
+          left <- execute(jn.left)
+          right <- execute(jn.right)
+          result <- leftAntiJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
+        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+
       case srt: Dataset.Sort[T] =>
         execute(srt.parent).flatMap(parent => sort(parent, srt.ordering))
 
@@ -510,5 +545,217 @@ object DatasetInterpreter extends Interpreter {
     }
 
     MaterializedDataset.fromVector(resultRows)(using left.schema)
+  }
+
+  // --- Expression-based joins using hash join ---
+
+  /** Build a hash index: key value → list of row indices. */
+  private def buildKeyIndex(keyCol: Column, rowCount: Int): scala.collection.mutable.HashMap[Any, Vector[Int]] = {
+    val index = scala.collection.mutable.HashMap.empty[Any, Vector[Int]]
+    var i = 0
+    while (i < rowCount) {
+      val key = keyCol.getValue(i)
+      index.updateWith(key) {
+        case Some(existing) => Some(existing :+ i)
+        case None => Some(Vector(i))
+      }
+      i += 1
+    }
+    index
+  }
+
+  /** Assemble result columns from matched left/right index pairs. */
+  private def assembleJoinColumns[A, B](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftIndices: Array[Int],
+    rightIndices: Array[Int]
+  ): (Vector[Column], Schema[(A, B)]) = {
+    val leftCols = left.columns.map(_.slice(leftIndices))
+    val rightCols = right.columns.map(_.slice(rightIndices))
+    val schema = Schema.tuple2Schema[A, B](using left.schema, right.schema)
+    (leftCols ++ rightCols, schema)
+  }
+
+  /** Expression-based inner join using hash join.
+    *
+    * Evaluates key expressions to columns, builds hash index on left keys, probes with right keys.
+    * O(N + M) instead of O(N * M) for the common equi-join case.
+    */
+  private def innerJoinOnExpr[A, B, K](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  ): Either[ExecutionError, MaterializedDataset[(A, B)]] = {
+    for {
+      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+    } yield {
+      val leftIndex = buildKeyIndex(leftKeyCol, left.rowCount)
+      val leftIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
+      val rightIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
+
+      var ri = 0
+      while (ri < right.rowCount) {
+        val rKey = rightKeyCol.getValue(ri)
+        leftIndex.get(rKey).foreach { leftRows =>
+          leftRows.foreach { li =>
+            leftIdxBuf += li
+            rightIdxBuf += ri
+          }
+        }
+        ri += 1
+      }
+
+      val (cols, schema) = assembleJoinColumns(left, right, leftIdxBuf.toArray, rightIdxBuf.toArray)
+      MaterializedDataset(cols, schema)
+    }
+  }
+
+  /** Expression-based left join using hash join. */
+  private def leftJoinOnExpr[A, B, K](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  ): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] = {
+    for {
+      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+    } yield {
+      val rightIndex = buildKeyIndex(rightKeyCol, right.rowCount)
+      val leftRows = left.toVectorUnsafe
+      val rightRows = right.toVectorUnsafe
+
+      val resultRows: Vector[(A, Option[B])] = leftRows.zipWithIndex.flatMap { case (leftVal, li) =>
+        val lKey = leftKeyCol.getValue(li)
+        rightIndex.get(lKey) match {
+          case Some(rightIdxs) => rightIdxs.map(ri => (leftVal, Option(rightRows(ri))))
+          case None => Vector((leftVal, Option.empty[B]))
+        }
+      }
+
+      given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
+      given resultSchema: Schema[(A, Option[B])] = Schema.tuple2Schema[A, Option[B]](using left.schema, rightOptionSchema)
+      MaterializedDataset.fromVector(resultRows).getOrElse(
+        throw new RuntimeException("leftJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
+      )
+    }
+  }
+
+  /** Expression-based right join using hash join. */
+  private def rightJoinOnExpr[A, B, K](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  ): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] = {
+    for {
+      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+    } yield {
+      val leftIndex = buildKeyIndex(leftKeyCol, left.rowCount)
+      val leftRows = left.toVectorUnsafe
+      val rightRows = right.toVectorUnsafe
+
+      val resultRows: Vector[(Option[A], B)] = rightRows.zipWithIndex.flatMap { case (rightVal, ri) =>
+        val rKey = rightKeyCol.getValue(ri)
+        leftIndex.get(rKey) match {
+          case Some(leftIdxs) => leftIdxs.map(li => (Option(leftRows(li)), rightVal))
+          case None => Vector((Option.empty[A], rightVal))
+        }
+      }
+
+      given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
+      given resultSchema: Schema[(Option[A], B)] = Schema.tuple2Schema[Option[A], B](using leftOptionSchema, right.schema)
+      MaterializedDataset.fromVector(resultRows).getOrElse(
+        throw new RuntimeException("rightJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
+      )
+    }
+  }
+
+  /** Expression-based full join using hash join. */
+  private def fullJoinOnExpr[A, B, K](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  ): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] = {
+    for {
+      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+    } yield {
+      val rightIndex = buildKeyIndex(rightKeyCol, right.rowCount)
+      val leftRows = left.toVectorUnsafe
+      val rightRows = right.toVectorUnsafe
+      val matchedRight = scala.collection.mutable.HashSet.empty[Int]
+
+      val leftSideResults: Vector[(Option[A], Option[B])] = leftRows.zipWithIndex.flatMap { case (leftVal, li) =>
+        val lKey = leftKeyCol.getValue(li)
+        rightIndex.get(lKey) match {
+          case Some(rightIdxs) =>
+            rightIdxs.map { ri =>
+              matchedRight += ri
+              (Option(leftVal), Option(rightRows(ri)))
+            }
+          case None => Vector((Option(leftVal), Option.empty[B]))
+        }
+      }
+
+      val unmatchedRight: Vector[(Option[A], Option[B])] = rightRows.zipWithIndex.collect {
+        case (rightVal, ri) if !matchedRight.contains(ri) =>
+          (Option.empty[A], Option(rightVal))
+      }
+
+      val resultRows = leftSideResults ++ unmatchedRight
+
+      given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
+      given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
+      given resultSchema: Schema[(Option[A], Option[B])] =
+        Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
+      MaterializedDataset.fromVector(resultRows).getOrElse(
+        throw new RuntimeException("fullJoinOnExpr assembly failed") // scalafix:ok DisableSyntax.throw
+      )
+    }
+  }
+
+  /** Expression-based anti join using hash join. */
+  private def leftAntiJoinOnExpr[A, B, K](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  ): Either[ExecutionError, MaterializedDataset[A]] = {
+    for {
+      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+    } yield {
+      // Build set of all right key values
+      val rightKeys = scala.collection.mutable.HashSet.empty[Any]
+      var ri = 0
+      while (ri < right.rowCount) {
+        rightKeys += rightKeyCol.getValue(ri)
+        ri += 1
+      }
+
+      // Filter left rows whose key is not in right keys
+      val indices = (0 until left.rowCount).filter { li =>
+        !rightKeys.contains(leftKeyCol.getValue(li))
+      }.toArray
+
+      val newColumns = left.columns.map(_.slice(indices))
+      MaterializedDataset(newColumns, left.schema)
+    }
   }
 }

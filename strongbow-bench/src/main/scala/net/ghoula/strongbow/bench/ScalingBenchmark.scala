@@ -267,7 +267,7 @@ object ScalingBenchmark {
       f"${distinctResult.medianMs}%.2f ms (alloc: ${distinctResult.allocatedMB}%.1f MB, heap: ${distinctResult.maxHeapMB}%.0f MB, GC: ${distinctResult.gcCollections})"
     )
 
-    // Join
+    // Join (Grouped key-based join — comparable to Crossbow's column-based join)
     print("  Join... ")
     val (keys1, values1) = generateData(rows / 2, groups / 2)
     val (keys2, values2) = generateData(rows / 2, groups / 2)

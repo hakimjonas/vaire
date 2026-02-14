@@ -54,6 +54,21 @@ object DatasetExplainer {
       case Dataset.LeftAntiJoin(left, right, _) =>
         s"LeftAntiJoin\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
 
+      case Dataset.InnerJoinOn(left, right, _, _, _, _) =>
+        s"InnerJoinOn[expr]\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
+      case Dataset.LeftJoinOn(left, right, _, _, _, _) =>
+        s"LeftJoinOn[expr]\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
+      case Dataset.RightJoinOn(left, right, _, _, _, _) =>
+        s"RightJoinOn[expr]\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
+      case Dataset.FullJoinOn(left, right, _, _, _, _) =>
+        s"FullJoinOn[expr]\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
+      case Dataset.LeftAntiJoinOn(left, right, _, _, _, _) =>
+        s"LeftAntiJoinOn[expr]\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
       case Dataset.Sort(parent, _) =>
         s"Sort[ordering]\n${explain(parent, indent + 1)}"
 
@@ -86,6 +101,9 @@ object DatasetExplainer {
     grouped match {
       case Grouped.GroupBy(parent, _) =>
         s"${prefix}GroupBy[key]\n${explain(parent, indent + 1)}"
+
+      case Grouped.GroupByExpr(parent, _, _) =>
+        s"${prefix}GroupByExpr[expr]\n${explain(parent, indent + 1)}"
 
       case Grouped.FromPairs(parent) =>
         s"${prefix}FromPairs\n${explain(parent, indent + 1)}"

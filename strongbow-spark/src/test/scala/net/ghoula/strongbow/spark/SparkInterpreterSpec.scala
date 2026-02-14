@@ -217,6 +217,33 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     assertParity(joined)
   }
 
+  // --- Expression-based joins ---
+
+  "InnerJoinOn" should "produce same results as lambda join" in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+    val col1 = Column.int(Array(1, 2, 3))
+    val col2 = Column.int(Array(2, 3, 4))
+    val ds1 = Dataset.fromColumns(Vector(col1), Schema.intSchema).toOption.get
+    val ds2 = Dataset.fromColumns(Vector(col2), Schema.intSchema).toOption.get
+
+    val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val rightKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val joined = ds1.joinOn(ds2, leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
+    assertParity(joined)
+  }
+
+  "LeftAntiJoinOn" should "produce same results as lambda anti join" in {
+    val col1 = Column.int(Array(1, 2, 3))
+    val col2 = Column.int(Array(2, 3, 4))
+    val ds1 = Dataset.fromColumns(Vector(col1), Schema.intSchema).toOption.get
+    val ds2 = Dataset.fromColumns(Vector(col2), Schema.intSchema).toOption.get
+
+    val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val rightKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val joined = ds1.antiJoinOn(ds2, leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
+    assertParity(joined)
+  }
+
   // --- SelectExprs ---
 
   "SelectExprs" should "produce same results" in {

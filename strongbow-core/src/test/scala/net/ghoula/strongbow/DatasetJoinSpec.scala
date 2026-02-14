@@ -230,6 +230,164 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
     result shouldBe empty
   }
 
+  // --- Expression-based join tests ---
+
+  val empDeptIdExpr = Expr.Cell[Employee, Int]("deptId", types.ColumnIndex(2))
+  val deptIdExpr = Expr.Cell[Department, Int]("id", types.ColumnIndex(0))
+
+  "expression-based inner join" should "produce same results as lambda-based" in {
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 10),
+        Employee(4, "Dave", 30)
+      )
+    )
+
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales")
+      )
+    )
+
+    val joined = employees.joinOn(departments, empDeptIdExpr, deptIdExpr, ColumnType.IntType, ColumnType.IntType)
+    val result = joined.collect.getOrElse(fail("Expression join failed"))
+
+    result should have length 3
+    result should contain((Employee(1, "Alice", 10), Department(10, "Engineering")))
+    result should contain((Employee(2, "Bob", 20), Department(20, "Sales")))
+    result should contain((Employee(3, "Charlie", 10), Department(10, "Engineering")))
+  }
+
+  "expression-based left join" should "include unmatched left rows" in {
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 30)
+      )
+    )
+
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales")
+      )
+    )
+
+    val joined = employees.leftJoinOn(departments, empDeptIdExpr, deptIdExpr, ColumnType.IntType, ColumnType.IntType)
+    val result = joined.collect.getOrElse(fail("Expression left join failed"))
+
+    result should have length 3
+    result should contain((Employee(1, "Alice", 10), Some(Department(10, "Engineering"))))
+    result should contain((Employee(2, "Bob", 20), Some(Department(20, "Sales"))))
+
+    val charlieRow = result.find(_._1.name == "Charlie")
+    charlieRow shouldBe defined
+    charlieRow.get._2 shouldBe None
+  }
+
+  "expression-based right join" should "include unmatched right rows" in {
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20)
+      )
+    )
+
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales"),
+        Department(30, "Marketing")
+      )
+    )
+
+    val joined = employees.rightJoinOn(departments, empDeptIdExpr, deptIdExpr, ColumnType.IntType, ColumnType.IntType)
+    val result = joined.collect.getOrElse(fail("Expression right join failed"))
+
+    result should have length 3
+    result should contain((Some(Employee(1, "Alice", 10)), Department(10, "Engineering")))
+    result should contain((Some(Employee(2, "Bob", 20)), Department(20, "Sales")))
+
+    val marketingRow = result.find(_._2.deptName == "Marketing")
+    marketingRow shouldBe defined
+    marketingRow.get._1 shouldBe None
+  }
+
+  "expression-based full join" should "include all rows" in {
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 40)
+      )
+    )
+
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(30, "Marketing")
+      )
+    )
+
+    val joined = employees.fullJoinOn(departments, empDeptIdExpr, deptIdExpr, ColumnType.IntType, ColumnType.IntType)
+    val result = joined.collect.getOrElse(fail("Expression full join failed"))
+
+    result should have length 4
+
+    result should contain((Some(Employee(1, "Alice", 10)), Some(Department(10, "Engineering"))))
+
+    val bobRow = result.find(r => r._1.exists(_.name == "Bob"))
+    bobRow shouldBe defined
+    bobRow.get._2 shouldBe None
+
+    val charlieRow = result.find(r => r._1.exists(_.name == "Charlie"))
+    charlieRow shouldBe defined
+    charlieRow.get._2 shouldBe None
+
+    val marketingRow = result.find(r => r._2.exists(_.deptName == "Marketing"))
+    marketingRow shouldBe defined
+    marketingRow.get._1 shouldBe None
+  }
+
+  "expression-based anti join" should "exclude matched rows" in {
+    val employees = createDataset(
+      Vector(
+        Employee(1, "Alice", 10),
+        Employee(2, "Bob", 20),
+        Employee(3, "Charlie", 30),
+        Employee(4, "Dave", 40)
+      )
+    )
+
+    val departments = createDataset(
+      Vector(
+        Department(10, "Engineering"),
+        Department(20, "Sales")
+      )
+    )
+
+    val joined = employees.antiJoinOn(departments, empDeptIdExpr, deptIdExpr, ColumnType.IntType, ColumnType.IntType)
+    val result = joined.collect.getOrElse(fail("Expression anti join failed"))
+
+    result should have length 2
+    result should contain(Employee(3, "Charlie", 30))
+    result should contain(Employee(4, "Dave", 40))
+  }
+
+  "expression-based join" should "handle empty datasets" in {
+    val emptyEmployees = createDataset[Employee](Vector.empty)
+    val departments = createDataset(Vector(Department(10, "Engineering")))
+
+    val joined = emptyEmployees.joinOn(departments, empDeptIdExpr, deptIdExpr, ColumnType.IntType, ColumnType.IntType)
+    val result = joined.collect.getOrElse(fail("Join with empty left failed"))
+
+    result shouldBe empty
+  }
+
   private def createDataset[T](values: Vector[T])(using schema: Schema[T]): Dataset[T] = {
     MaterializedDataset.fromVector(values) match {
       case Right(mat) =>

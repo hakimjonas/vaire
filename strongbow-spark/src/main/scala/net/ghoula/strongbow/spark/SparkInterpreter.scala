@@ -146,6 +146,21 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val right = buildPlan(jn.right)
         applyLeftAntiJoin[a, b, T](left, right, jn.condition)
 
+      case jn: Dataset.InnerJoinOn[a, b, _] =>
+        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "inner")
+
+      case jn: Dataset.LeftJoinOn[a, b, _] =>
+        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left")
+
+      case jn: Dataset.RightJoinOn[a, b, _] =>
+        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "right")
+
+      case jn: Dataset.FullJoinOn[a, b, _] =>
+        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "full")
+
+      case jn: Dataset.LeftAntiJoinOn[a, b, _] =>
+        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_anti")
+
       case grp: Dataset.GroupedToPairs[k, v] =>
         applyGroupedToPairs[k, v, T](grp.grouped, grp.schemaK, grp.schemaV)
 
@@ -340,6 +355,75 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
     val df = createDataFrame(resultRows, left.schema)
     SparkPlan(df, left.schema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+  }
+
+  // --- Expression-based joins using native Spark equi-join ---
+
+  private def applyJoinOnExpr[A, B, T](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B],
+    leftKey: Expr[A, ?],
+    rightKey: Expr[B, ?],
+    joinType: String
+  ): SparkPlan[T] = {
+    val left = buildPlan(leftDs)
+    val right = buildPlan(rightDs)
+
+    // Use DataFrame-qualified column references to avoid ambiguity when both sides
+    // have same-named columns (e.g. both have "value")
+    val leftColName = getColName(leftKey)
+    val rightColName = getColName(rightKey)
+
+    // Alias DataFrames to disambiguate
+    val leftAlias = left.df.alias("_l")
+    val rightAlias = right.df.alias("_r")
+
+    import org.apache.spark.sql.functions.col
+    val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
+    val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
+
+    // Drop the alias prefixes — select original columns by position
+    val leftColNames = left.df.columns.map(c => col(s"_l.$c"))
+    val rightColNames = right.df.columns.map(c => col(s"_r.$c"))
+
+    val selectedDf = joinType match {
+      case "left_anti" =>
+        // Anti join only returns left columns
+        joinedDf.select(leftColNames*)
+      case _ =>
+        joinedDf.select((leftColNames ++ rightColNames)*)
+    }
+
+    val resultSchema = buildJoinSchema[A, B, T](left.schema, right.schema, joinType)
+    SparkPlan(selectedDf, resultSchema)
+  }
+
+  private def getColName[Row, A](expr: Expr[Row, A]): String = expr match {
+    case cell: Expr.Cell[_, _] => cell.name
+    case named: Expr.Named[_, _] => named.name
+    case _ => "_expr"
+  }
+
+  private def buildJoinSchema[A, B, T](leftSchema: Schema[A], rightSchema: Schema[B], joinType: String): Schema[T] = {
+    val schema = joinType match {
+      case "inner" =>
+        Schema.tuple2Schema[A, B](using leftSchema, rightSchema)
+      case "left" =>
+        val rightOpt = Schema.optionSchema[B](using rightSchema)
+        Schema.tuple2Schema[A, Option[B]](using leftSchema, rightOpt)
+      case "right" =>
+        val leftOpt = Schema.optionSchema[A](using leftSchema)
+        Schema.tuple2Schema[Option[A], B](using leftOpt, rightSchema)
+      case "full" =>
+        val leftOpt = Schema.optionSchema[A](using leftSchema)
+        val rightOpt = Schema.optionSchema[B](using rightSchema)
+        Schema.tuple2Schema[Option[A], Option[B]](using leftOpt, rightOpt)
+      case "left_anti" =>
+        leftSchema
+      case other =>
+        throw new RuntimeException(s"Unknown join type: $other") // scalafix:ok DisableSyntax.throw
+    }
+    schema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
   }
 
   // --- ZipWithIndex ---

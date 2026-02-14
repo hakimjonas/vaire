@@ -12,6 +12,7 @@ package net.ghoula.strongbow
   */
 enum Grouped[K, +V] {
   case GroupBy[K, V](parent: Dataset[V], key: V => K) extends Grouped[K, V]
+  case GroupByExpr[K, V](parent: Dataset[V], keyExpr: Expr[V, K], keyType: ColumnType) extends Grouped[K, V]
   case FromPairs[K, V](parent: Dataset[(K, V)]) extends Grouped[K, V]
   case MapValues[K, A, B](parent: Grouped[K, A], func: A => B) extends Grouped[K, B]
   case FlatMapValues[K, A, B](parent: Grouped[K, A], func: A => Iterable[B]) extends Grouped[K, B]

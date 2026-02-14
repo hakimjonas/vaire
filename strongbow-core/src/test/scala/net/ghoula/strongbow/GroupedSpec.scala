@@ -228,6 +228,44 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     unioned should contain theSameElementsAs Vector(1, 2, 3, 4)
   }
 
+  "groupByExpr" should "produce same results as groupBy" in {
+    val users = Vector(
+      User(1, "Alice", 25),
+      User(2, "Bob", 30),
+      User(3, "Charlie", 25),
+      User(4, "Diana", 30)
+    )
+
+    val dataset = createDataset(users)
+
+    // Lambda-based
+    val lambdaResult = GroupByInterpreter.execute(dataset.groupBy(_.age))
+
+    // Expression-based
+    val ageExpr = Expr.Cell[User, Int]("age", types.ColumnIndex(2))
+    val exprResult = GroupByInterpreter.execute(dataset.groupByExpr(ageExpr, ColumnType.IntType))
+
+    exprResult should contain theSameElementsAs lambdaResult
+  }
+
+  "groupByExpr with reduceByKey" should "aggregate correctly" in {
+    val users = Vector(
+      User(1, "Alice", 25),
+      User(2, "Bob", 30),
+      User(3, "Charlie", 25),
+      User(4, "Diana", 30)
+    )
+
+    val dataset = createDataset(users)
+    val ageExpr = Expr.Cell[User, Int]("age", types.ColumnIndex(2))
+    val grouped = dataset.groupByExpr(ageExpr, ColumnType.IntType)
+    val reduced = grouped.reduceByKey((a, b) => User(a.id, s"${a.name}+${b.name}", a.age))
+    val result = GroupByInterpreter.execute(reduced)
+
+    result should have length 2
+    result.map(_._1).toSet shouldBe Set(25, 30)
+  }
+
   // Helper methods
   private def createDataset(users: Vector[User]): Dataset[User] = {
     val idCol = Column.int(users.map(_.id).toArray)

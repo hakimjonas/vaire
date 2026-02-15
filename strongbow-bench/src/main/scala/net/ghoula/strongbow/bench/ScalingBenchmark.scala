@@ -7,6 +7,7 @@ import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
 import net.ghoula.strongbow.prelude.*
+import net.ghoula.strongbow.WindowSpec
 import net.ghoula.strongbow.types.ColumnIndex
 
 /** Multi-scale benchmarks to find where Longbow's advantages matter.
@@ -77,6 +78,35 @@ object ScalingBenchmark {
     Dataset.fromColumns(Vector(keyCol, valCol), summon[Schema[(String, Int)]]) match {
       case Right(ds) => ds
       case Left(err) => throw new RuntimeException(s"Failed to create dataset: $err")
+    }
+  }
+
+  // --- Triple-column case classes for N-ary benchmarks ---
+
+  case class BenchRow(key: String, value: Int, amount: Double)
+  given benchRowSchema: Schema[BenchRow] = Schema.derived
+  // Column names: key_value(0), value_value(1), amount_value(2)
+
+  case class AggResult(key: String, totalAmount: Double, cnt: Long)
+  given aggResultSchema: Schema[AggResult] = Schema.derived
+
+  case class WindowResult(key: String, value: Int, amount: Double, rowNum: Int)
+  given windowResultSchema: Schema[WindowResult] = Schema.derived
+
+  def generateTripleData(rows: Int, numGroups: Int): (Vector[String], Vector[Int], Vector[Double]) = {
+    val keys = Vector.fill(rows)(s"group${Random.nextInt(numGroups)}")
+    val values = Vector.fill(rows)(Random.nextInt(1000))
+    val amounts = Vector.fill(rows)(Random.nextDouble() * 1000.0)
+    (keys, values, amounts)
+  }
+
+  def createBenchDataset(keys: Vector[String], values: Vector[Int], amounts: Vector[Double]): Dataset[BenchRow] = {
+    val keyCol = Column.string(keys.toArray)
+    val valCol = Column.int(values.toArray)
+    val amtCol = Column.double(amounts.toArray)
+    Dataset.fromColumns(Vector(keyCol, valCol, amtCol), benchRowSchema) match {
+      case Right(ds) => ds
+      case Left(err) => throw new RuntimeException(s"Failed to create dataset: $err") // scalafix:ok DisableSyntax.throw
     }
   }
 
@@ -286,6 +316,77 @@ object ScalingBenchmark {
       f"${joinResult.medianMs}%.2f ms (alloc: ${joinResult.allocatedMB}%.1f MB, heap: ${joinResult.maxHeapMB}%.0f MB, GC: ${joinResult.gcCollections})"
     )
 
+    // GroupByAgg (typed specs via DatasetInterpreter)
+    print("  GroupByAgg... ")
+    val (tripleKeys, tripleValues, tripleAmounts) = generateTripleData(rows, groups)
+    val benchDataset = createBenchDataset(tripleKeys, tripleValues, tripleAmounts)
+
+    val groupByAggResult = benchmarkOperation(scale, rows, "GroupByAgg", 20, 50) {
+      val keyCell: Expr[BenchRow, Any] = Expr.Cell("key_value", ColumnIndex(0))
+      val amountCell: Expr[BenchRow, Double] = Expr.Cell("amount_value", ColumnIndex(2))
+      val aggKeys = Vector(KeySpec[BenchRow, Any]("key", keyCell, ColumnType.StringType))
+      val aggs = Vector(
+        AggSpec("totalAmount", Expr.SumDouble(amountCell), ColumnType.DoubleType),
+        AggSpec("cnt", Expr.Count[BenchRow](), ColumnType.LongType)
+      )
+      val grouped = benchDataset.groupByAgg[AggResult](aggKeys, aggs)
+      val materialized = DatasetInterpreter
+        .execute(grouped)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
+    }
+    results += groupByAggResult
+    println(
+      f"${groupByAggResult.medianMs}%.2f ms (alloc: ${groupByAggResult.allocatedMB}%.1f MB, heap: ${groupByAggResult.maxHeapMB}%.0f MB, GC: ${groupByAggResult.gcCollections})"
+    )
+
+    // SortByExprs (multi-column sort via DatasetInterpreter)
+    print("  SortByExprs... ")
+    val sortByExprsResult = benchmarkOperation(scale, rows, "SortByExprs", 20, 50) {
+      val valCell: Expr[BenchRow, Int] = Expr.Cell("value_value", ColumnIndex(1))
+      val amtCell: Expr[BenchRow, Double] = Expr.Cell("amount_value", ColumnIndex(2))
+      val sortKeys = Vector(
+        SortSpec(valCell, summon[Ordering[Int]], ColumnType.IntType, true),
+        SortSpec(amtCell, summon[Ordering[Double]], ColumnType.DoubleType, false)
+      )
+      val sorted = benchDataset.sortByExprs(sortKeys)
+      val materialized = DatasetInterpreter
+        .execute(sorted)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
+    }
+    results += sortByExprsResult
+    println(
+      f"${sortByExprsResult.medianMs}%.2f ms (alloc: ${sortByExprsResult.allocatedMB}%.1f MB, heap: ${sortByExprsResult.maxHeapMB}%.0f MB, GC: ${sortByExprsResult.gcCollections})"
+    )
+
+    // WithWindow (ROW_NUMBER window function via DatasetInterpreter)
+    print("  WithWindow... ")
+    val withWindowResult = benchmarkOperation(scale, rows, "WithWindow", 20, 50) {
+      val keyCell: Expr[BenchRow, Any] = Expr.Cell("key_value", ColumnIndex(0))
+      val amtCell: Expr[BenchRow, Double] = Expr.Cell("amount_value", ColumnIndex(2))
+      val wSpec = WindowSpec[BenchRow](
+        partitionBy = Vector(KeySpec[BenchRow, Any]("key", keyCell, ColumnType.StringType)),
+        orderBy = Vector(SortSpec[BenchRow, Double](amtCell, summon[Ordering[Double]], ColumnType.DoubleType, false))
+      )
+      val wExprs = Vector(WindowExprSpec("rowNum", Expr.RowNumber[BenchRow](), ColumnType.IntType))
+      val windowed = benchDataset.withWindow[WindowResult](wExprs, wSpec)
+      val materialized = DatasetInterpreter
+        .execute(windowed)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
+    }
+    results += withWindowResult
+    println(
+      f"${withWindowResult.medianMs}%.2f ms (alloc: ${withWindowResult.allocatedMB}%.1f MB, heap: ${withWindowResult.maxHeapMB}%.0f MB, GC: ${withWindowResult.gcCollections})"
+    )
+
     results.toSeq
   }
 
@@ -294,7 +395,7 @@ object ScalingBenchmark {
     println("SCALING SUMMARY")
     println("=".repeat(80))
 
-    val operations = Seq("Filter", "GroupBy", "Sort", "Limit", "Union", "Distinct", "Join")
+    val operations = Seq("Filter", "GroupBy", "Sort", "Limit", "Union", "Distinct", "Join", "GroupByAgg", "SortByExprs", "WithWindow")
     val scales = allResults.map(_.scale).distinct
 
     println()

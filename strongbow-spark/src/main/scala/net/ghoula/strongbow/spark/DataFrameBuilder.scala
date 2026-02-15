@@ -13,11 +13,17 @@ object DataFrameBuilder {
     dataset: MaterializedDataset[T]
   ): DataFrame = {
     val structType = SchemaConverter.toStructType(dataset.schema)
-    val rows = (0 until dataset.rowCount).map { rowIdx =>
-      val values = dataset.columns.map(_.getValue(rowIdx))
-      Row.fromSeq(values)
+    val cols = dataset.columns
+    val colCount = cols.length
+    val rows = Array.tabulate(dataset.rowCount) { rowIdx =>
+      val values = new Array[Any](colCount)
+      var j = 0 // scalafix:ok DisableSyntax.var
+      while (j < colCount) {
+        values(j) = cols(j).getValue(rowIdx)
+        j += 1
+      }
+      Row.fromSeq(values.toIndexedSeq)
     }
-
     val javaRows = java.util.Arrays.asList(rows*)
     spark.createDataFrame(javaRows, structType)
   }
@@ -30,11 +36,16 @@ object DataFrameBuilder {
   ): DataFrame = {
     val structType = SchemaConverter.toStructType(schema)
     val rowCount = if (columns.isEmpty) 0 else columns.head.length
-    val rows = (0 until rowCount).map { rowIdx =>
-      val values = columns.map(_.getValue(rowIdx))
-      Row.fromSeq(values)
+    val colCount = columns.length
+    val rows = Array.tabulate(rowCount) { rowIdx =>
+      val values = new Array[Any](colCount)
+      var j = 0 // scalafix:ok DisableSyntax.var
+      while (j < colCount) {
+        values(j) = columns(j).getValue(rowIdx)
+        j += 1
+      }
+      Row.fromSeq(values.toIndexedSeq)
     }
-
     val javaRows = java.util.Arrays.asList(rows*)
     spark.createDataFrame(javaRows, structType)
   }

@@ -21,8 +21,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     try {
       val plan = buildPlan(dataset)
       val rows = plan.df.collect()
-      val values = rows.iterator.map(r => RowConverter.fromRowUnsafe(r, plan.schema)).toVector
-      MaterializedDataset.fromVector(values)(using plan.schema)
+      RowConverter.toMaterialized(rows, plan.schema)
     } catch {
       case e: Exception =>
         Left(ExecutionError.InvalidValue(s"Spark execution failed: ${e.getMessage}"))

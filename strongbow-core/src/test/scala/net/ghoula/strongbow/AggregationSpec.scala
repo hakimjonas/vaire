@@ -38,6 +38,46 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right(0)
   }
 
+  "SumDouble" should "compute total of doubles" in {
+    val doubleColumn = Column.DoubleColumn(
+      Array(1.5, 2.5, 3.0, 4.0, 5.0),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val columns = Vector(doubleColumn)
+
+    val sumExpr = Expr.SumDouble(Expr.Cell[Double, Double]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(sumExpr, columns)
+
+    result shouldBe Right(16.0)
+  }
+
+  it should "return 0.0 for empty dataset" in {
+    val sumExpr = Expr.SumDouble(Expr.Cell[Double, Double]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(sumExpr, Vector.empty)
+
+    result shouldBe Right(0.0)
+  }
+
+  "SumLong" should "compute total of longs" in {
+    val longColumn = Column.LongColumn(
+      Array(100L, 200L, 300L, 400L, 500L),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val columns = Vector(longColumn)
+
+    val sumExpr = Expr.SumLong(Expr.Cell[Long, Long]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(sumExpr, columns)
+
+    result shouldBe Right(1500L)
+  }
+
+  it should "return 0L for empty dataset" in {
+    val sumExpr = Expr.SumLong(Expr.Cell[Long, Long]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(sumExpr, Vector.empty)
+
+    result shouldBe Right(0L)
+  }
+
   "Avg" should "compute average using zero casts" in {
     val doubleColumn = Column.DoubleColumn(
       Array(1.0, 2.0, 3.0, 4.0, 5.0),

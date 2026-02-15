@@ -49,6 +49,8 @@ object ExprInterpreter {
                 column.getString(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.BooleanType =>
                 column.getBoolean(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+              case ColumnType.DateType =>
+                java.time.LocalDate.ofEpochDay(column.getDateEpochDay(idx).toLong).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.AnyType | ColumnType.OptionType(_) =>
                 column.getValue(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
             }
@@ -221,9 +223,52 @@ object ExprInterpreter {
           case Left(err) => Left(err)
         }
 
-      case _: Expr.Sum[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] |
-          _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] | _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
+      case like: Expr.Like[Row] =>
+        for {
+          v <- eval(like.expr, columns, rowIdx)
+        } yield likeToRegex(like.pattern).matches(v)
+
+      case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] |
+          _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] |
+          _: Expr.CountIf[Row] | _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
+
+      case dad: Expr.DateAddDays[Row] =>
+        for {
+          d <- eval(dad.date, columns, rowIdx)
+          n <- eval(dad.days, columns, rowIdx)
+        } yield d.plusDays(n.toLong)
+
+      case dsd: Expr.DateSubDays[Row] =>
+        for {
+          d <- eval(dsd.date, columns, rowIdx)
+          n <- eval(dsd.days, columns, rowIdx)
+        } yield d.minusDays(n.toLong)
+
+      case dam: Expr.DateAddMonths[Row] =>
+        for {
+          d <- eval(dam.date, columns, rowIdx)
+          n <- eval(dam.months, columns, rowIdx)
+        } yield d.plusMonths(n.toLong)
+
+      case dd: Expr.DateDiff[Row] =>
+        for {
+          l <- eval(dd.left, columns, rowIdx)
+          r <- eval(dd.right, columns, rowIdx)
+        } yield java.time.temporal.ChronoUnit.DAYS.between(r, l).toInt
+
+      case ey: Expr.ExtractYear[Row] =>
+        eval(ey.date, columns, rowIdx).map(_.getYear)
+
+      case em: Expr.ExtractMonth[Row] =>
+        eval(em.date, columns, rowIdx).map(_.getMonthValue)
+
+      case ed: Expr.ExtractDay[Row] =>
+        eval(ed.date, columns, rowIdx).map(_.getDayOfMonth)
+
+      case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] |
+          _: Expr.Lag[Row, ?] | _: Expr.Lead[Row, ?] =>
+        Left(ExecutionError.UnsupportedOperation("Window functions not supported in row-level eval"))
     }
   }
 
@@ -303,6 +348,10 @@ object ExprInterpreter {
         val cond = evalBoolean(when.condition, columns, rowIdx)
         if (cond) evalBoolean(when.thenExpr, columns, rowIdx)
         else evalBoolean(when.elseExpr, columns, rowIdx)
+
+      case like: Expr.Like[Row] =>
+        val v = evalAny(like.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        likeToRegex(like.pattern).matches(v)
     }
   }
 
@@ -326,6 +375,7 @@ object ExprInterpreter {
           case ColumnType.DoubleType => column.getDouble(idx)
           case ColumnType.StringType => column.getString(idx)
           case ColumnType.BooleanType => column.getBoolean(idx)
+          case ColumnType.DateType => java.time.LocalDate.ofEpochDay(column.getDateEpochDay(idx).toLong)
           case ColumnType.AnyType | ColumnType.OptionType(_) => column.getValue(idx)
         }
 
@@ -406,12 +456,42 @@ object ExprInterpreter {
         else evalAny(when.elseExpr, columns, rowIdx)
 
       case boolExpr: (Expr.Gt[Row, _] | Expr.Lt[Row, _] | Expr.Gte[Row, _] | Expr.Lte[Row, _] | Expr.Eq[Row, _] |
-            Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _]) =>
+            Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _] |
+            Expr.Like[Row]) =>
         evalBoolean(
           boolExpr.asInstanceOf[Expr[Row, Boolean]],
           columns,
           rowIdx
         ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case dad: Expr.DateAddDays[Row] =>
+        val d = evalAny(dad.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val n = evalAny(dad.days, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        d.plusDays(n.toLong)
+
+      case dsd: Expr.DateSubDays[Row] =>
+        val d = evalAny(dsd.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val n = evalAny(dsd.days, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        d.minusDays(n.toLong)
+
+      case dam: Expr.DateAddMonths[Row] =>
+        val d = evalAny(dam.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val n = evalAny(dam.months, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        d.plusMonths(n.toLong)
+
+      case dd: Expr.DateDiff[Row] =>
+        val l = evalAny(dd.left, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(dd.right, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        java.time.temporal.ChronoUnit.DAYS.between(r, l).toInt
+
+      case ey: Expr.ExtractYear[Row] =>
+        evalAny(ey.date, columns, rowIdx).asInstanceOf[java.time.LocalDate].getYear // scalafix:ok DisableSyntax.asInstanceOf
+
+      case em: Expr.ExtractMonth[Row] =>
+        evalAny(em.date, columns, rowIdx).asInstanceOf[java.time.LocalDate].getMonthValue // scalafix:ok DisableSyntax.asInstanceOf
+
+      case ed: Expr.ExtractDay[Row] =>
+        evalAny(ed.date, columns, rowIdx).asInstanceOf[java.time.LocalDate].getDayOfMonth // scalafix:ok DisableSyntax.asInstanceOf
     }
   }
 
@@ -436,14 +516,21 @@ object ExprInterpreter {
         ColumnType.DoubleType
       case _: Expr.Concat[_] => ColumnType.StringType
       case _: Expr.Gt[_, _] | _: Expr.Lt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
-          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] =>
+          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] |
+          _: Expr.Like[_] =>
         ColumnType.BooleanType
       case w: Expr.When[_, _] => inferExprColumnType(w.thenExpr, columns)
       case g: Expr.GetOrElse[_, _] => inferExprColumnType(g.expr, columns)
       case _: Expr.Sum[_] => ColumnType.IntType
-      case _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] => ColumnType.LongType
-      case _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] => ColumnType.DoubleType
+      case _: Expr.SumDouble[_] | _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] => ColumnType.DoubleType
+      case _: Expr.SumLong[_] | _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
+        ColumnType.LongType
       case _: Expr.Max[_, _] | _: Expr.Min[_, _] => ColumnType.AnyType
+      case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] => ColumnType.DateType
+      case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>
+        ColumnType.IntType
+      case _: Expr.RowNumber[_] | _: Expr.Rank[_] | _: Expr.DenseRank[_] => ColumnType.IntType
+      case _: Expr.Lag[_, _] | _: Expr.Lead[_, _] => ColumnType.AnyType
     }
   }
 
@@ -491,6 +578,9 @@ object ExprInterpreter {
             Right(
               Column.boolean(Array.fill(rowCount)(c.value.asInstanceOf[Boolean]))
             ) // scalafix:ok DisableSyntax.asInstanceOf
+          case ColumnType.DateType =>
+            val epochDay = c.value.asInstanceOf[java.time.LocalDate].toEpochDay.toInt // scalafix:ok DisableSyntax.asInstanceOf
+            Right(Column.date(Array.fill(rowCount)(epochDay)))
           case _ =>
             Right(Column.any(Array.fill(rowCount)(c.value.asInstanceOf[Any]))) // scalafix:ok DisableSyntax.asInstanceOf
         }
@@ -812,6 +902,10 @@ object ExprInterpreter {
           Right(0L)
         case _: Expr.Sum[Row] =>
           Right(0)
+        case _: Expr.SumDouble[Row] =>
+          Right(0.0)
+        case _: Expr.SumLong[Row] =>
+          Right(0L)
         case _: Expr.Avg[Row] =>
           Right(0.0)
         case _: Expr.Max[Row, ?] =>
@@ -837,6 +931,22 @@ object ExprInterpreter {
           (0 until rowCount).foldLeft[Either[ExecutionError, Int]](Right(0)) { (acc, rowIdx) =>
             acc.flatMap { currentSum =>
               eval(sum.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+            }
+          }
+
+        case sumD: Expr.SumDouble[Row] =>
+          val rowCount = columns.head.length
+          (0 until rowCount).foldLeft[Either[ExecutionError, Double]](Right(0.0)) { (acc, rowIdx) =>
+            acc.flatMap { currentSum =>
+              eval(sumD.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+            }
+          }
+
+        case sumL: Expr.SumLong[Row] =>
+          val rowCount = columns.head.length
+          (0 until rowCount).foldLeft[Either[ExecutionError, Long]](Right(0L)) { (acc, rowIdx) =>
+            acc.flatMap { currentSum =>
+              eval(sumL.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
             }
           }
 
@@ -916,5 +1026,22 @@ object ExprInterpreter {
           }
       }
     }
+  }
+
+  /** Convert a SQL LIKE pattern to a regex. `%` → `.*`, `_` → `.`, others escaped. */
+  private def likeToRegex(pattern: String): scala.util.matching.Regex = {
+    val sb = new StringBuilder("(?s)") // DOTALL so `.` matches newlines
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < pattern.length) {
+      pattern.charAt(i) match {
+        case '%' => sb.append(".*")
+        case '_' => sb.append('.')
+        case c =>
+          if ("\\[]{}()^$.|*+?".indexOf(c) >= 0) sb.append('\\')
+          sb.append(c)
+      }
+      i += 1
+    }
+    sb.toString.r
   }
 }

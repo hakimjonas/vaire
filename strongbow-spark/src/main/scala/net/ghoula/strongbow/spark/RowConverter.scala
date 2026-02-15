@@ -11,14 +11,29 @@ object RowConverter {
   /** Encode a Strongbow value to a Spark Row via Schema. */
   def toRow[T](value: T, schema: Schema[T]): Row = {
     val encoded = schema.encode(value)
-    Row.fromSeq(encoded)
+    val converted = encoded.zip(schema.columnTypes).map { case (v, ct) =>
+      ct match {
+        case net.ghoula.strongbow.ColumnType.DateType =>
+          v match {
+            case d: java.time.LocalDate => java.sql.Date.valueOf(d)
+            case other => other
+          }
+        case _ => v
+      }
+    }
+    Row.fromSeq(converted)
   }
 
   /** Decode a Spark Row to a Strongbow value via Schema. */
   def fromRow[T](row: Row, schema: Schema[T]): Either[DecodeError, T] = {
     val values = (0 until row.size).map { i =>
       if (row.isNullAt(i)) null // scalafix:ok DisableSyntax.null
-      else row.get(i)
+      else {
+        row.get(i) match {
+          case d: java.sql.Date => d.toLocalDate
+          case other => other
+        }
+      }
     }.toVector
     schema.decode(values)
   }

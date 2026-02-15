@@ -49,9 +49,10 @@ object ExprMacro {
       case '[Double] => '{ ColumnType.DoubleType }
       case '[String] => '{ ColumnType.StringType }
       case '[Boolean] => '{ ColumnType.BooleanType }
+      case '[java.time.LocalDate] => '{ ColumnType.DateType }
       case _ =>
         report.errorAndAbort(
-          s"Unsupported field type ${Type.show[A]}. Only Int, Long, Double, String, Boolean are supported."
+          s"Unsupported field type ${Type.show[A]}. Only Int, Long, Double, String, Boolean, LocalDate are supported."
         )
     }
   }

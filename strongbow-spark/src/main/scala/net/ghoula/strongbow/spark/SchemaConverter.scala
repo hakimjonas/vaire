@@ -3,6 +3,7 @@ package net.ghoula.strongbow.spark
 import org.apache.spark.sql.types.{
   BooleanType => SparkBooleanType,
   DataType => SparkDataType,
+  DateType => SparkDateType,
   DoubleType => SparkDoubleType,
   IntegerType => SparkIntegerType,
   LongType => SparkLongType,
@@ -36,6 +37,7 @@ object SchemaConverter {
     case ColumnType.DoubleType => SparkDoubleType
     case ColumnType.StringType => SparkStringType
     case ColumnType.BooleanType => SparkBooleanType
+    case ColumnType.DateType => SparkDateType
     case ColumnType.OptionType(inner) => toSparkType(inner)
     case ColumnType.AnyType => SparkStringType // fallback
   }
@@ -47,6 +49,7 @@ object SchemaConverter {
     case SparkDoubleType => ColumnType.DoubleType
     case SparkStringType => ColumnType.StringType
     case SparkBooleanType => ColumnType.BooleanType
+    case SparkDateType => ColumnType.DateType
     case _ => ColumnType.AnyType
   }
 }

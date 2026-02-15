@@ -186,9 +186,19 @@ object ExprToColumn {
           (e, ct) <- convert(goe.expr)
         } yield (sparkWhen(e.isNull, toLit(goe.default)).otherwise(e), ct)
 
+      // String pattern matching
+      case lk: Expr.Like[Row] =>
+        convert(lk.expr).map { case (sparkCol, _) => (sparkCol.like(lk.pattern), ColumnType.BooleanType) }
+
       // Aggregations
       case s: Expr.Sum[Row] =>
         convert(s.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.IntType) }
+
+      case sd: Expr.SumDouble[Row] =>
+        convert(sd.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.DoubleType) }
+
+      case sl: Expr.SumLong[Row] =>
+        convert(sl.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.LongType) }
 
       case _: Expr.Count[Row] =>
         Right((count(lit(1)), ColumnType.LongType))
@@ -215,6 +225,68 @@ object ExprToColumn {
 
       case sdp: Expr.StdDevPop[Row] =>
         convert(sdp.expr).map { case (sparkCol, _) => (stddev_pop(sparkCol), ColumnType.DoubleType) }
+
+      // Date expressions
+      case dad: Expr.DateAddDays[Row] =>
+        for {
+          (d, _) <- convert(dad.date)
+          (n, _) <- convert(dad.days)
+        } yield (date_add(d, n), ColumnType.DateType)
+
+      case dsd: Expr.DateSubDays[Row] =>
+        for {
+          (d, _) <- convert(dsd.date)
+          (n, _) <- convert(dsd.days)
+        } yield (date_sub(d, n), ColumnType.DateType)
+
+      case dam: Expr.DateAddMonths[Row] =>
+        for {
+          (d, _) <- convert(dam.date)
+          (n, _) <- convert(dam.months)
+        } yield (add_months(d, n), ColumnType.DateType)
+
+      case dd: Expr.DateDiff[Row] =>
+        for {
+          (l, _) <- convert(dd.left)
+          (r, _) <- convert(dd.right)
+        } yield (datediff(l, r), ColumnType.IntType)
+
+      case ey: Expr.ExtractYear[Row] =>
+        convert(ey.date).map { case (d, _) => (year(d), ColumnType.IntType) }
+
+      case em: Expr.ExtractMonth[Row] =>
+        convert(em.date).map { case (d, _) => (month(d), ColumnType.IntType) }
+
+      case ed: Expr.ExtractDay[Row] =>
+        convert(ed.date).map { case (d, _) => (dayofmonth(d), ColumnType.IntType) }
+
+      // Window functions — these produce Spark Column but need .over(windowSpec) at call site
+      case _: Expr.RowNumber[Row] =>
+        Right((row_number(), ColumnType.IntType))
+
+      case _: Expr.Rank[Row] =>
+        Right((rank(), ColumnType.IntType))
+
+      case _: Expr.DenseRank[Row] =>
+        Right((dense_rank(), ColumnType.IntType))
+
+      case lagExpr: Expr.Lag[Row, _] =>
+        convert(lagExpr.expr).map { case (sparkCol, ct) =>
+          val lagCol = lagExpr.default match {
+            case Some(d) => lag(sparkCol, lagExpr.offset, d)
+            case scala.None => lag(sparkCol, lagExpr.offset)
+          }
+          (lagCol, ct)
+        }
+
+      case leadExpr: Expr.Lead[Row, _] =>
+        convert(leadExpr.expr).map { case (sparkCol, ct) =>
+          val leadCol = leadExpr.default match {
+            case Some(d) => lead(sparkCol, leadExpr.offset, d)
+            case scala.None => lead(sparkCol, leadExpr.offset)
+          }
+          (leadCol, ct)
+        }
     }
   }
 

@@ -27,3 +27,6 @@ project/project/
 # JVM crash logs
 hs_err_pid*
 core.*
+
+# Docker local overrides
+docker/spark-cluster/.env

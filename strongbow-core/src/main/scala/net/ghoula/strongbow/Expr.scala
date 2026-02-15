@@ -49,11 +49,14 @@ enum Expr[Row, +A] {
 
   case Concat[Row](left: Expr[Row, String], right: Expr[Row, String]) extends Expr[Row, String]
   case Length[Row](expr: Expr[Row, String]) extends Expr[Row, Int]
+  case Like[Row](expr: Expr[Row, String], pattern: String) extends Expr[Row, Boolean]
 
   case IsDefined[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Boolean]
   case GetOrElse[Row, A](expr: Expr[Row, Option[A]], default: A) extends Expr[Row, A]
 
   case Sum[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case SumDouble[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case SumLong[Row](expr: Expr[Row, Long]) extends Expr[Row, Long]
   case Count[Row]() extends Expr[Row, Long]
   case Max[Row, A](expr: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Option[A]]
   case Min[Row, A](expr: Expr[Row, A], ordering: Ordering[A]) extends Expr[Row, Option[A]]
@@ -62,6 +65,26 @@ enum Expr[Row, +A] {
   case CountIf[Row](predicate: Expr[Row, Boolean]) extends Expr[Row, Long]
   case StdDev[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
   case StdDevPop[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+
+  // Phase 3: Date expressions
+  case DateAddDays[Row](date: Expr[Row, java.time.LocalDate], days: Expr[Row, Int])
+      extends Expr[Row, java.time.LocalDate]
+  case DateSubDays[Row](date: Expr[Row, java.time.LocalDate], days: Expr[Row, Int])
+      extends Expr[Row, java.time.LocalDate]
+  case DateAddMonths[Row](date: Expr[Row, java.time.LocalDate], months: Expr[Row, Int])
+      extends Expr[Row, java.time.LocalDate]
+  case DateDiff[Row](left: Expr[Row, java.time.LocalDate], right: Expr[Row, java.time.LocalDate])
+      extends Expr[Row, Int]
+  case ExtractYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+  case ExtractMonth[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+  case ExtractDay[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+
+  // Phase 5: Window function expressions
+  case RowNumber[Row]() extends Expr[Row, Int]
+  case Rank[Row]() extends Expr[Row, Int]
+  case DenseRank[Row]() extends Expr[Row, Int]
+  case Lag[Row, A](expr: Expr[Row, A], offset: Int, default: Option[A]) extends Expr[Row, A]
+  case Lead[Row, A](expr: Expr[Row, A], offset: Int, default: Option[A]) extends Expr[Row, A]
 }
 
 object Expr {
@@ -105,6 +128,16 @@ object Expr {
   /** Population standard deviation. */
   def stddevPop[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
     StdDevPop(expr)
+  }
+
+  /** Sum of Double-valued expressions. */
+  def sumDouble[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
+    SumDouble(expr)
+  }
+
+  /** Sum of Long-valued expressions. */
+  def sumLong[Row](expr: Expr[Row, Long]): Expr[Row, Long] = {
+    SumLong(expr)
   }
 
   extension [Row, A](left: Expr[Row, A]) {
@@ -179,11 +212,22 @@ object Expr {
   extension [Row](left: Expr[Row, String]) {
     inline def ++(right: Expr[Row, String]): Expr[Row, String] = Concat(left, right)
     inline def length: Expr[Row, Int] = Length(left)
+    inline def like(pattern: String): Expr[Row, Boolean] = Like(left, pattern)
   }
 
   extension [Row, A](e: Expr[Row, Option[A]]) {
     inline def isDefined: Expr[Row, Boolean] = IsDefined(e)
     inline def getOrElse(default: A): Expr[Row, A] = GetOrElse(e, default)
+  }
+
+  extension [Row](d: Expr[Row, java.time.LocalDate]) {
+    inline def addDays(days: Expr[Row, Int]): Expr[Row, java.time.LocalDate] = DateAddDays(d, days)
+    inline def subDays(days: Expr[Row, Int]): Expr[Row, java.time.LocalDate] = DateSubDays(d, days)
+    inline def addMonths(months: Expr[Row, Int]): Expr[Row, java.time.LocalDate] = DateAddMonths(d, months)
+    inline def dateDiff(other: Expr[Row, java.time.LocalDate]): Expr[Row, Int] = DateDiff(d, other)
+    inline def year: Expr[Row, Int] = ExtractYear(d)
+    inline def month: Expr[Row, Int] = ExtractMonth(d)
+    inline def day: Expr[Row, Int] = ExtractDay(d)
   }
 
   /** Infer the output ColumnType of an expression, if statically known. */
@@ -194,12 +238,14 @@ object Expr {
       case n: Expr.Named[_, _] => n.expr.outputType
       case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Sum[_] =>
         Some(ColumnType.IntType)
-      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] =>
+      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] | _: Expr.SumLong[_] =>
         Some(ColumnType.LongType)
-      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] =>
+      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] |
+          _: Expr.SumDouble[_] =>
         Some(ColumnType.DoubleType)
       case _: Expr.Gt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lt[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
-          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] =>
+          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] |
+          _: Expr.Like[_] =>
         Some(ColumnType.BooleanType)
       case w: Expr.When[_, _] => w.thenExpr.outputType
       case _: Expr.Concat[_] => Some(ColumnType.StringType)
@@ -210,6 +256,13 @@ object Expr {
       case _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] =>
         Some(ColumnType.DoubleType)
       case _: Expr.Max[_, _] | _: Expr.Min[_, _] => None
+      case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] =>
+        Some(ColumnType.DateType)
+      case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>
+        Some(ColumnType.IntType)
+      case _: Expr.RowNumber[_] | _: Expr.Rank[_] | _: Expr.DenseRank[_] =>
+        Some(ColumnType.IntType)
+      case _: Expr.Lag[_, _] | _: Expr.Lead[_, _] => None
     }
   }
 }

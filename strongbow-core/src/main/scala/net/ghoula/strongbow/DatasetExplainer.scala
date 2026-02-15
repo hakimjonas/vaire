@@ -92,6 +92,22 @@ object DatasetExplainer {
 
       case Dataset.GroupedValues(grouped, _) =>
         s"GroupedValues\n${explainGrouped(grouped, indent + 1)}"
+
+      case Dataset.GroupByAgg(parent, keySpecs, aggSpecs, _) =>
+        val keys = keySpecs.map(_.name).mkString(", ")
+        val aggs = aggSpecs.map(_.name).mkString(", ")
+        s"GroupByAgg[keys=($keys), aggs=($aggs)]\n${explain(parent, indent + 1)}"
+
+      case Dataset.SortByExprs(parent, sortKeys) =>
+        val dirs = sortKeys.map(spec => if (spec.ascending) "ASC" else "DESC").mkString(", ")
+        s"SortByExprs[$dirs]\n${explain(parent, indent + 1)}"
+
+      case Dataset.LeftSemiJoinOn(left, right, _, _, _, _) =>
+        s"LeftSemiJoinOn[expr]\n${explain(left, indent + 1)}\n${explain(right, indent + 1)}"
+
+      case Dataset.WithWindow(parent, windowExprs, _, _) =>
+        val cols = windowExprs.map(_.name).mkString(", ")
+        s"WithWindow[$cols]\n${explain(parent, indent + 1)}"
     }
     s"$prefix$node"
   }

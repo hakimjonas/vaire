@@ -10,6 +10,7 @@ enum ColumnType derives CanEqual {
   case DoubleType
   case StringType
   case BooleanType
+  case DateType
   case OptionType(inner: ColumnType)
   case AnyType
 }

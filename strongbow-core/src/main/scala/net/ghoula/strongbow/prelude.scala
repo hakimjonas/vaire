@@ -45,6 +45,9 @@ object prelude {
   // Action methods
   export net.ghoula.strongbow.DatasetActions.*
 
+  // Typed spec types for N-ary operations
+  export net.ghoula.strongbow.specs.{SortSpec, KeySpec, AggSpec, WindowExprSpec}
+
   // Debug/explain utilities
   export net.ghoula.strongbow.DatasetExplainer
 

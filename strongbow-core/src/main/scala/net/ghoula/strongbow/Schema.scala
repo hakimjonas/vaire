@@ -94,6 +94,24 @@ object Schema {
     }
   }
 
+  given dateSchema: Schema[java.time.LocalDate] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DateType)
+    def encode(value: java.time.LocalDate): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, java.time.LocalDate] = {
+      if (values.length != 1) {
+        Left(DecodeError.WrongArity(1, values.length))
+      } else {
+        values.head match {
+          case d: java.time.LocalDate => Right(d)
+          case i: Int => Right(java.time.LocalDate.ofEpochDay(i.toLong))
+          case other => Left(DecodeError.TypeMismatch("LocalDate", other.getClass.getSimpleName))
+        }
+      }
+    }
+  }
+
   given booleanSchema: Schema[Boolean] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")

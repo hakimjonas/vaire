@@ -16,6 +16,7 @@ enum Column {
   case DoubleColumn(data: Array[Double], nulls: BitSet)
   case StringColumn(data: Array[String], nulls: BitSet)
   case BooleanColumn(data: Array[Boolean], nulls: BitSet)
+  case DateColumn(data: Array[Int], nulls: BitSet) // epoch days since 1970-01-01
   case AnyColumn(data: Array[Any], nulls: BitSet)
 
   inline def length: Int = this match {
@@ -24,6 +25,7 @@ enum Column {
     case DoubleColumn(data, _) => data.length
     case StringColumn(data, _) => data.length
     case BooleanColumn(data, _) => data.length
+    case DateColumn(data, _) => data.length
     case AnyColumn(data, _) => data.length
   }
 
@@ -33,6 +35,7 @@ enum Column {
     case DoubleColumn(_, _) => ColumnType.DoubleType
     case StringColumn(_, _) => ColumnType.StringType
     case BooleanColumn(_, _) => ColumnType.BooleanType
+    case DateColumn(_, _) => ColumnType.DateType
     case AnyColumn(_, _) => ColumnType.AnyType
   }
 
@@ -42,6 +45,7 @@ enum Column {
     case DoubleColumn(_, nulls) => nulls.contains(index.toInt)
     case StringColumn(_, nulls) => nulls.contains(index.toInt)
     case BooleanColumn(_, nulls) => nulls.contains(index.toInt)
+    case DateColumn(_, nulls) => nulls.contains(index.toInt)
     case AnyColumn(_, nulls) => nulls.contains(index.toInt)
   }
 
@@ -53,6 +57,9 @@ enum Column {
     case StringColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
     case BooleanColumn(data, nulls) =>
       if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
+    case DateColumn(data, nulls) =>
+      if (nulls.contains(index)) null // scalafix:ok DisableSyntax.null
+      else java.time.LocalDate.ofEpochDay(data(index).toLong)
     case AnyColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
   }
 
@@ -110,6 +117,14 @@ enum Column {
       throw new IllegalStateException(s"Cannot get Boolean from ${this.columnType}") // scalafix:ok DisableSyntax.throw
   }
 
+  /** Get date value as epoch day Int. */
+  inline def getDateEpochDay(index: Int): Int = this match {
+    case DateColumn(data, nulls) =>
+      if (nulls.contains(index)) 0 else data(index)
+    case _ =>
+      throw new IllegalStateException(s"Cannot get Date from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+  }
+
   /** Typed prefix slicing — takes the first n elements without boxing.
     *
     * Uses `Array.copyOfRange` on typed arrays for zero-boxing, cache-friendly copies. This replaces
@@ -131,6 +146,8 @@ enum Column {
         StringColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
       case BooleanColumn(data, nulls) =>
         BooleanColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
+      case DateColumn(data, nulls) =>
+        DateColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
       case AnyColumn(data, nulls) =>
         val arr = new Array[Any](len)
         System.arraycopy(data, 0, arr, 0, len)
@@ -157,6 +174,7 @@ enum Column {
         case DoubleColumn(_, n) => n
         case StringColumn(_, n) => n
         case BooleanColumn(_, n) => n
+        case DateColumn(_, n) => n
         case AnyColumn(_, n) => n
       }
       val leftNulls = this match {
@@ -165,6 +183,7 @@ enum Column {
         case DoubleColumn(_, n) => n
         case StringColumn(_, n) => n
         case BooleanColumn(_, n) => n
+        case DateColumn(_, n) => n
         case AnyColumn(_, n) => n
       }
       val combinedNulls = leftNulls | rightNulls.map(_ + leftLen)
@@ -195,6 +214,11 @@ enum Column {
           System.arraycopy(l, 0, arr, 0, leftLen)
           System.arraycopy(r, 0, arr, leftLen, rightLen)
           Right(BooleanColumn(arr, combinedNulls))
+        case (DateColumn(l, _), DateColumn(r, _)) =>
+          val arr = new Array[Int](leftLen + rightLen)
+          System.arraycopy(l, 0, arr, 0, leftLen)
+          System.arraycopy(r, 0, arr, leftLen, rightLen)
+          Right(DateColumn(arr, combinedNulls))
         case (AnyColumn(l, _), AnyColumn(r, _)) =>
           val arr = new Array[Any](leftLen + rightLen)
           System.arraycopy(l, 0, arr, 0, leftLen)
@@ -240,6 +264,8 @@ enum Column {
       )
     case BooleanColumn(data, nulls) =>
       BooleanColumn(sliceArray(data, indices, nulls, false), buildNullSet(nulls, indices))
+    case DateColumn(data, nulls) =>
+      DateColumn(sliceArray(data, indices, nulls, 0), buildNullSet(nulls, indices))
     case AnyColumn(data, nulls) =>
       AnyColumn(sliceArray(data, indices, nulls, null), buildNullSet(nulls, indices)) // scalafix:ok DisableSyntax.null
   }
@@ -292,6 +318,11 @@ object Column {
     BooleanColumn(data, nulls)
   }
 
+  /** Create a DateColumn from epoch day values. */
+  inline def date(data: Array[Int], nulls: BitSet = BitSet.empty): Column = {
+    DateColumn(data, nulls)
+  }
+
   inline def any(data: Array[Any], nulls: BitSet = BitSet.empty): Column = {
     AnyColumn(data, nulls)
   }
@@ -303,6 +334,7 @@ object Column {
     case ColumnType.DoubleType => DoubleColumn(Array.empty[Double], BitSet.empty)
     case ColumnType.StringType => StringColumn(Array.empty[String], BitSet.empty)
     case ColumnType.BooleanType => BooleanColumn(Array.empty[Boolean], BitSet.empty)
+    case ColumnType.DateType => DateColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.AnyType => AnyColumn(Array.empty[Any], BitSet.empty)
     case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any], BitSet.empty)
   }
@@ -409,6 +441,23 @@ object Column {
         }
 
         result.map(builder => BooleanColumn(builder.result().toArray, nullIndices))
+
+      case ColumnType.DateType =>
+        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Int]]](
+          Right(new scala.collection.immutable.VectorBuilder[Int]())
+        ) {
+          case (Left(err), _) => Left(err)
+          case (Right(builder), v) =>
+            Option(v) match {
+              case None => Right(builder += 0)
+              case Some(d: java.time.LocalDate) => Right(builder += d.toEpochDay.toInt)
+              case Some(i: Int) => Right(builder += i) // already epoch days
+              case Some(other) =>
+                Left(ExecutionError.TypeMismatch("LocalDate", other.getClass.getSimpleName, "Column.fromValues"))
+            }
+        }
+
+        result.map(builder => DateColumn(builder.result().toArray, nullIndices))
 
       case ColumnType.AnyType | ColumnType.OptionType(_) =>
         Right(AnyColumn(values.toArray, nullIndices))

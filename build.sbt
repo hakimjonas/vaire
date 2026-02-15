@@ -85,7 +85,10 @@ lazy val spark = project
       "--add-opens=java.base/java.io=ALL-UNNAMED",
       "--add-opens=java.base/java.util=ALL-UNNAMED",
       "--add-opens=java.base/java.nio=ALL-UNNAMED"
-    )
+    ),
+    Test / javaOptions ++= {
+      sys.props.get("spark.test.master").map(v => s"-Dspark.test.master=$v").toSeq
+    }
   )
 
 // Optional integration modules (commented out until dependencies are published):

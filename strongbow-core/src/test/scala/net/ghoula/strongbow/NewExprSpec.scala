@@ -129,6 +129,69 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     results shouldBe Seq(Right(5), Right(0), Right(5))
   }
 
+  // --- Like ---
+
+  "like" should "match with % wildcard" in {
+    val col = Column.string(Array("PROMO STEEL", "STANDARD COPPER", "PROMO BRASS", "ECONOMY TIN"))
+    val columns = Vector(col)
+
+    val strCell = Expr.Cell[String, String]("type", ColumnIndex(0))
+    val expr = strCell.like("PROMO%")
+
+    val results = (0 until 4).map { idx =>
+      ExprInterpreter.eval(expr, columns, RowIndex(idx))
+    }
+
+    results shouldBe Seq(Right(true), Right(false), Right(true), Right(false))
+  }
+
+  it should "match with _ wildcard" in {
+    val col = Column.string(Array("abc", "aXc", "abcd", "ac"))
+    val columns = Vector(col)
+
+    val strCell = Expr.Cell[String, String]("value", ColumnIndex(0))
+    val expr = strCell.like("a_c")
+
+    val results = (0 until 4).map { idx =>
+      ExprInterpreter.eval(expr, columns, RowIndex(idx))
+    }
+
+    results shouldBe Seq(Right(true), Right(true), Right(false), Right(false))
+  }
+
+  it should "match exact strings without wildcards" in {
+    val col = Column.string(Array("hello", "world"))
+    val columns = Vector(col)
+
+    val strCell = Expr.Cell[String, String]("value", ColumnIndex(0))
+    val expr = strCell.like("hello")
+
+    val results = (0 until 2).map { idx =>
+      ExprInterpreter.eval(expr, columns, RowIndex(idx))
+    }
+
+    results shouldBe Seq(Right(true), Right(false))
+  }
+
+  it should "match with % in the middle" in {
+    val col = Column.string(Array("abcdef", "aef", "aXYZef", "xyz"))
+    val columns = Vector(col)
+
+    val strCell = Expr.Cell[String, String]("value", ColumnIndex(0))
+    val expr = strCell.like("a%ef")
+
+    val results = (0 until 4).map { idx =>
+      ExprInterpreter.eval(expr, columns, RowIndex(idx))
+    }
+
+    results shouldBe Seq(Right(true), Right(true), Right(true), Right(false))
+  }
+
+  "Like outputType" should "return BooleanType" in {
+    val strCell = Expr.Cell[String, String]("value", ColumnIndex(0))
+    strCell.like("PROMO%").outputType shouldBe Some(ColumnType.BooleanType)
+  }
+
   // --- outputType ---
 
   "outputType" should "return IntType for arithmetic expressions" in {
@@ -165,11 +228,17 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     Expr.CountDistinct(Expr.Cell[Int, Int]("value", ColumnIndex(0))).outputType shouldBe Some(ColumnType.LongType)
   }
 
-  "outputType" should "return DoubleType for Avg and StdDev" in {
+  "outputType" should "return DoubleType for Avg, StdDev, and SumDouble" in {
     val cell = Expr.Cell[Double, Double]("value", ColumnIndex(0))
     Expr.Avg(cell).outputType shouldBe Some(ColumnType.DoubleType)
     Expr.StdDev(cell).outputType shouldBe Some(ColumnType.DoubleType)
     Expr.StdDevPop(cell).outputType shouldBe Some(ColumnType.DoubleType)
+    Expr.SumDouble(cell).outputType shouldBe Some(ColumnType.DoubleType)
+  }
+
+  "outputType" should "return LongType for SumLong" in {
+    val cell = Expr.Cell[Long, Long]("value", ColumnIndex(0))
+    Expr.SumLong(cell).outputType shouldBe Some(ColumnType.LongType)
   }
 
   "comparison operators" should "maintain zero-cast architecture" in {

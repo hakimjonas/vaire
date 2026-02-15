@@ -1,6 +1,7 @@
 package net.ghoula.strongbow
 
 import net.ghoula.strongbow.errors.{NonEmptyList, SchemaError}
+import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
 
 /** Immutable description of dataset transformations.
   *
@@ -87,6 +88,38 @@ enum Dataset[+T] {
   case GroupedToPairs[K, V](grouped: Grouped[K, V], schemaK: Schema[K], schemaV: Schema[V]) extends Dataset[(K, V)]
   case GroupedKeys[K, V](grouped: Grouped[K, V], schemaK: Schema[K]) extends Dataset[K]
   case GroupedValues[K, V](grouped: Grouped[K, V], schemaV: Schema[V]) extends Dataset[V]
+
+  // Phase 1: Distributed GROUP BY with vector-based keys and aggregations
+  case GroupByAgg[In, Out](
+    parent: Dataset[In],
+    keySpecs: Vector[KeySpec[In]],
+    aggSpecs: Vector[AggSpec[In]],
+    schema: Schema[Out]
+  ) extends Dataset[Out]
+
+  // Phase 2: Multi-column ORDER BY
+  case SortByExprs[T](
+    parent: Dataset[T],
+    sortKeys: Vector[SortSpec[T]]
+  ) extends Dataset[T]
+
+  // Phase 4: Left semi-join for IN/EXISTS subqueries
+  case LeftSemiJoinOn[A, B, K](
+    left: Dataset[A],
+    right: Dataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  ) extends Dataset[A]
+
+  // Phase 5: Window functions — appends window columns to parent
+  case WithWindow[In, Out](
+    parent: Dataset[In],
+    windowExprs: Vector[WindowExprSpec[In]],
+    windowSpec: WindowSpec[In],
+    schema: Schema[Out]
+  ) extends Dataset[Out]
 }
 
 object Dataset {
@@ -345,6 +378,45 @@ object Dataset {
       rightKeyType: ColumnType
     ): Dataset[T] = {
       LeftAntiJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
+    }
+
+    /** Expression-based semi join — for IN/EXISTS subquery patterns. */
+    inline def semiJoinOn[U, K](
+      other: Dataset[U],
+      leftKey: Expr[T, K],
+      rightKey: Expr[U, K],
+      leftKeyType: ColumnType,
+      rightKeyType: ColumnType
+    ): Dataset[T] = {
+      LeftSemiJoinOn(ds, other, leftKey, rightKey, leftKeyType, rightKeyType)
+    }
+
+    /** GROUP BY with arbitrary keys and aggregations, producing a new Dataset.
+      *
+      * Unlike the Grouped path, this uses Expr throughout — fully pushable to Spark.
+      * Supports any number of keys and aggregations (no 2-5 arity limit).
+      * HAVING is just `.filter()` on the result.
+      */
+    inline def groupByAgg[Out](
+      keys: Vector[KeySpec[T]],
+      aggs: Vector[AggSpec[T]]
+    )(using schema: Schema[Out]): Dataset[Out] = {
+      GroupByAgg(ds, keys, aggs, schema)
+    }
+
+    /** Multi-column ORDER BY with mixed ASC/DESC directions. */
+    inline def sortByExprs(
+      sortKeys: Vector[SortSpec[T]]
+    ): Dataset[T] = {
+      SortByExprs(ds, sortKeys)
+    }
+
+    /** Add window function columns to this dataset. */
+    inline def withWindow[Out](
+      windowExprs: Vector[WindowExprSpec[T]],
+      windowSpec: WindowSpec[T]
+    )(using schema: Schema[Out]): Dataset[Out] = {
+      WithWindow(ds, windowExprs, windowSpec, schema)
     }
   }
 

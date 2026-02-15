@@ -4,6 +4,7 @@ import org.apache.spark.sql.{DataFrame, SparkSession}
 
 import net.ghoula.strongbow.{Column => SBColumn, Dataset, Expr, Grouped, Interpreter, MaterializedDataset, Schema}
 import net.ghoula.strongbow.errors.ExecutionError
+import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
 
 /** Spark-based interpreter for Strongbow Dataset plans.
   *
@@ -166,6 +167,21 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
       case values: Dataset.GroupedValues[k, v] =>
         applyGroupedValues[k, v, T](values.grouped, values.schemaV)
+
+      case gba: Dataset.GroupByAgg[_, T] =>
+        val parent = buildPlan(gba.parent)
+        applyGroupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)
+
+      case srtExprs: Dataset.SortByExprs[T] =>
+        val parent = buildPlan(srtExprs.parent)
+        applySortByExprs(parent, srtExprs.sortKeys)
+
+      case jn: Dataset.LeftSemiJoinOn[a, b, _] =>
+        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_semi")
+
+      case ww: Dataset.WithWindow[_, T] =>
+        val parent = buildPlan(ww.parent)
+        applyWithWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
     }
   }
 
@@ -371,7 +387,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val rightColNames = right.df.columns.map(c => col(s"_r.$c"))
 
     val selectedDf = joinType match {
-      case "left_anti" =>
+      case "left_anti" | "left_semi" =>
         joinedDf.select(leftColNames*)
       case _ =>
         joinedDf.select((leftColNames ++ rightColNames)*)
@@ -401,7 +417,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val leftOpt = Schema.optionSchema[A](using leftSchema)
         val rightOpt = Schema.optionSchema[B](using rightSchema)
         Schema.tuple2Schema[Option[A], Option[B]](using leftOpt, rightOpt)
-      case "left_anti" =>
+      case "left_anti" | "left_semi" =>
         leftSchema
       case other =>
         throw new RuntimeException(s"Unknown join type: $other") // scalafix:ok DisableSyntax.throw
@@ -453,6 +469,123 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
     val df = createDataFrame(values, schemaV)
     SparkPlan(df, schemaV.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+  }
+
+  private def applyGroupByAgg[In, T](
+    parent: SparkPlan[In],
+    keySpecs: Vector[KeySpec[In]],
+    aggSpecs: Vector[AggSpec[In]],
+    schema: Schema[T]
+  ): SparkPlan[T] = {
+    val keyCols = keySpecs.map { spec =>
+      ExprToColumn.convert(spec.expr) match {
+        case Right((sparkCol, _)) => sparkCol.as(spec.name)
+        case Left(err) =>
+          throw new RuntimeException(s"Key expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+      }
+    }
+
+    val aggCols = aggSpecs.map { spec =>
+      ExprToColumn.convert(spec.expr) match {
+        case Right((sparkCol, _)) => sparkCol.as(spec.name)
+        case Left(err) =>
+          throw new RuntimeException(s"Agg expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+      }
+    }
+
+    val grouped = parent.df.groupBy(keyCols*)
+    val aggDf = grouped.agg(aggCols.head, aggCols.tail*)
+
+    // Rename output columns to match the output schema's column names
+    val outputColNames = schema.columnNames
+    val currentColNames = aggDf.columns.toVector
+    val renamedDf = currentColNames.zip(outputColNames).foldLeft(aggDf) { case (df, (current, target)) =>
+      if (current != target) df.withColumnRenamed(current, target) else df
+    }
+    SparkPlan(renamedDf, schema)
+  }
+
+  private def applySortByExprs[T](
+    parent: SparkPlan[T],
+    sortKeys: Vector[SortSpec[T]]
+  ): SparkPlan[T] = {
+    val sparkSortCols = sortKeys.map { spec =>
+      ExprToColumn.convert(spec.expr) match {
+        case Right((sparkCol, _)) =>
+          if (spec.ascending) sparkCol.asc else sparkCol.desc
+        case Left(_) =>
+          throw new RuntimeException("Sort expr conversion failed") // scalafix:ok DisableSyntax.throw
+      }
+    }
+    SparkPlan(parent.df.sort(sparkSortCols*), parent.schema)
+  }
+
+  private def applyWithWindow[In, T](
+    parent: SparkPlan[In],
+    windowExprs: Vector[WindowExprSpec[In]],
+    windowSpec: net.ghoula.strongbow.WindowSpec[In],
+    schema: Schema[T]
+  ): SparkPlan[T] = {
+    import org.apache.spark.sql.functions.*
+    import org.apache.spark.sql.expressions.Window
+
+    // Build Spark WindowSpec
+    val partCols = windowSpec.partitionBy.map { spec =>
+      ExprToColumn.convert(spec.expr) match {
+        case Right((sparkCol, _)) => sparkCol
+        case Left(err) =>
+          throw new RuntimeException(s"Window partition expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+      }
+    }
+
+    val orderSparkCols = windowSpec.orderBy.map { spec =>
+      ExprToColumn.convert(spec.expr) match {
+        case Right((sparkCol, _)) =>
+          if (spec.ascending) sparkCol.asc else sparkCol.desc
+        case Left(err) =>
+          throw new RuntimeException(s"Window order expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+      }
+    }
+
+    val w = {
+      val partitioned = if (partCols.nonEmpty) Window.partitionBy(partCols*) else Window.partitionBy()
+      if (orderSparkCols.nonEmpty) partitioned.orderBy(orderSparkCols*) else partitioned
+    }
+
+    // Add window columns
+    var df = parent.df // scalafix:ok DisableSyntax.var
+    windowExprs.foreach { spec =>
+      val windowCol: org.apache.spark.sql.Column = spec.expr match {
+        case _: Expr.RowNumber[_] => row_number().over(w)
+        case _: Expr.Rank[_] => rank().over(w)
+        case _: Expr.DenseRank[_] => dense_rank().over(w)
+        case lagExpr: Expr.Lag[_, _] =>
+          val innerCol = ExprToColumn.convert(lagExpr.expr) match {
+            case Right((sc, _)) => sc
+            case Left(err) =>
+              throw new RuntimeException(s"Lag expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+          }
+          lagExpr.default match {
+            case Some(d) => lag(innerCol, lagExpr.offset, d).over(w)
+            case scala.None => lag(innerCol, lagExpr.offset).over(w)
+          }
+        case leadExpr: Expr.Lead[_, _] =>
+          val innerCol = ExprToColumn.convert(leadExpr.expr) match {
+            case Right((sc, _)) => sc
+            case Left(err) =>
+              throw new RuntimeException(s"Lead expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+          }
+          leadExpr.default match {
+            case Some(d) => lead(innerCol, leadExpr.offset, d).over(w)
+            case scala.None => lead(innerCol, leadExpr.offset).over(w)
+          }
+        case other =>
+          throw new RuntimeException(s"Unsupported window expr: $other") // scalafix:ok DisableSyntax.throw
+      }
+      df = df.withColumn(spec.name, windowCol)
+    }
+
+    SparkPlan(df, schema)
   }
 
   private[spark] def createDataFrame[T](values: Vector[T], schema: Schema[T]): DataFrame = {

@@ -2,7 +2,7 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-import net.ghoula.strongbow.{Column => SBColumn, Dataset, Expr, Grouped, Interpreter, MaterializedDataset, Schema}
+import net.ghoula.strongbow.{Column => SBColumn, Dataset, Expr, Interpreter, MaterializedDataset, Schema}
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
 
@@ -158,15 +158,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case jn: Dataset.LeftAntiJoinOn[a, b, _] =>
         applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_anti")
 
-      case grp: Dataset.GroupedToPairs[k, v] =>
-        applyGroupedToPairs[k, v, T](grp.grouped, grp.schemaK, grp.schemaV)
-
-      case keys: Dataset.GroupedKeys[k, v] =>
-        applyGroupedKeys[k, v, T](keys.grouped, keys.schemaK)
-
-      case values: Dataset.GroupedValues[k, v] =>
-        applyGroupedValues[k, v, T](values.grouped, values.schemaV)
-
       case gba: Dataset.GroupByAgg[_, T] =>
         val parent = buildPlan(gba.parent)
         applyGroupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)
@@ -181,6 +172,54 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case ww: Dataset.WithWindow[_, T] =>
         val parent = buildPlan(ww.parent)
         applyWithWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
+
+      case rbk: Dataset.ReduceByKey[k, v] =>
+        val parent = buildPlan(rbk.parent)
+        val values = collectValues(parent).asInstanceOf[Vector[(k, v)]] // scalafix:ok DisableSyntax.asInstanceOf
+        val reduced = sparkReduceByKey(values, rbk.reduce)
+        given Schema[k] = rbk.schemaK
+        given Schema[v] = rbk.schemaV
+        val tupleSchema = Schema.tuple2Schema[k, v]
+        SparkPlan(
+          createDataFrame(reduced, tupleSchema),
+          tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        )
+
+      case abk: Dataset.AggregateByKey[k, v, r] =>
+        val parent = buildPlan(abk.parent)
+        val values = collectValues(parent).asInstanceOf[Vector[(k, v)]] // scalafix:ok DisableSyntax.asInstanceOf
+        val result = sparkAggregateByKey(values, abk.extractors, abk.reducers, abk.assembler)
+        given Schema[k] = abk.schemaK
+        given Schema[r] = abk.schemaR
+        val tupleSchema = Schema.tuple2Schema[k, r]
+        SparkPlan(
+          createDataFrame(result, tupleSchema),
+          tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        )
+
+      case mwk: Dataset.MapWithKeyExpr[t, k] =>
+        val parent = buildPlan(mwk.parent)
+        val values = collectValues(parent)
+        val mat = net.ghoula.strongbow.MaterializedDataset.fromVector(values)(using parent.schema) match {
+          case Right(m) => m
+          case Left(err) =>
+            throw new RuntimeException(s"MapWithKeyExpr materialization failed: $err") // scalafix:ok DisableSyntax.throw
+        }
+        val keyCol = net.ghoula.strongbow.ExprInterpreter.evalColumn(mwk.keyExpr, mat.columns, mwk.keyType) match {
+          case Right(col) => col
+          case Left(err) =>
+            throw new RuntimeException(s"MapWithKeyExpr key eval failed: $err") // scalafix:ok DisableSyntax.throw
+        }
+        val pairs = values.indices.map(i =>
+          (keyCol.getValue(i).asInstanceOf[k], values(i)) // scalafix:ok DisableSyntax.asInstanceOf
+        ).toVector
+        given Schema[k] = mwk.schemaK
+        given Schema[t] = mwk.schemaT
+        val tupleSchema = Schema.tuple2Schema[k, t]
+        SparkPlan(
+          createDataFrame(pairs, tupleSchema),
+          tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        )
     }
   }
 
@@ -433,43 +472,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
   }
 
-  private def applyGroupedToPairs[K, V, T](
-    grouped: Grouped[K, V],
-    schemaK: Schema[K],
-    schemaV: Schema[V]
-  ): SparkPlan[T] = {
-    val interpreter = SparkGroupedInterpreter(this)
-    val pairs = interpreter.execute(grouped)
-
-    val tupleSchema = Schema.tuple2Schema[K, V](using schemaK, schemaV)
-    val df = createDataFrame(pairs, tupleSchema)
-    SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
-  }
-
-  private def applyGroupedKeys[K, V, T](
-    grouped: Grouped[K, V],
-    schemaK: Schema[K]
-  ): SparkPlan[T] = {
-    val interpreter = SparkGroupedInterpreter(this)
-    val pairs = interpreter.execute(grouped)
-    val keys = pairs.map(_._1)
-
-    val df = createDataFrame(keys, schemaK)
-    SparkPlan(df, schemaK.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
-  }
-
-  private def applyGroupedValues[K, V, T](
-    grouped: Grouped[K, V],
-    schemaV: Schema[V]
-  ): SparkPlan[T] = {
-    val interpreter = SparkGroupedInterpreter(this)
-    val pairs = interpreter.execute(grouped)
-    val values = pairs.map(_._2)
-
-    val df = createDataFrame(values, schemaV)
-    SparkPlan(df, schemaV.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
-  }
-
   private def applyGroupByAgg[In, T](
     parent: SparkPlan[In],
     keySpecs: Vector[KeySpec[In]],
@@ -585,6 +587,41 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
 
     SparkPlan(df, schema)
+  }
+
+  private def sparkReduceByKey[K, V](pairs: Vector[(K, V)], reduce: (V, V) => V): Vector[(K, V)] = {
+    val builder = scala.collection.mutable.HashMap.empty[K, V]
+    pairs.foreach { case (k, v) =>
+      builder.get(k) match {
+        case Some(existing) => builder(k) = reduce(existing, v)
+        case None => builder(k) = v
+      }
+    }
+    builder.toVector
+  }
+
+  private def sparkAggregateByKey[K, V, R](
+    pairs: Vector[(K, V)],
+    extractors: Vector[V => Any],
+    reducers: Vector[(Any, Any) => Any],
+    assembler: Vector[Any] => R
+  ): Vector[(K, R)] = {
+    val n = extractors.length
+    val builder = scala.collection.mutable.HashMap.empty[K, Array[Any]]
+    pairs.foreach { case (k, v) =>
+      val extracted = extractors.map(_(v))
+      builder.get(k) match {
+        case Some(existing) =>
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < n) {
+            existing(i) = reducers(i)(existing(i), extracted(i))
+            i += 1
+          }
+        case None =>
+          builder(k) = extracted.toArray
+      }
+    }
+    builder.toVector.map { case (k, aggs) => (k, assembler(aggs.toVector)) }
   }
 
   private[spark] def createDataFrame[T](values: Vector[T], schema: Schema[T]): DataFrame = {

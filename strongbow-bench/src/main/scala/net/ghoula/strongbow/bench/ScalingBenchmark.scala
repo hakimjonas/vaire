@@ -221,10 +221,13 @@ object ScalingBenchmark {
 
     // GroupBy
     print("  GroupBy... ")
+    given schemaStr: Schema[String] = Schema.stringSchema
+    given schemaInt: Schema[Int] = Schema.intSchema
+    given schemaStrInt: Schema[(String, Int)] = Schema.tuple2Schema[String, Int]
     val groupByResult = benchmarkOperation(scale, rows, "GroupBy", 20, 50) {
       val grouped = dataset.groupBy(_._1)
       val reduced = grouped.reduceByKey((a, b) => (a._1, a._2 + b._2))
-      val pairs = GroupByInterpreter.execute(reduced)
+      val pairs = reduced.toPairs.collect.toOption.get
       pairs.length
     }
     results += groupByResult
@@ -308,7 +311,7 @@ object ScalingBenchmark {
       val grouped1 = dataset1.groupBy(_._1)
       val grouped2 = dataset2.groupBy(_._1)
       val joined = grouped1.join(grouped2)
-      val pairs = GroupByInterpreter.execute(joined)
+      val pairs = joined.toPairs.collect.toOption.get
       pairs.length
     }
     results += joinResult

@@ -84,15 +84,6 @@ object DatasetExplainer {
       case Dataset.ZipWithIndex(parent) =>
         s"ZipWithIndex\n${explain(parent, indent + 1)}"
 
-      case Dataset.GroupedToPairs(grouped, _, _) =>
-        s"GroupedToPairs\n${explainGrouped(grouped, indent + 1)}"
-
-      case Dataset.GroupedKeys(grouped, _) =>
-        s"GroupedKeys\n${explainGrouped(grouped, indent + 1)}"
-
-      case Dataset.GroupedValues(grouped, _) =>
-        s"GroupedValues\n${explainGrouped(grouped, indent + 1)}"
-
       case Dataset.GroupByAgg(parent, keySpecs, aggSpecs, _) =>
         val keys = keySpecs.map(_.name).mkString(", ")
         val aggs = aggSpecs.map(_.name).mkString(", ")
@@ -108,66 +99,17 @@ object DatasetExplainer {
       case Dataset.WithWindow(parent, windowExprs, _, _) =>
         val cols = windowExprs.map(_.name).mkString(", ")
         s"WithWindow[$cols]\n${explain(parent, indent + 1)}"
+
+      case Dataset.ReduceByKey(parent, _, _, _) =>
+        s"ReduceByKey[func]\n${explain(parent, indent + 1)}"
+
+      case Dataset.AggregateByKey(parent, extractors, _, _, _, _) =>
+        s"AggregateByKey[${extractors.length} aggs]\n${explain(parent, indent + 1)}"
+
+      case Dataset.MapWithKeyExpr(parent, _, _, _, _) =>
+        s"MapWithKeyExpr[expr]\n${explain(parent, indent + 1)}"
     }
     s"$prefix$node"
   }
 
-  private def explainGrouped[K, V](grouped: Grouped[K, V], indent: Int): String = {
-    val prefix = "  " * indent
-    grouped match {
-      case Grouped.GroupBy(parent, _) =>
-        s"${prefix}GroupBy[key]\n${explain(parent, indent + 1)}"
-
-      case Grouped.GroupByExpr(parent, _, _) =>
-        s"${prefix}GroupByExpr[expr]\n${explain(parent, indent + 1)}"
-
-      case Grouped.FromPairs(parent) =>
-        s"${prefix}FromPairs\n${explain(parent, indent + 1)}"
-
-      case Grouped.MapValues(parent, _) =>
-        s"${prefix}MapValues[func]\n${explainGrouped(parent, indent + 1)}"
-
-      case Grouped.FlatMapValues(parent, _) =>
-        s"${prefix}FlatMapValues[func]\n${explainGrouped(parent, indent + 1)}"
-
-      case Grouped.FilterKeys(parent, _) =>
-        s"${prefix}FilterKeys[predicate]\n${explainGrouped(parent, indent + 1)}"
-
-      case Grouped.InnerJoin(left, right) =>
-        s"${prefix}InnerJoin\n${explainGrouped(left, indent + 1)}\n${explainGrouped(right, indent + 1)}"
-
-      case Grouped.LeftJoin(left, right) =>
-        s"${prefix}LeftJoin\n${explainGrouped(left, indent + 1)}\n${explainGrouped(right, indent + 1)}"
-
-      case Grouped.RightJoin(left, right) =>
-        s"${prefix}RightJoin\n${explainGrouped(left, indent + 1)}\n${explainGrouped(right, indent + 1)}"
-
-      case Grouped.FullJoin(left, right) =>
-        s"${prefix}FullJoin\n${explainGrouped(left, indent + 1)}\n${explainGrouped(right, indent + 1)}"
-
-      case Grouped.ReduceByKey(parent, _) =>
-        s"${prefix}ReduceByKey[func]\n${explainGrouped(parent, indent + 1)}"
-
-      case Grouped.LeftAntiJoin(left, right) =>
-        s"${prefix}LeftAntiJoin\n${explainGrouped(left, indent + 1)}\n${explainGrouped(right, indent + 1)}"
-
-      case Grouped.SortByKey(parent, _) =>
-        s"${prefix}SortByKey[ordering]\n${explainGrouped(parent, indent + 1)}"
-
-      case Grouped.UnionGrouped(left, right) =>
-        s"${prefix}UnionGrouped\n${explainGrouped(left, indent + 1)}\n${explainGrouped(right, indent + 1)}"
-
-      case agg: Grouped.AggregateByKey2[_, _, _, _] =>
-        s"${prefix}AggregateByKey2\n${explainGrouped(agg.parent, indent + 1)}"
-
-      case agg: Grouped.AggregateByKey3[_, _, _, _, _] =>
-        s"${prefix}AggregateByKey3\n${explainGrouped(agg.parent, indent + 1)}"
-
-      case agg: Grouped.AggregateByKey4[_, _, _, _, _, _] =>
-        s"${prefix}AggregateByKey4\n${explainGrouped(agg.parent, indent + 1)}"
-
-      case agg: Grouped.AggregateByKey5[_, _, _, _, _, _, _] =>
-        s"${prefix}AggregateByKey5\n${explainGrouped(agg.parent, indent + 1)}"
-    }
-  }
 }

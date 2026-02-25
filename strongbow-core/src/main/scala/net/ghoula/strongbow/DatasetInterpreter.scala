@@ -164,33 +164,6 @@ object DatasetInterpreter extends Interpreter {
           zipWithIndex(parent).map(_.asInstanceOf[MaterializedDataset[T]]) // scalafix:ok DisableSyntax.asInstanceOf
         }
 
-      case grp: Dataset.GroupedToPairs[k, v] =>
-        val pairs: Vector[(k, v)] = GroupByInterpreter.execute(grp.grouped)
-
-        given Schema[k] = grp.schemaK
-        given Schema[v] = grp.schemaV
-        val tupleSchema: Schema[(k, v)] = summon[Schema[(k, v)]]
-
-        MaterializedDataset.fromVector(pairs)(using
-          tupleSchema.asInstanceOf[Schema[T]]
-        ) // scalafix:ok DisableSyntax.asInstanceOf
-
-      case keys: Dataset.GroupedKeys[k, v] =>
-        val pairs: Vector[(k, v)] = GroupByInterpreter.execute(keys.grouped)
-        val keyValues: Vector[k] = pairs.map(_._1)
-
-        MaterializedDataset.fromVector(keyValues)(using
-          keys.schemaK.asInstanceOf[Schema[T]]
-        ) // scalafix:ok DisableSyntax.asInstanceOf
-
-      case values: Dataset.GroupedValues[k, v] =>
-        val pairs: Vector[(k, v)] = GroupByInterpreter.execute(values.grouped)
-        val valueValues: Vector[v] = pairs.map(_._2)
-
-        MaterializedDataset.fromVector(valueValues)(using
-          values.schemaV.asInstanceOf[Schema[T]]
-        ) // scalafix:ok DisableSyntax.asInstanceOf
-
       case gba: Dataset.GroupByAgg[_, T] =>
         execute(gba.parent).flatMap { parent =>
           groupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)
@@ -211,6 +184,50 @@ object DatasetInterpreter extends Interpreter {
       case ww: Dataset.WithWindow[_, T] =>
         execute(ww.parent).flatMap { parent =>
           withWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
+        }
+
+      case rbk: Dataset.ReduceByKey[k, v] =>
+        execute(rbk.parent).flatMap { parent =>
+          val rows = parent.toVectorUnsafe
+          val reduced = reduceByKeyHelper(rows.asInstanceOf[Vector[(k, v)]], rbk.reduce) // scalafix:ok DisableSyntax.asInstanceOf
+          given Schema[k] = rbk.schemaK
+          given Schema[v] = rbk.schemaV
+          MaterializedDataset.fromVector(reduced)(using
+            Schema.tuple2Schema[k, v].asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
+          )
+        }
+
+      case abk: Dataset.AggregateByKey[k, v, r] =>
+        execute(abk.parent).flatMap { parent =>
+          val rows = parent.toVectorUnsafe
+          val result = aggregateByKeyHelper(
+            rows.asInstanceOf[Vector[(k, v)]], // scalafix:ok DisableSyntax.asInstanceOf
+            abk.extractors,
+            abk.reducers,
+            abk.assembler
+          )
+          given Schema[k] = abk.schemaK
+          given Schema[r] = abk.schemaR
+          MaterializedDataset.fromVector(result)(using
+            Schema.tuple2Schema[k, r].asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
+          )
+        }
+
+      case mwk: Dataset.MapWithKeyExpr[t, k] =>
+        execute(mwk.parent).flatMap { parent =>
+          ExprInterpreter.evalColumn(mwk.keyExpr, parent.columns, mwk.keyType).flatMap { keyCol =>
+            val rows = parent.toVectorUnsafe
+            val pairs = rows.indices.iterator
+              .map(i =>
+                (keyCol.getValue(i).asInstanceOf[k], rows(i)) // scalafix:ok DisableSyntax.asInstanceOf
+              )
+              .toVector
+            given Schema[k] = mwk.schemaK
+            given Schema[t] = mwk.schemaT
+            MaterializedDataset.fromVector(pairs)(using
+              Schema.tuple2Schema[k, t].asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
+            )
+          }
         }
     }
   }
@@ -1021,5 +1038,40 @@ object DatasetInterpreter extends Interpreter {
         }.map(windowCols => MaterializedDataset(dataset.columns ++ windowCols, outputSchema))
       }
     } yield result
+  }
+
+  private def reduceByKeyHelper[K, V](pairs: Vector[(K, V)], reduce: (V, V) => V): Vector[(K, V)] = {
+    val builder = scala.collection.mutable.HashMap.empty[K, V]
+    pairs.foreach { case (k, v) =>
+      builder.get(k) match {
+        case Some(existing) => builder(k) = reduce(existing, v)
+        case None => builder(k) = v
+      }
+    }
+    builder.toVector
+  }
+
+  private def aggregateByKeyHelper[K, V, R](
+    pairs: Vector[(K, V)],
+    extractors: Vector[V => Any],
+    reducers: Vector[(Any, Any) => Any],
+    assembler: Vector[Any] => R
+  ): Vector[(K, R)] = {
+    val n = extractors.length
+    val builder = scala.collection.mutable.HashMap.empty[K, Array[Any]]
+    pairs.foreach { case (k, v) =>
+      val extracted = extractors.map(_(v))
+      builder.get(k) match {
+        case Some(existing) =>
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < n) {
+            existing(i) = reducers(i)(existing(i), extracted(i))
+            i += 1
+          }
+        case None =>
+          builder(k) = extracted.toArray
+      }
+    }
+    builder.toVector.map { case (k, aggs) => (k, assembler(aggs.toVector)) }
   }
 }

@@ -34,7 +34,7 @@ object prelude {
   export net.ghoula.strongbow.MaterializedDataset
 
   // Interpreters
-  export net.ghoula.strongbow.{Interpreter, DatasetInterpreter, ExprInterpreter, GroupByInterpreter}
+  export net.ghoula.strongbow.{Interpreter, DatasetInterpreter, ExprInterpreter}
 
   // Opaque types
   export net.ghoula.strongbow.types.{ColumnIndex, RowIndex}

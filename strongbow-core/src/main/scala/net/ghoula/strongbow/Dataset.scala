@@ -85,9 +85,6 @@ enum Dataset[+T] {
     withReplacement: Boolean
   ) extends Dataset[T]
   case ZipWithIndex[T](parent: Dataset[T]) extends Dataset[(T, Long)]
-  case GroupedToPairs[K, V](grouped: Grouped[K, V], schemaK: Schema[K], schemaV: Schema[V]) extends Dataset[(K, V)]
-  case GroupedKeys[K, V](grouped: Grouped[K, V], schemaK: Schema[K]) extends Dataset[K]
-  case GroupedValues[K, V](grouped: Grouped[K, V], schemaV: Schema[V]) extends Dataset[V]
 
   // Phase 1: Distributed GROUP BY with vector-based keys and aggregations
   case GroupByAgg[In, Out](
@@ -120,6 +117,31 @@ enum Dataset[+T] {
     windowSpec: WindowSpec[In],
     schema: Schema[Out]
   ) extends Dataset[Out]
+
+  // Grouped elimination: key-value operations flattened into Dataset
+  case ReduceByKey[K, V](
+    parent: Dataset[(K, V)],
+    reduce: (V, V) => V,
+    schemaK: Schema[K],
+    schemaV: Schema[V]
+  ) extends Dataset[(K, V)]
+
+  case AggregateByKey[K, V, R](
+    parent: Dataset[(K, V)],
+    extractors: Vector[V => Any],
+    reducers: Vector[(Any, Any) => Any],
+    assembler: Vector[Any] => R,
+    schemaK: Schema[K],
+    schemaR: Schema[R]
+  ) extends Dataset[(K, R)]
+
+  case MapWithKeyExpr[T, K](
+    parent: Dataset[T],
+    keyExpr: Expr[T, K],
+    keyType: ColumnType,
+    schemaK: Schema[K],
+    schemaT: Schema[T]
+  ) extends Dataset[(K, T)]
 }
 
 object Dataset {
@@ -206,17 +228,21 @@ object Dataset {
       SortByExpr(ds, keyExpr, keyType, ord)
     }
 
-    inline def groupBy[K](key: T => K): Grouped[K, T] = {
-      Grouped.GroupBy(ds, key)
+    inline def groupBy[K](key: T => K)(using schemaK: Schema[K], schemaT: Schema[T]): Grouped[K, T] = {
+      given Schema[(K, T)] = Schema.tuple2Schema[K, T]
+      Grouped(ds.map(t => (key(t), t)))
     }
 
-    inline def keyBy[K](key: T => K): Grouped[K, T] = {
+    inline def keyBy[K](key: T => K)(using Schema[K], Schema[T]): Grouped[K, T] = {
       groupBy(key)
     }
 
     /** Group by expression — enables Spark pushdown via native df.groupBy(). */
-    inline def groupByExpr[K](keyExpr: Expr[T, K], keyType: ColumnType): Grouped[K, T] = {
-      Grouped.GroupByExpr(ds, keyExpr, keyType)
+    inline def groupByExpr[K](keyExpr: Expr[T, K], keyType: ColumnType)(using
+      schemaK: Schema[K],
+      schemaT: Schema[T]
+    ): Grouped[K, T] = {
+      Grouped(MapWithKeyExpr(ds, keyExpr, keyType, schemaK, schemaT))
     }
 
     /** Select columns by evaluating expressions. */

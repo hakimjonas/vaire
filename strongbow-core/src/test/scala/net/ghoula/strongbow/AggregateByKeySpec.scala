@@ -9,6 +9,7 @@ class AggregateByKeySpec extends AnyFlatSpec with Matchers {
 
   case class Sale(product: String, quantity: Int, revenue: Double)
   given Schema[Sale] = Schema.derived
+  given Schema[String] = Schema.stringSchema
 
   "aggregateByKey (2-arity)" should "compute two aggregations per key" in {
     val sales = createSalesDataset()

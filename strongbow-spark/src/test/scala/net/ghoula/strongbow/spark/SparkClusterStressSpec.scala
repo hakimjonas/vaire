@@ -8,12 +8,14 @@ import net.ghoula.strongbow.types.ColumnIndex
 
 /** Stress tests targeting distributed Spark execution.
   *
-  * These tests create datasets with millions of rows and use only operations that execute natively on
-  * Spark (Expr-based filter, distinct, intersect, except, joinOn, sortByExpr, selectExprs) rather
-  * than operations that collect to the driver (Map, FlatMap, lambda-based joins, Sort, SortBy).
+  * These tests create datasets with millions of rows and use only operations that execute natively
+  * on Spark (Expr-based filter, distinct, intersect, except, joinOn, sortByExpr, selectExprs)
+  * rather than operations that collect to the driver (Map, FlatMap, lambda-based joins, Sort,
+  * SortBy).
   *
   * In local[2] mode these still pass but exercise nothing interesting. Against a real cluster
-  * (`-Dspark.test.master=spark://...`) they produce real shuffles, network I/O, and memory pressure.
+  * (`-Dspark.test.master=spark://...`) they produce real shuffles, network I/O, and memory
+  * pressure.
   */
 class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -209,10 +211,12 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
     val ds = intDataset(Array.tabulate(N)(identity))
 
     // Compute value * 2 + 1 via Expr, then filter results > N
-    val doubled = Expr.Add(
-      Expr.Mul(valueExpr, Expr.Const(2)),
-      Expr.Const(1)
-    ).asInstanceOf[Expr[Int, Any]]
+    val doubled = Expr
+      .Add(
+        Expr.Mul(valueExpr, Expr.Const(2)),
+        Expr.Const(1)
+      )
+      .asInstanceOf[Expr[Int, Any]]
 
     val selected = ds.selectAs[Int](("result", doubled, ColumnType.IntType))
     val filtered = selected.filter(

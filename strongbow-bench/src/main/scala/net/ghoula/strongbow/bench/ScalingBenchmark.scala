@@ -398,7 +398,8 @@ object ScalingBenchmark {
     println("SCALING SUMMARY")
     println("=".repeat(80))
 
-    val operations = Seq("Filter", "GroupBy", "Sort", "Limit", "Union", "Distinct", "Join", "GroupByAgg", "SortByExprs", "WithWindow")
+    val operations =
+      Seq("Filter", "GroupBy", "Sort", "Limit", "Union", "Distinct", "Join", "GroupByAgg", "SortByExprs", "WithWindow")
     val scales = allResults.map(_.scale).distinct
 
     println()

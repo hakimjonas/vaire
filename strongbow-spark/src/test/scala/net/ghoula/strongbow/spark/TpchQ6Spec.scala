@@ -18,8 +18,8 @@ import net.ghoula.strongbow.types.ColumnIndex
   *   AND l_quantity < 24
   * }}}
   *
-  * This is the simplest TPC-H query — filter + single aggregate. After adding SumDouble
-  * to Expr, this is fully expressible in strongbow using distributed Expr-based operations.
+  * This is the simplest TPC-H query — filter + single aggregate. After adding SumDouble to Expr,
+  * this is fully expressible in strongbow using distributed Expr-based operations.
   */
 class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -59,7 +59,8 @@ class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
     // Filter using distributed Expr, then compute price * discount via selectExprs
     val revenueExpr = Expr.MulDouble(extendedprice, discount).asInstanceOf[Expr[LineItem, Any]]
 
-    val filtered = ds.filter(predicate)
+    val filtered = ds
+      .filter(predicate)
       .selectAs[Double](("revenue", revenueExpr, ColumnType.DoubleType))
 
     val t0 = System.nanoTime()
@@ -73,31 +74,45 @@ class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
     info(f"Strongbow: revenue = $sbRevenue%.2f (${sbValues.size} rows, ${(t1 - t0) / 1e6}%.1f ms)")
 
     // --- Native Spark path ---
-    val structType = org.apache.spark.sql.types.StructType(Array(
-      org.apache.spark.sql.types.StructField("l_orderkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("l_partkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("l_suppkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("l_linenumber", org.apache.spark.sql.types.IntegerType),
-      org.apache.spark.sql.types.StructField("l_quantity", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_extendedprice", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_discount", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_tax", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_returnflag", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_linestatus", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_shipdate", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_commitdate", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_receiptdate", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_shipinstruct", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_shipmode", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_comment", org.apache.spark.sql.types.StringType)
-    ))
+    val structType = org.apache.spark.sql.types.StructType(
+      Array(
+        org.apache.spark.sql.types.StructField("l_orderkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("l_partkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("l_suppkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("l_linenumber", org.apache.spark.sql.types.IntegerType),
+        org.apache.spark.sql.types.StructField("l_quantity", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_extendedprice", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_discount", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_tax", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_returnflag", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_linestatus", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_shipdate", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_commitdate", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_receiptdate", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_shipinstruct", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_shipmode", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_comment", org.apache.spark.sql.types.StringType)
+      )
+    )
 
     val rows = items.map { li =>
       org.apache.spark.sql.Row(
-        li.l_orderkey, li.l_partkey, li.l_suppkey, li.l_linenumber,
-        li.l_quantity, li.l_extendedprice, li.l_discount, li.l_tax,
-        li.l_returnflag, li.l_linestatus, li.l_shipdate, li.l_commitdate,
-        li.l_receiptdate, li.l_shipinstruct, li.l_shipmode, li.l_comment
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_suppkey,
+        li.l_linenumber,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount,
+        li.l_tax,
+        li.l_returnflag,
+        li.l_linestatus,
+        li.l_shipdate,
+        li.l_commitdate,
+        li.l_receiptdate,
+        li.l_shipinstruct,
+        li.l_shipmode,
+        li.l_comment
       )
     }
     val javaRows = java.util.Arrays.asList(rows*)
@@ -141,7 +156,8 @@ class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
 
     val revenueExpr = Expr.MulDouble(extendedprice, discount).asInstanceOf[Expr[LineItem, Any]]
 
-    val filtered = ds.filter(predicate)
+    val filtered = ds
+      .filter(predicate)
       .selectAs[Double](("revenue", revenueExpr, ColumnType.DoubleType))
 
     // Just verify it executes without error — plan details logged via info

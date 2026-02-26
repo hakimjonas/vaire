@@ -111,11 +111,15 @@ class WindowFunctionSpec extends AnyFlatSpec with Matchers {
     )
 
     val windowExprs = Vector(
-      WindowExprSpec("lagVal", Expr.Lag[ValRow, Any](
-        Expr.Cell[ValRow, Any]("val1", ColumnIndex(1)),
-        1,
-        Some(0)
-      ), ColumnType.IntType)
+      WindowExprSpec(
+        "lagVal",
+        Expr.Lag[ValRow, Any](
+          Expr.Cell[ValRow, Any]("val1", ColumnIndex(1)),
+          1,
+          Some(0)
+        ),
+        ColumnType.IntType
+      )
     )
 
     val result = ds.withWindow[ValRowWithLag](windowExprs, windowSpec)
@@ -150,11 +154,15 @@ class WindowFunctionSpec extends AnyFlatSpec with Matchers {
     )
 
     val windowExprs = Vector(
-      WindowExprSpec("leadVal", Expr.Lead[ValRow, Any](
-        Expr.Cell[ValRow, Any]("val1", ColumnIndex(1)),
-        1,
-        Some(99)
-      ), ColumnType.IntType)
+      WindowExprSpec(
+        "leadVal",
+        Expr.Lead[ValRow, Any](
+          Expr.Cell[ValRow, Any]("val1", ColumnIndex(1)),
+          1,
+          Some(99)
+        ),
+        ColumnType.IntType
+      )
     )
 
     val result = ds.withWindow[ValRowWithLead](windowExprs, windowSpec)

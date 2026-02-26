@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import java.time.LocalDate
+
 import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
 
 class DateExprSpec extends AnyFlatSpec with Matchers {

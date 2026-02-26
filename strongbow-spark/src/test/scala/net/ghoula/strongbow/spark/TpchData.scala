@@ -4,9 +4,9 @@ import net.ghoula.strongbow.{Column, ColumnType, Dataset, Schema}
 
 /** Synthetic TPC-H data generators for proof-of-concept queries.
   *
-  * Generates lineitem and part data with realistic distributions — no dbgen dependency.
-  * Uses a seeded PRNG for reproducibility. Field types follow TPC-H but use Double for
-  * DECIMAL (strongbow has no BigDecimal) and String for DATE (ISO-8601 format).
+  * Generates lineitem and part data with realistic distributions — no dbgen dependency. Uses a
+  * seeded PRNG for reproducibility. Field types follow TPC-H but use Double for DECIMAL (strongbow
+  * has no BigDecimal) and String for DATE (ISO-8601 format).
   */
 object TpchData {
 
@@ -56,22 +56,45 @@ object TpchData {
   private val shipInstructs = Array("DELIVER IN PERSON", "COLLECT COD", "TAKE BACK RETURN", "NONE")
   private val shipModes = Array("REG AIR", "AIR", "RAIL", "SHIP", "TRUCK", "MAIL", "FOB")
   private val partTypes = Array(
-    "STANDARD ANODIZED TIN", "STANDARD ANODIZED STEEL",
-    "PROMO ANODIZED TIN", "PROMO BURNISHED STEEL",
-    "ECONOMY PLATED COPPER", "PROMO BRUSHED BRASS",
-    "STANDARD POLISHED BRASS", "ECONOMY BURNISHED NICKEL",
-    "PROMO POLISHED COPPER", "STANDARD BRUSHED TIN"
+    "STANDARD ANODIZED TIN",
+    "STANDARD ANODIZED STEEL",
+    "PROMO ANODIZED TIN",
+    "PROMO BURNISHED STEEL",
+    "ECONOMY PLATED COPPER",
+    "PROMO BRUSHED BRASS",
+    "STANDARD POLISHED BRASS",
+    "ECONOMY BURNISHED NICKEL",
+    "PROMO POLISHED COPPER",
+    "STANDARD BRUSHED TIN"
   )
   private val containers = Array(
-    "SM CASE", "SM BOX", "SM PACK", "SM PKG",
-    "MED BAG", "MED BOX", "MED PKG", "MED PACK",
-    "LG CASE", "LG BOX", "LG PACK", "LG PKG"
+    "SM CASE",
+    "SM BOX",
+    "SM PACK",
+    "SM PKG",
+    "MED BAG",
+    "MED BOX",
+    "MED PKG",
+    "MED PACK",
+    "LG CASE",
+    "LG BOX",
+    "LG PACK",
+    "LG PKG"
   )
   private val brands = Array(
-    "Brand#11", "Brand#12", "Brand#13", "Brand#14", "Brand#15",
-    "Brand#21", "Brand#22", "Brand#23", "Brand#24", "Brand#25"
+    "Brand#11",
+    "Brand#12",
+    "Brand#13",
+    "Brand#14",
+    "Brand#15",
+    "Brand#21",
+    "Brand#22",
+    "Brand#23",
+    "Brand#24",
+    "Brand#25"
   )
-  private val manufacturers = Array("Manufacturer#1", "Manufacturer#2", "Manufacturer#3", "Manufacturer#4", "Manufacturer#5")
+  private val manufacturers =
+    Array("Manufacturer#1", "Manufacturer#2", "Manufacturer#3", "Manufacturer#4", "Manufacturer#5")
 
   /** Generate a date between startYear-01-01 and endYear-12-31. */
   private def randomDate(rng: scala.util.Random, startYear: Int, endYear: Int): String = {
@@ -84,11 +107,11 @@ object TpchData {
   /** Generate `n` LineItem rows with reproducible data.
     *
     * Distribution matches TPC-H spec:
-    * - quantity: 1-50
-    * - extendedprice: 900-100000
-    * - discount: 0.00-0.10
-    * - tax: 0.00-0.08
-    * - shipdate: 1992-01-01 to 1998-12-01
+    *   - quantity: 1-50
+    *   - extendedprice: 900-100000
+    *   - discount: 0.00-0.10
+    *   - tax: 0.00-0.08
+    *   - shipdate: 1992-01-01 to 1998-12-01
     */
   def generateLineItems(n: Int, seed: Long = 42L): Vector[LineItem] = {
     val rng = new scala.util.Random(seed)

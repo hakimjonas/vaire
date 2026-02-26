@@ -32,19 +32,16 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
 
     // --- Reference: compute in Scala ---
     val partMap = parts.map(p => p.p_partkey -> p).toMap
-    val filteredItems = items.filter(li =>
-      li.l_shipdate >= "1995-09-01" && li.l_shipdate < "1995-10-01"
-    )
+    val filteredItems = items.filter(li => li.l_shipdate >= "1995-09-01" && li.l_shipdate < "1995-10-01")
     val joinedPairs = filteredItems.flatMap { li =>
       partMap.get(li.l_partkey).map(p => (li, p))
     }
     val totalRevenue = joinedPairs.map { case (li, _) =>
       li.l_extendedprice * (1.0 - li.l_discount)
     }.sum
-    val promoRevenue = joinedPairs
-      .filter { case (_, p) => p.p_type.startsWith("PROMO") }
-      .map { case (li, _) => li.l_extendedprice * (1.0 - li.l_discount) }
-      .sum
+    val promoRevenue = joinedPairs.filter { case (_, p) => p.p_type.startsWith("PROMO") }.map { case (li, _) =>
+      li.l_extendedprice * (1.0 - li.l_discount)
+    }.sum
     val scalaPromoPercent = if (totalRevenue == 0.0) 0.0 else 100.0 * promoRevenue / totalRevenue
 
     // --- Strongbow path ---
@@ -64,8 +61,11 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
 
     // Join
     val joined = liDs.joinOn(
-      partDs, liPartkey, pPartkey,
-      ColumnType.LongType, ColumnType.LongType
+      partDs,
+      liPartkey,
+      pPartkey,
+      ColumnType.LongType,
+      ColumnType.LongType
     )
 
     // After join, column indices shift. The Spark DataFrame has the left columns
@@ -117,52 +117,77 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
     val sbPromoRev = sbValues.map(_._1).sum
     val sbPromoPercent = if (sbTotalRev == 0.0) 0.0 else 100.0 * sbPromoRev / sbTotalRev
 
-    info(f"Strongbow: promo%% = $sbPromoPercent%.4f (promo=$sbPromoRev%.2f, total=$sbTotalRev%.2f, ${sbValues.size} rows, ${(t1 - t0) / 1e6}%.1f ms)")
+    info(
+      f"Strongbow: promo%% = $sbPromoPercent%.4f (promo=$sbPromoRev%.2f, total=$sbTotalRev%.2f, ${sbValues.size} rows, ${(t1 - t0) / 1e6}%.1f ms)"
+    )
 
     // --- Native Spark path ---
-    val liStructType = org.apache.spark.sql.types.StructType(Array(
-      org.apache.spark.sql.types.StructField("l_orderkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("l_partkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("l_suppkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("l_linenumber", org.apache.spark.sql.types.IntegerType),
-      org.apache.spark.sql.types.StructField("l_quantity", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_extendedprice", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_discount", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_tax", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("l_returnflag", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_linestatus", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_shipdate", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_commitdate", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_receiptdate", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_shipinstruct", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_shipmode", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("l_comment", org.apache.spark.sql.types.StringType)
-    ))
+    val liStructType = org.apache.spark.sql.types.StructType(
+      Array(
+        org.apache.spark.sql.types.StructField("l_orderkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("l_partkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("l_suppkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("l_linenumber", org.apache.spark.sql.types.IntegerType),
+        org.apache.spark.sql.types.StructField("l_quantity", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_extendedprice", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_discount", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_tax", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("l_returnflag", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_linestatus", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_shipdate", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_commitdate", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_receiptdate", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_shipinstruct", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_shipmode", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("l_comment", org.apache.spark.sql.types.StringType)
+      )
+    )
 
-    val partStructType = org.apache.spark.sql.types.StructType(Array(
-      org.apache.spark.sql.types.StructField("p_partkey", org.apache.spark.sql.types.LongType),
-      org.apache.spark.sql.types.StructField("p_name", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("p_mfgr", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("p_brand", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("p_type", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("p_size", org.apache.spark.sql.types.IntegerType),
-      org.apache.spark.sql.types.StructField("p_container", org.apache.spark.sql.types.StringType),
-      org.apache.spark.sql.types.StructField("p_retailprice", org.apache.spark.sql.types.DoubleType),
-      org.apache.spark.sql.types.StructField("p_comment", org.apache.spark.sql.types.StringType)
-    ))
+    val partStructType = org.apache.spark.sql.types.StructType(
+      Array(
+        org.apache.spark.sql.types.StructField("p_partkey", org.apache.spark.sql.types.LongType),
+        org.apache.spark.sql.types.StructField("p_name", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("p_mfgr", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("p_brand", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("p_type", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("p_size", org.apache.spark.sql.types.IntegerType),
+        org.apache.spark.sql.types.StructField("p_container", org.apache.spark.sql.types.StringType),
+        org.apache.spark.sql.types.StructField("p_retailprice", org.apache.spark.sql.types.DoubleType),
+        org.apache.spark.sql.types.StructField("p_comment", org.apache.spark.sql.types.StringType)
+      )
+    )
 
     val liRows = items.map { li =>
       org.apache.spark.sql.Row(
-        li.l_orderkey, li.l_partkey, li.l_suppkey, li.l_linenumber,
-        li.l_quantity, li.l_extendedprice, li.l_discount, li.l_tax,
-        li.l_returnflag, li.l_linestatus, li.l_shipdate, li.l_commitdate,
-        li.l_receiptdate, li.l_shipinstruct, li.l_shipmode, li.l_comment
+        li.l_orderkey,
+        li.l_partkey,
+        li.l_suppkey,
+        li.l_linenumber,
+        li.l_quantity,
+        li.l_extendedprice,
+        li.l_discount,
+        li.l_tax,
+        li.l_returnflag,
+        li.l_linestatus,
+        li.l_shipdate,
+        li.l_commitdate,
+        li.l_receiptdate,
+        li.l_shipinstruct,
+        li.l_shipmode,
+        li.l_comment
       )
     }
     val partRows = parts.map { p =>
       org.apache.spark.sql.Row(
-        p.p_partkey, p.p_name, p.p_mfgr, p.p_brand,
-        p.p_type, p.p_size, p.p_container, p.p_retailprice, p.p_comment
+        p.p_partkey,
+        p.p_name,
+        p.p_mfgr,
+        p.p_brand,
+        p.p_type,
+        p.p_size,
+        p.p_container,
+        p.p_retailprice,
+        p.p_comment
       )
     }
 
@@ -180,8 +205,7 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
       )
       .select(
         F.sum(
-          F.when(F.col("p_type").like("PROMO%"),
-            F.col("l_extendedprice") * (F.lit(1.0) - F.col("l_discount")))
+          F.when(F.col("p_type").like("PROMO%"), F.col("l_extendedprice") * (F.lit(1.0) - F.col("l_discount")))
             .otherwise(F.lit(0.0))
         ).as("promo_rev"),
         F.sum(F.col("l_extendedprice") * (F.lit(1.0) - F.col("l_discount"))).as("total_rev")
@@ -193,7 +217,9 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
     val nativeTotalRev = nativeResult.head.getDouble(1)
     val nativePromoPercent = if (nativeTotalRev == 0.0) 0.0 else 100.0 * nativePromoRev / nativeTotalRev
 
-    info(f"Native Spark: promo%% = $nativePromoPercent%.4f (promo=$nativePromoRev%.2f, total=$nativeTotalRev%.2f, ${(t3 - t2) / 1e6}%.1f ms)")
+    info(
+      f"Native Spark: promo%% = $nativePromoPercent%.4f (promo=$nativePromoRev%.2f, total=$nativeTotalRev%.2f, ${(t3 - t2) / 1e6}%.1f ms)"
+    )
     info(f"Scala reference: promo%% = $scalaPromoPercent%.4f")
 
     // Results should match within Double precision
@@ -217,8 +243,11 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
     val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey_value", ColumnIndex(0))
 
     val joined = liDs.joinOn(
-      partDs, liPartkey, pPartkey,
-      ColumnType.LongType, ColumnType.LongType
+      partDs,
+      liPartkey,
+      pPartkey,
+      ColumnType.LongType,
+      ColumnType.LongType
     )
 
     type LP = (LineItem, Part)

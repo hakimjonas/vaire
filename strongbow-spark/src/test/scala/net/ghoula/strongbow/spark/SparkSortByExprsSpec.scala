@@ -26,10 +26,12 @@ class SparkSortByExprsSpec extends AnyFlatSpec with Matchers with SparkTestBase 
   "SparkInterpreter SortByExprs" should "produce same results as in-memory" in {
     val ds = makeRecords
 
-    val sorted = ds.sortByExprs(Vector(
-      SortSpec(ageCell, summon[Ordering[Int]], ColumnType.IntType, true),
-      SortSpec(scoreCell, summon[Ordering[Double]], ColumnType.DoubleType, true)
-    ))
+    val sorted = ds.sortByExprs(
+      Vector(
+        SortSpec(ageCell, summon[Ordering[Int]], ColumnType.IntType, true),
+        SortSpec(scoreCell, summon[Ordering[Double]], ColumnType.DoubleType, true)
+      )
+    )
 
     val inMemory = DatasetInterpreter.execute(sorted).map(_.toVectorUnsafe)
     val sparkResult = sparkInterpreter.execute(sorted).map(_.toVectorUnsafe)
@@ -40,10 +42,12 @@ class SparkSortByExprsSpec extends AnyFlatSpec with Matchers with SparkTestBase 
   it should "handle mixed ASC/DESC" in {
     val ds = makeRecords
 
-    val sorted = ds.sortByExprs(Vector(
-      SortSpec(ageCell, summon[Ordering[Int]], ColumnType.IntType, true),
-      SortSpec(scoreCell, summon[Ordering[Double]], ColumnType.DoubleType, false)
-    ))
+    val sorted = ds.sortByExprs(
+      Vector(
+        SortSpec(ageCell, summon[Ordering[Int]], ColumnType.IntType, true),
+        SortSpec(scoreCell, summon[Ordering[Double]], ColumnType.DoubleType, false)
+      )
+    )
 
     val inMemory = DatasetInterpreter.execute(sorted).map(_.toVectorUnsafe)
     val sparkResult = sparkInterpreter.execute(sorted).map(_.toVectorUnsafe)

@@ -5,8 +5,8 @@ import org.scalatest.{BeforeAndAfterAll, Suite}
 
 /** Shared test trait providing a singleton SparkSession for all Spark tests.
   *
-  * By default, tests run in local[2] mode. To run against a Spark standalone
-  * cluster, pass `-Dspark.test.master=spark://127.0.0.1:7077` to the JVM.
+  * By default, tests run in local[2] mode. To run against a Spark standalone cluster, pass
+  * `-Dspark.test.master=spark://127.0.0.1:7077` to the JVM.
   */
 trait SparkTestBase extends BeforeAndAfterAll { self: Suite =>
 

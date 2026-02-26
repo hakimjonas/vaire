@@ -108,6 +108,10 @@ object DatasetExplainer {
 
       case Dataset.MapWithKeyExpr(parent, _, _, _, _) =>
         s"MapWithKeyExpr[expr]\n${explain(parent, indent + 1)}"
+
+      case Dataset.Aggregate(parent, aggSpecs, _) =>
+        val aggs = aggSpecs.map(_.name).mkString(", ")
+        s"Aggregate[aggs=($aggs)]\n${explain(parent, indent + 1)}"
     }
     s"$prefix$node"
   }

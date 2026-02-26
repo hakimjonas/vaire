@@ -49,6 +49,54 @@ class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
     unioned shouldBe Vector(1, 2, 3, 4)
   }
 
+  "partition" should "split dataset into matching and non-matching" in {
+    val dataset = createIntDataset(Vector(1, 2, 3, 4, 5, 6))
+
+    val predicate = Expr.Gt(
+      Expr.Cell[Int, Int]("value", ColumnIndex(0)),
+      Expr.Const[Int, Int](3),
+      summon[Ordering[Int]]
+    )
+
+    val (matching, nonMatching) = dataset.partition(predicate)
+
+    matching.collect.toOption.get shouldBe Vector(4, 5, 6)
+    nonMatching.collect.toOption.get shouldBe Vector(1, 2, 3)
+  }
+
+  it should "handle empty partitions" in {
+    val dataset = createIntDataset(Vector(1, 2, 3))
+
+    val predicate = Expr.Gt(
+      Expr.Cell[Int, Int]("value", ColumnIndex(0)),
+      Expr.Const[Int, Int](10),
+      summon[Ordering[Int]]
+    )
+
+    val (matching, nonMatching) = dataset.partition(predicate)
+
+    matching.collect.toOption.get shouldBe empty
+    nonMatching.collect.toOption.get shouldBe Vector(1, 2, 3)
+  }
+
+  "Option2Iterable" should "convert Some to single-element iterable in row-level eval" in {
+    val anyColumn = Column.AnyColumn(Array(Some(1), None, Some(3)), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(anyColumn)
+
+    import net.ghoula.strongbow.types.RowIndex
+
+    val expr = Expr.Option2Iterable(Expr.Cell[Any, Option[Int]]("value", ColumnIndex(0)))
+
+    val result0 = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    result0 shouldBe Right(List(1))
+
+    val result1 = ExprInterpreter.eval(expr, columns, RowIndex(1))
+    result1 shouldBe Right(List())
+
+    val result2 = ExprInterpreter.eval(expr, columns, RowIndex(2))
+    result2 shouldBe Right(List(3))
+  }
+
   private def createIntDataset(values: Vector[Int]): Dataset[Int] = {
     val column = Column.int(values.toArray)
     Dataset.fromColumns(Vector(column), Schema.intSchema).toOption.get

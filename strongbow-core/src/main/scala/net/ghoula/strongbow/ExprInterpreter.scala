@@ -50,7 +50,9 @@ object ExprInterpreter {
               case ColumnType.BooleanType =>
                 column.getBoolean(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.DateType =>
-                java.time.LocalDate.ofEpochDay(column.getDateEpochDay(idx).toLong).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+                java.time.LocalDate
+                  .ofEpochDay(column.getDateEpochDay(idx).toLong)
+                  .asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.AnyType | ColumnType.OptionType(_) =>
                 column.getValue(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
             }
@@ -228,9 +230,12 @@ object ExprInterpreter {
           v <- eval(like.expr, columns, rowIdx)
         } yield likeToRegex(like.pattern).matches(v)
 
-      case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] |
-          _: Expr.Max[Row, ?] | _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] |
-          _: Expr.CountIf[Row] | _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] =>
+      case opt2iter: Expr.Option2Iterable[Row, _] =>
+        eval(opt2iter.expr, columns, rowIdx).map(_.toList)
+
+      case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] |
+          _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
+          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] | _: Expr.First[Row, ?] | _: Expr.Collect[Row, ?] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
 
       case dad: Expr.DateAddDays[Row] =>
@@ -266,8 +271,8 @@ object ExprInterpreter {
       case ed: Expr.ExtractDay[Row] =>
         eval(ed.date, columns, rowIdx).map(_.getDayOfMonth)
 
-      case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] |
-          _: Expr.Lag[Row, ?] | _: Expr.Lead[Row, ?] =>
+      case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
+          _: Expr.Lead[Row, ?] =>
         Left(ExecutionError.UnsupportedOperation("Window functions not supported in row-level eval"))
     }
   }
@@ -465,33 +470,49 @@ object ExprInterpreter {
         ) // scalafix:ok DisableSyntax.asInstanceOf
 
       case dad: Expr.DateAddDays[Row] =>
-        val d = evalAny(dad.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val d =
+          evalAny(dad.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
         val n = evalAny(dad.days, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         d.plusDays(n.toLong)
 
       case dsd: Expr.DateSubDays[Row] =>
-        val d = evalAny(dsd.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val d =
+          evalAny(dsd.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
         val n = evalAny(dsd.days, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         d.minusDays(n.toLong)
 
       case dam: Expr.DateAddMonths[Row] =>
-        val d = evalAny(dam.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val d =
+          evalAny(dam.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
         val n = evalAny(dam.months, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         d.plusMonths(n.toLong)
 
       case dd: Expr.DateDiff[Row] =>
-        val l = evalAny(dd.left, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
-        val r = evalAny(dd.right, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val l =
+          evalAny(dd.left, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val r =
+          evalAny(dd.right, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
         java.time.temporal.ChronoUnit.DAYS.between(r, l).toInt
 
       case ey: Expr.ExtractYear[Row] =>
-        evalAny(ey.date, columns, rowIdx).asInstanceOf[java.time.LocalDate].getYear // scalafix:ok DisableSyntax.asInstanceOf
+        evalAny(ey.date, columns, rowIdx)
+          .asInstanceOf[java.time.LocalDate]
+          .getYear // scalafix:ok DisableSyntax.asInstanceOf
 
       case em: Expr.ExtractMonth[Row] =>
-        evalAny(em.date, columns, rowIdx).asInstanceOf[java.time.LocalDate].getMonthValue // scalafix:ok DisableSyntax.asInstanceOf
+        evalAny(em.date, columns, rowIdx)
+          .asInstanceOf[java.time.LocalDate]
+          .getMonthValue // scalafix:ok DisableSyntax.asInstanceOf
 
       case ed: Expr.ExtractDay[Row] =>
-        evalAny(ed.date, columns, rowIdx).asInstanceOf[java.time.LocalDate].getDayOfMonth // scalafix:ok DisableSyntax.asInstanceOf
+        evalAny(ed.date, columns, rowIdx)
+          .asInstanceOf[java.time.LocalDate]
+          .getDayOfMonth // scalafix:ok DisableSyntax.asInstanceOf
+
+      case opt2iter: Expr.Option2Iterable[Row, _] =>
+        evalAny(opt2iter.expr, columns, rowIdx)
+          .asInstanceOf[Option[Any]]
+          .toList // scalafix:ok DisableSyntax.asInstanceOf
     }
   }
 
@@ -525,7 +546,8 @@ object ExprInterpreter {
       case _: Expr.SumDouble[_] | _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] => ColumnType.DoubleType
       case _: Expr.SumLong[_] | _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
         ColumnType.LongType
-      case _: Expr.Max[_, _] | _: Expr.Min[_, _] => ColumnType.AnyType
+      case _: Expr.Max[_, _] | _: Expr.Min[_, _] | _: Expr.First[_, _] => ColumnType.AnyType
+      case _: Expr.Collect[_, _] | _: Expr.Option2Iterable[_, _] => ColumnType.AnyType
       case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] => ColumnType.DateType
       case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>
         ColumnType.IntType
@@ -579,7 +601,8 @@ object ExprInterpreter {
               Column.boolean(Array.fill(rowCount)(c.value.asInstanceOf[Boolean]))
             ) // scalafix:ok DisableSyntax.asInstanceOf
           case ColumnType.DateType =>
-            val epochDay = c.value.asInstanceOf[java.time.LocalDate].toEpochDay.toInt // scalafix:ok DisableSyntax.asInstanceOf
+            val epochDay =
+              c.value.asInstanceOf[java.time.LocalDate].toEpochDay.toInt // scalafix:ok DisableSyntax.asInstanceOf
             Right(Column.date(Array.fill(rowCount)(epochDay)))
           case _ =>
             Right(Column.any(Array.fill(rowCount)(c.value.asInstanceOf[Any]))) // scalafix:ok DisableSyntax.asInstanceOf
@@ -920,6 +943,10 @@ object ExprInterpreter {
           Right(0.0)
         case _: Expr.StdDevPop[Row] =>
           Right(0.0)
+        case _: Expr.First[Row, ?] =>
+          Right(None)
+        case _: Expr.Collect[Row, ?] =>
+          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
       }
     } else {
       (expr: @unchecked) match {
@@ -1024,6 +1051,20 @@ object ExprInterpreter {
             val variance = values.map(v => math.pow(v - mean, 2)).sum / values.length
             Right(math.sqrt(variance).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
           }
+
+        case first: Expr.First[Row, _] =>
+          val rowCount = columns.head.length
+          val firstValue = (0 until rowCount).iterator.flatMap { rowIdx =>
+            eval(first.expr, columns, RowIndex(rowIdx)).toOption
+          }.nextOption()
+          Right(firstValue.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case collect: Expr.Collect[Row, _] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(collect.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          Right(values.toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
       }
     }
   }

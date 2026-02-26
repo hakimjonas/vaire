@@ -197,22 +197,30 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
         )
 
+      case agg: Dataset.Aggregate[_, T] =>
+        val parent = buildPlan(agg.parent)
+        applyGlobalAggregate(parent, agg.aggSpecs, agg.resultSchema)
+
       case mwk: Dataset.MapWithKeyExpr[t, k] =>
         val parent = buildPlan(mwk.parent)
         val values = collectValues(parent)
         val mat = net.ghoula.strongbow.MaterializedDataset.fromVector(values)(using parent.schema) match {
           case Right(m) => m
           case Left(err) =>
-            throw new RuntimeException(s"MapWithKeyExpr materialization failed: $err") // scalafix:ok DisableSyntax.throw
+            throw new RuntimeException(
+              s"MapWithKeyExpr materialization failed: $err"
+            ) // scalafix:ok DisableSyntax.throw
         }
         val keyCol = net.ghoula.strongbow.ExprInterpreter.evalColumn(mwk.keyExpr, mat.columns, mwk.keyType) match {
           case Right(col) => col
           case Left(err) =>
             throw new RuntimeException(s"MapWithKeyExpr key eval failed: $err") // scalafix:ok DisableSyntax.throw
         }
-        val pairs = values.indices.map(i =>
-          (keyCol.getValue(i).asInstanceOf[k], values(i)) // scalafix:ok DisableSyntax.asInstanceOf
-        ).toVector
+        val pairs = values.indices
+          .map(i =>
+            (keyCol.getValue(i).asInstanceOf[k], values(i)) // scalafix:ok DisableSyntax.asInstanceOf
+          )
+          .toVector
         given Schema[k] = mwk.schemaK
         given Schema[t] = mwk.schemaT
         val tupleSchema = Schema.tuple2Schema[k, t]
@@ -506,6 +514,29 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     SparkPlan(renamedDf, schema)
   }
 
+  private def applyGlobalAggregate[In, T](
+    parent: SparkPlan[In],
+    aggSpecs: Vector[AggSpec[In]],
+    schema: Schema[T]
+  ): SparkPlan[T] = {
+    val aggCols = aggSpecs.map { spec =>
+      ExprToColumn.convert(spec.expr) match {
+        case Right((sparkCol, _)) => sparkCol.as(spec.name)
+        case Left(err) =>
+          throw new RuntimeException(s"Agg expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+      }
+    }
+
+    val aggDf = parent.df.agg(aggCols.head, aggCols.tail*)
+
+    val outputColNames = schema.columnNames
+    val currentColNames = aggDf.columns.toVector
+    val renamedDf = currentColNames.zip(outputColNames).foldLeft(aggDf) { case (df, (current, target)) =>
+      if (current != target) df.withColumnRenamed(current, target) else df
+    }
+    SparkPlan(renamedDf, schema)
+  }
+
   private def applySortByExprs[T](
     parent: SparkPlan[T],
     sortKeys: Vector[SortSpec[T]]
@@ -535,7 +566,9 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       ExprToColumn.convert(spec.expr) match {
         case Right((sparkCol, _)) => sparkCol
         case Left(err) =>
-          throw new RuntimeException(s"Window partition expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+          throw new RuntimeException(
+            s"Window partition expr conversion failed: $err"
+          ) // scalafix:ok DisableSyntax.throw
       }
     }
 

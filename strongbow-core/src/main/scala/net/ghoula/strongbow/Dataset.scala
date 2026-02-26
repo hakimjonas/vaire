@@ -142,6 +142,13 @@ enum Dataset[+T] {
     schemaK: Schema[K],
     schemaT: Schema[T]
   ) extends Dataset[(K, T)]
+
+  // Global aggregation (no grouping keys)
+  case Aggregate[T, R](
+    parent: Dataset[T],
+    aggSpecs: Vector[AggSpec[T]],
+    resultSchema: Schema[R]
+  ) extends Dataset[R]
 }
 
 object Dataset {
@@ -419,9 +426,9 @@ object Dataset {
 
     /** GROUP BY with arbitrary keys and aggregations, producing a new Dataset.
       *
-      * Unlike the Grouped path, this uses Expr throughout — fully pushable to Spark.
-      * Supports any number of keys and aggregations (no 2-5 arity limit).
-      * HAVING is just `.filter()` on the result.
+      * Unlike the Grouped path, this uses Expr throughout — fully pushable to Spark. Supports any
+      * number of keys and aggregations (no 2-5 arity limit). HAVING is just `.filter()` on the
+      * result.
       */
     inline def groupByAgg[Out](
       keys: Vector[KeySpec[T]],
@@ -443,6 +450,22 @@ object Dataset {
       windowSpec: WindowSpec[T]
     )(using schema: Schema[Out]): Dataset[Out] = {
       WithWindow(ds, windowExprs, windowSpec, schema)
+    }
+
+    /** Split dataset into two based on a predicate.
+      *
+      * Returns (matching, non-matching) — equivalent to `(ds.filter(f), ds.filter(!f))`.
+      */
+    inline def partition(predicate: Expr[T, Boolean]): (Dataset[T], Dataset[T]) = {
+      (ds.filter(predicate), ds.filter(Expr.Not(predicate)))
+    }
+
+    /** Global aggregation without grouping keys.
+      *
+      * Evaluates aggregation expressions over the entire dataset, producing a single-row result.
+      */
+    inline def aggregate[R](aggSpecs: Vector[AggSpec[T]])(using schema: Schema[R]): Dataset[R] = {
+      Aggregate(ds, aggSpecs, schema)
     }
   }
 

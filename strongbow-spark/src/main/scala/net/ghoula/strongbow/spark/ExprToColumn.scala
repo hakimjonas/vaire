@@ -226,6 +226,17 @@ object ExprToColumn {
       case sdp: Expr.StdDevPop[Row] =>
         convert(sdp.expr).map { case (sparkCol, _) => (stddev_pop(sparkCol), ColumnType.DoubleType) }
 
+      case f: Expr.First[Row, _] =>
+        convert(f.expr).map { case (sparkCol, ct) => (first(sparkCol), ct) }
+
+      case c: Expr.Collect[Row, _] =>
+        convert(c.expr).map { case (sparkCol, _) => (collect_list(sparkCol), ColumnType.AnyType) }
+
+      case opt2iter: Expr.Option2Iterable[Row, _] =>
+        convert(opt2iter.expr).map { case (sparkCol, _) =>
+          (sparkWhen(sparkCol.isNotNull, array(sparkCol)).otherwise(array()), ColumnType.AnyType)
+        }
+
       // Date expressions
       case dad: Expr.DateAddDays[Row] =>
         for {

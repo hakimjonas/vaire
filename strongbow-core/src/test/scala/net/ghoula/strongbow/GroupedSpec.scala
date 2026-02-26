@@ -267,6 +267,22 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     result.map(_._1).toSet shouldBe Set(25, 30)
   }
 
+  "mapValuesWithKey" should "transform values with access to the key" in {
+    val dataset = createIntDataset(Vector(1, 2, 3, 4, 5))
+    val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0)
+
+    val mapped = grouped.mapValuesWithKey((isEven, v) => if (isEven) v * 100 else v * 10)
+    val result = mapped.toPairs.collect.toOption.get
+
+    result should contain theSameElementsAs Vector(
+      (false, 10),
+      (false, 30),
+      (false, 50),
+      (true, 200),
+      (true, 400)
+    )
+  }
+
   // Helper methods
   private def createDataset(users: Vector[User]): Dataset[User] = {
     val idCol = Column.int(users.map(_.id).toArray)

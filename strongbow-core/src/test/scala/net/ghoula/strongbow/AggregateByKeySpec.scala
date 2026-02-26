@@ -165,6 +165,75 @@ class AggregateByKeySpec extends AnyFlatSpec with Matchers {
     result.head._1 shouldBe "Laptop"
   }
 
+  "aggregateByKey (6-arity)" should "compute six aggregations per key" in {
+    val sales = createSalesDataset()
+
+    val result = sales
+      .groupBy(_.product)
+      .aggregateByKey(
+        agg1 = (_: Sale) => 1,
+        agg2 = (s: Sale) => s.quantity,
+        agg3 = (s: Sale) => s.revenue,
+        agg4 = (s: Sale) => s.revenue,
+        agg5 = (s: Sale) => s.quantity.toDouble,
+        agg6 = (s: Sale) => s.quantity.toDouble,
+        reduce1 = (a: Int, b: Int) => a + b, // count
+        reduce2 = (a: Int, b: Int) => a + b, // sum quantity
+        reduce3 = (a: Double, b: Double) => a + b, // sum revenue
+        reduce4 = (a: Double, b: Double) => math.max(a, b), // max revenue
+        reduce5 = (a: Double, b: Double) => math.min(a, b), // min quantity
+        reduce6 = (a: Double, b: Double) => math.max(a, b) // max quantity
+      )
+      .toPairs
+      .collect
+      .toOption
+      .get
+
+    val laptopStats = result.find(_._1 == "Laptop").get._2
+    laptopStats._1 shouldBe 3 // count
+    laptopStats._2 shouldBe 5 // sum quantity
+    laptopStats._3 shouldBe (2499.95 +- 0.01) // sum revenue
+    laptopStats._4 shouldBe (999.99 +- 0.01) // max revenue
+    laptopStats._5 shouldBe (1.0 +- 0.01) // min quantity
+    laptopStats._6 shouldBe (2.0 +- 0.01) // max quantity
+  }
+
+  "aggregateByKey (7-arity)" should "compute seven aggregations per key" in {
+    val sales = createSalesDataset()
+
+    val result = sales
+      .groupBy(_.product)
+      .aggregateByKey(
+        agg1 = (_: Sale) => 1,
+        agg2 = (s: Sale) => s.quantity,
+        agg3 = (s: Sale) => s.revenue,
+        agg4 = (s: Sale) => s.revenue,
+        agg5 = (s: Sale) => s.quantity.toDouble,
+        agg6 = (s: Sale) => s.quantity.toDouble,
+        agg7 = (s: Sale) => s.revenue,
+        reduce1 = (a: Int, b: Int) => a + b, // count
+        reduce2 = (a: Int, b: Int) => a + b, // sum quantity
+        reduce3 = (a: Double, b: Double) => a + b, // sum revenue
+        reduce4 = (a: Double, b: Double) => math.max(a, b), // max revenue
+        reduce5 = (a: Double, b: Double) => math.min(a, b), // min quantity
+        reduce6 = (a: Double, b: Double) => math.max(a, b), // max quantity
+        reduce7 = (a: Double, b: Double) => math.min(a, b) // min revenue
+      )
+      .toPairs
+      .collect
+      .toOption
+      .get
+
+    val laptopStats = result.find(_._1 == "Laptop").get._2
+    laptopStats._1 shouldBe 3 // count
+    laptopStats._2 shouldBe 5 // sum quantity
+    laptopStats._3 shouldBe (2499.95 +- 0.01) // sum revenue
+    laptopStats._4 shouldBe (999.99 +- 0.01) // max revenue
+    laptopStats._5 shouldBe (1.0 +- 0.01) // min quantity
+    laptopStats._6 shouldBe (2.0 +- 0.01) // max quantity
+    laptopStats._7 shouldBe (499.97 +- 0.01) // min revenue
+  }
+
   private def createSalesDataset(): Dataset[Sale] = {
     val sales = Vector(
       Sale("Laptop", 2, 999.99),

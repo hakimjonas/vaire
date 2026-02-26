@@ -223,6 +223,63 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  "First" should "return first value" in {
+    val intColumn = Column.IntColumn(Array(10, 20, 30), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+
+    val expr = Expr.First(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+
+    result shouldBe Right(Some(10))
+  }
+
+  it should "return None for empty dataset" in {
+    val expr = Expr.First(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(expr, Vector.empty)
+
+    result shouldBe Right(None)
+  }
+
+  "Collect" should "accumulate all values into a Seq" in {
+    val intColumn = Column.IntColumn(Array(3, 1, 4, 1, 5), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+
+    val expr = Expr.Collect(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+
+    result shouldBe Right(Seq(3, 1, 4, 1, 5))
+  }
+
+  it should "return empty Seq for empty dataset" in {
+    val expr = Expr.Collect(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(expr, Vector.empty)
+
+    result shouldBe Right(Seq.empty)
+  }
+
+  "Dataset.aggregate" should "compute global aggregations without grouping keys" in {
+    case class Stats(totalCount: Long, totalSum: Int)
+    given Schema[Stats] = Schema.derived
+
+    val intColumn = Column.IntColumn(Array(10, 20, 30, 40, 50), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+    val dataset = Dataset.fromColumns(columns, Schema.intSchema).toOption.get
+
+    val result = dataset
+      .aggregate[Stats](
+        Vector(
+          AggSpec("totalCount", Expr.Count[Int](), ColumnType.LongType),
+          AggSpec("totalSum", Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0))), ColumnType.IntType)
+        )
+      )
+      .collect
+      .toOption
+      .get
+
+    result should have length 1
+    result.head shouldBe Stats(5L, 150)
+  }
+
   "stddevPop" should "compute population standard deviation" in {
     val doubleColumn = Column.DoubleColumn(
       Array(2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0),

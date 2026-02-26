@@ -66,6 +66,10 @@ enum Expr[Row, +A] {
   case StdDev[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
   case StdDevPop[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
 
+  case First[Row, A](expr: Expr[Row, A]) extends Expr[Row, Option[A]]
+  case Collect[Row, A](expr: Expr[Row, A]) extends Expr[Row, Seq[A]]
+  case Option2Iterable[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Iterable[A]]
+
   // Phase 3: Date expressions
   case DateAddDays[Row](date: Expr[Row, java.time.LocalDate], days: Expr[Row, Int])
       extends Expr[Row, java.time.LocalDate]
@@ -73,8 +77,7 @@ enum Expr[Row, +A] {
       extends Expr[Row, java.time.LocalDate]
   case DateAddMonths[Row](date: Expr[Row, java.time.LocalDate], months: Expr[Row, Int])
       extends Expr[Row, java.time.LocalDate]
-  case DateDiff[Row](left: Expr[Row, java.time.LocalDate], right: Expr[Row, java.time.LocalDate])
-      extends Expr[Row, Int]
+  case DateDiff[Row](left: Expr[Row, java.time.LocalDate], right: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
   case ExtractYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
   case ExtractMonth[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
   case ExtractDay[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
@@ -255,7 +258,9 @@ object Expr {
         Some(ColumnType.LongType)
       case _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] =>
         Some(ColumnType.DoubleType)
-      case _: Expr.Max[_, _] | _: Expr.Min[_, _] => None
+      case _: Expr.Max[_, _] | _: Expr.Min[_, _] | _: Expr.First[_, _] => None
+      case _: Expr.Collect[_, _] => Some(ColumnType.AnyType)
+      case _: Expr.Option2Iterable[_, _] => Some(ColumnType.AnyType)
       case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] =>
         Some(ColumnType.DateType)
       case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>

@@ -14,6 +14,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
 
   given Schema[Int] = Schema.intSchema
   given Schema[String] = Schema.stringSchema
+  given Schema[Boolean] = Schema.booleanSchema
 
   "groupBy" should "partition data by key" in {
     val users = Vector(
@@ -27,7 +28,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val grouped: Grouped[Int, User] = dataset.groupBy(_.age)
 
     // Execute to get key-value pairs
-    val result = GroupByInterpreter.execute(grouped)
+    val result = grouped.toPairs.collect.toOption.get
 
     // Should have (age, user) pairs
     result should contain theSameElementsAs Vector(
@@ -43,7 +44,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0) // Even/odd
 
     val reduced = grouped.reduceByKey(_ + _)
-    val result = GroupByInterpreter.execute(reduced).toMap
+    val result = reduced.toPairs.collect.toOption.get.toMap
 
     result(false) shouldBe 9 // 1 + 3 + 5
     result(true) shouldBe 12 // 2 + 4 + 6
@@ -54,7 +55,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val grouped: Grouped[Boolean, Int] = dataset.groupBy(_ % 2 == 0)
 
     val mapped = grouped.mapValues(_ * 10)
-    val result = GroupByInterpreter.execute(mapped)
+    val result = mapped.toPairs.collect.toOption.get
 
     result should contain theSameElementsAs Vector(
       (false, 10),
@@ -70,7 +71,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val grouped: Grouped[Int, Int] = dataset.groupBy(x => x)
 
     val filtered = grouped.filterKeys(_ > 3)
-    val result = GroupByInterpreter.execute(filtered)
+    val result = filtered.toPairs.collect.toOption.get
 
     result should contain theSameElementsAs Vector(
       (4, 4),
@@ -86,7 +87,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val groupedRight: Grouped[String, String] = right.groupBy(identity)
 
     val joined = groupedLeft.join(groupedRight)
-    val result = GroupByInterpreter.execute(joined).toSet
+    val result = joined.toPairs.collect.toOption.get.toSet
 
     result shouldBe Set(
       ("b", ("b", "b")),
@@ -102,7 +103,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val groupedRight: Grouped[String, String] = right.groupBy(identity)
 
     val joined = groupedLeft.leftJoin(groupedRight)
-    val result = GroupByInterpreter.execute(joined).toSet
+    val result = joined.toPairs.collect.toOption.get.toSet
 
     result shouldBe Set(
       ("a", ("a", None)),
@@ -118,7 +119,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val groupedRight: Grouped[String, String] = right.groupBy(identity)
 
     val joined = groupedLeft.rightJoin(groupedRight)
-    val result = GroupByInterpreter.execute(joined).toSet
+    val result = joined.toPairs.collect.toOption.get.toSet
 
     result shouldBe Set(
       ("b", (Some("b"), "b")),
@@ -134,7 +135,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val groupedRight: Grouped[String, String] = right.groupBy(identity)
 
     val joined = groupedLeft.fullJoin(groupedRight)
-    val result = GroupByInterpreter.execute(joined).toSet
+    val result = joined.toPairs.collect.toOption.get.toSet
 
     result shouldBe Set(
       ("a", (Some("a"), None)),
@@ -149,7 +150,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
 
     // Duplicate each value
     val expanded = grouped.flatMapValues(x => List(x, x))
-    val result = GroupByInterpreter.execute(expanded)
+    val result = expanded.toPairs.collect.toOption.get
 
     result should contain theSameElementsAs Vector(
       (false, 1),
@@ -239,11 +240,11 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val dataset = createDataset(users)
 
     // Lambda-based
-    val lambdaResult = GroupByInterpreter.execute(dataset.groupBy(_.age))
+    val lambdaResult = dataset.groupBy(_.age).toPairs.collect.toOption.get
 
     // Expression-based
     val ageExpr = Expr.Cell[User, Int]("age", types.ColumnIndex(2))
-    val exprResult = GroupByInterpreter.execute(dataset.groupByExpr(ageExpr, ColumnType.IntType))
+    val exprResult = dataset.groupByExpr(ageExpr, ColumnType.IntType).toPairs.collect.toOption.get
 
     exprResult should contain theSameElementsAs lambdaResult
   }
@@ -260,7 +261,7 @@ class GroupedSpec extends AnyFlatSpec with Matchers {
     val ageExpr = Expr.Cell[User, Int]("age", types.ColumnIndex(2))
     val grouped = dataset.groupByExpr(ageExpr, ColumnType.IntType)
     val reduced = grouped.reduceByKey((a, b) => User(a.id, s"${a.name}+${b.name}", a.age))
-    val result = GroupByInterpreter.execute(reduced)
+    val result = reduced.toPairs.collect.toOption.get
 
     result should have length 2
     result.map(_._1).toSet shouldBe Set(25, 30)

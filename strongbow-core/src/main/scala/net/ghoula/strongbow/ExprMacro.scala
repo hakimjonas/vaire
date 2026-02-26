@@ -594,8 +594,12 @@ extension [T](ds: Dataset[T]) {
   }
 
   /** Group by field, compiled to GroupByExpr. */
-  inline def groupByColumn[K](inline f: T => K)(using m: Mirror.ProductOf[T]): Grouped[K, T] = {
+  inline def groupByColumn[K](inline f: T => K)(using
+    m: Mirror.ProductOf[T],
+    sk: Schema[K],
+    st: Schema[T]
+  ): Grouped[K, T] = {
     val (expr, colType) = ExprMacro.column(f)
-    Grouped.GroupByExpr(ds, expr, colType)
+    ds.groupByExpr(expr, colType)
   }
 }

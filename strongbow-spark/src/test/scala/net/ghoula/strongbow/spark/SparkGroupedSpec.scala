@@ -3,10 +3,12 @@ package net.ghoula.strongbow.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{Column, Dataset, DatasetInterpreter, Grouped, Schema}
+import net.ghoula.strongbow.{Column, Dataset, DatasetInterpreter, Schema}
 
 /** Parity tests for Grouped operations through SparkInterpreter. */
 class SparkGroupedSpec extends AnyFlatSpec with Matchers with SparkTestBase {
+
+  given Schema[Int] = Schema.intSchema
 
   private def intDataset(values: Int*): Dataset[Int] = {
     val col = Column.int(values.toArray)

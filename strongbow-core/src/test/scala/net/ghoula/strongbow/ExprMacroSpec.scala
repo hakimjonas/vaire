@@ -451,10 +451,10 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
 
     // Manual
     val ageCell = Expr.Cell[User, Int]("age", ColumnIndex(2))
-    val manualResult = GroupByInterpreter.execute(dataset.groupByExpr(ageCell, ColumnType.IntType))
+    val manualResult = dataset.groupByExpr(ageCell, ColumnType.IntType).toPairs.collect.toOption.get
 
     // Macro
-    val macroResult = GroupByInterpreter.execute(dataset.groupByColumn(_.age))
+    val macroResult = dataset.groupByColumn(_.age).toPairs.collect.toOption.get
 
     macroResult should contain theSameElementsAs manualResult
   }

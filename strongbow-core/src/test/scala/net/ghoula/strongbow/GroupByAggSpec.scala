@@ -167,4 +167,61 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
     groupA.cnt shouldBe 3L
     groupA.sumInt shouldBe 7 // 1+2+4
   }
+
+  // --- AggBuilder ergonomic tests ---
+
+  "AggBuilders" should "produce same results as manual AggSpec" in {
+    import net.ghoula.strongbow.agg.AggBuilders as agg
+    import net.ghoula.strongbow.agg.as
+
+    val sales = makeSales
+
+    val keys = Vector(
+      KeySpec[Sale, Any]("region", Expr.Cell[Sale, Any]("region", ColumnIndex(0)), ColumnType.StringType)
+    )
+    val aggs = Vector(
+      agg.sumDouble[Sale](_.amount).as("totalAmount"),
+      agg.count[Sale].as("totalQty")
+    )
+
+    val grouped = sales.groupByAgg[RegionTotal](keys, aggs)
+    val result = DatasetInterpreter.execute(grouped).toOption.get.toVectorUnsafe
+
+    result.length shouldBe 2
+    val east = result.find(_.region == "East").get
+    east.totalAmount shouldBe 550.0
+    east.totalQty shouldBe 3L
+  }
+
+  it should "support .as() renaming" in {
+    import net.ghoula.strongbow.agg.AggBuilders as agg
+    import net.ghoula.strongbow.agg.as
+
+    val spec = agg.count[Sale].as("myCount")
+    spec.name shouldBe "myCount"
+  }
+
+  it should "support sum for Int fields" in {
+    import net.ghoula.strongbow.agg.AggBuilders as agg
+    import net.ghoula.strongbow.agg.as
+
+    val sales = makeSales
+
+    case class RegionSum(region: String, totalQty: Int)
+    given Schema[RegionSum] = Schema.derived
+
+    val keys = Vector(
+      KeySpec[Sale, Any]("region", Expr.Cell[Sale, Any]("region", ColumnIndex(0)), ColumnType.StringType)
+    )
+    val aggs = Vector(
+      agg.sum[Sale](_.quantity).as("totalQty")
+    )
+
+    val grouped = sales.groupByAgg[RegionSum](keys, aggs)
+    val result = DatasetInterpreter.execute(grouped).toOption.get.toVectorUnsafe
+
+    result.length shouldBe 2
+    val east = result.find(_.region == "East").get
+    east.totalQty shouldBe 55 // 10+15+30
+  }
 }

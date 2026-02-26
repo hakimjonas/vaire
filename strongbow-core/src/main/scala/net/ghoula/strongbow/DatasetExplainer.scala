@@ -84,6 +84,18 @@ object DatasetExplainer {
       case Dataset.ZipWithIndex(parent) =>
         s"ZipWithIndex\n${explain(parent, indent + 1)}"
 
+      case Dataset.ZipWithUniqueId(parent) =>
+        s"ZipWithUniqueId\n${explain(parent, indent + 1)}"
+
+      case Dataset.Persist(parent) =>
+        s"Persist\n${explain(parent, indent + 1)}"
+
+      case Dataset.Checkpoint(parent) =>
+        s"Checkpoint\n${explain(parent, indent + 1)}"
+
+      case Dataset.Rebalance(parent, numPartitions) =>
+        s"Rebalance(${numPartitions.getOrElse("auto")})\n${explain(parent, indent + 1)}"
+
       case Dataset.GroupByAgg(parent, keySpecs, aggSpecs, _) =>
         val keys = keySpecs.map(_.name).mkString(", ")
         val aggs = aggSpecs.map(_.name).mkString(", ")

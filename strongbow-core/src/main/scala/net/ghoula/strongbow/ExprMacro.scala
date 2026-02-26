@@ -22,6 +22,27 @@ object ExprMacro {
   ): (SExpr[T, A], ColumnType) =
     ${ compileExprImpl[T, A, m.MirroredElemLabels, m.MirroredElemTypes]('f) }
 
+  /** Compile a T => T lambda (expected to use .copy()) into per-field expressions.
+    *
+    * Returns expressions for all fields — unchanged fields get Cell references, modified fields get
+    * the compiled replacement expression.
+    */
+  inline def compileCopy[T](inline f: T => T)(using
+    m: Mirror.ProductOf[T]
+  ): Vector[(String, SExpr[T, Any], ColumnType)] =
+    ${ compileCopyImpl[T, m.MirroredElemLabels, m.MirroredElemTypes]('f) }
+
+  /** Project T down to U by matching field names. Compile-time error if U has fields not in T or
+    * types don't match.
+    */
+  inline def projectExprs[T, U](using
+    mt: Mirror.ProductOf[T],
+    mu: Mirror.ProductOf[U]
+  ): Vector[(String, SExpr[T, Any], ColumnType)] =
+    ${
+      projectExprsImpl[T, U, mt.MirroredElemLabels, mt.MirroredElemTypes, mu.MirroredElemLabels, mu.MirroredElemTypes]
+    }
+
   private def getLabels[Labels <: Tuple: Type](using q: Quotes): List[String] = {
     import q.reflect.*
 
@@ -112,6 +133,188 @@ object ExprMacro {
       report.errorAndAbort(
         s"Unsupported expression return type: ${bodyType.show}. Only Int, Long, Double, String, Boolean are supported."
       )
+    }
+  }
+
+  private def compileCopyImpl[T: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
+    f: QExpr[T => T]
+  )(using q: Quotes): QExpr[Vector[(String, SExpr[T, Any], ColumnType)]] = {
+    import q.reflect.*
+
+    val labels = getLabels[Labels]
+    val elemTypes = getElemTypes[Elems]
+    val term = f.asTerm
+    val (paramName, body) = extractLambdaBody(term)
+    val unwrapped = unwrapTerm(body)
+
+    // Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args))
+    // Extract the val bindings and the copy call
+    val (valBindings, copyArgs) = unwrapped match {
+      // Simple direct copy (no default args needed — all fields provided)
+      case Apply(Select(Ident(name), "copy"), argList) if name == paramName =>
+        (Map.empty[String, Term], argList)
+
+      // Desugared copy with Block: vals for defaults/explicit args, then copy call
+      case Block(stats, Apply(Select(Ident(name), "copy"), argList)) if name == paramName =>
+        val bindings = stats.collect { case ValDef(vname, _, Some(rhs)) =>
+          vname -> rhs
+        }.toMap
+        (bindings, argList)
+
+      case other =>
+        report.errorAndAbort(
+          s"Expected .copy() call on the lambda parameter, got: ${other.show}"
+        )
+    }
+
+    if (copyArgs.length != labels.length) {
+      report.errorAndAbort(
+        s"copy() argument count (${copyArgs.length}) doesn't match field count (${labels.length})"
+      )
+    }
+
+    // Resolve each copy argument through val bindings to find the actual expression
+    def resolveArg(arg: Term): Term = arg match {
+      case NamedArg(_, value) => resolveArg(value)
+      case Ident(ref) => valBindings.getOrElse(ref, arg)
+      case other => other
+    }
+
+    // Check if a resolved expression is an unchanged field reference (default)
+    def isDefault(resolved: Term, fieldName: String): Boolean = resolved match {
+      // Direct field access (t.fieldName) or copy$default$N accessor
+      case Select(Ident(name), field) =>
+        name == paramName && (field == fieldName || field.startsWith("copy$default$"))
+      case _ => false
+    }
+
+    // For each field, check if the argument is unchanged or a replacement
+    val fieldExprs: List[QExpr[(String, SExpr[T, Any], ColumnType)]] =
+      labels.zip(elemTypes).zipWithIndex.map { case ((fieldName, fieldTypeRepr), fieldIdx) =>
+        val rawArg = copyArgs(fieldIdx)
+        val resolved = resolveArg(rawArg)
+        val colIdx = flatColumnOffset[T](fieldIdx)
+        val nameExpr = QExpr(fieldName)
+        val idxExpr = QExpr(colIdx)
+
+        if (isDefault(resolved, fieldName)) {
+          // Unchanged field → emit Cell
+          val ct = inferColumnTypeFromRepr(fieldTypeRepr)
+          '{ ($nameExpr, SExpr.Cell[T, Any]($nameExpr, ColumnIndex($idxExpr)), $ct) }
+        } else {
+          // Replacement expression → compile it based on field type
+          compileFieldExprAny[T](resolved, paramName, labels, fieldTypeRepr, nameExpr)
+        }
+      }
+
+    // Build the Vector at compile time
+    fieldExprs match {
+      case Nil => '{ Vector.empty }
+      case head :: Nil => '{ Vector($head) }
+      case all => '{ Vector(${ QExpr.ofList(all) }*) }
+    }
+  }
+
+  private def projectExprsImpl[
+    T: Type,
+    U: Type,
+    TLabels <: Tuple: Type,
+    TElems <: Tuple: Type,
+    ULabels <: Tuple: Type,
+    UElems <: Tuple: Type
+  ](using q: Quotes): QExpr[Vector[(String, SExpr[T, Any], ColumnType)]] = {
+    import q.reflect.*
+
+    val tLabels = getLabels[TLabels]
+    val tElemTypes = getElemTypes[TElems]
+    val uLabels = getLabels[ULabels]
+    val uElemTypes = getElemTypes[UElems]
+
+    val fieldExprs: List[QExpr[(String, SExpr[T, Any], ColumnType)]] =
+      uLabels.zip(uElemTypes).map { case (uFieldName, uFieldType) =>
+        val tFieldIdx = tLabels.indexOf(uFieldName)
+        if (tFieldIdx < 0) {
+          report.errorAndAbort(
+            s"Field '$uFieldName' not found in ${Type.show[T]}. Available: ${tLabels.mkString(", ")}"
+          )
+        }
+        val tFieldType = tElemTypes(tFieldIdx)
+        if (!(tFieldType.widen =:= uFieldType.widen)) {
+          report.errorAndAbort(
+            s"Type mismatch for field '$uFieldName': ${Type.show[T]} has ${tFieldType.widen.show} but ${Type.show[U]} expects ${uFieldType.widen.show}"
+          )
+        }
+        val colIdx = flatColumnOffset[T](tFieldIdx)
+        val nameExpr = QExpr(uFieldName)
+        val idxExpr = QExpr(colIdx)
+        val ct = inferColumnTypeFromRepr(tFieldType)
+        '{ ($nameExpr, SExpr.Cell[T, Any]($nameExpr, ColumnIndex($idxExpr)), $ct) }
+      }
+
+    fieldExprs match {
+      case Nil => '{ Vector.empty }
+      case head :: Nil => '{ Vector($head) }
+      case all => '{ Vector(${ QExpr.ofList(all) }*) }
+    }
+  }
+
+  private def getElemTypes[Elems <: Tuple: Type](using q: Quotes): List[q.reflect.TypeRepr] = {
+    import q.reflect.*
+
+    def extract[E <: Tuple: Type]: List[TypeRepr] = Type.of[E] match {
+      case '[EmptyTuple] => Nil
+      case '[elem *: rest] => TypeRepr.of[elem] :: extract[rest]
+    }
+
+    extract[Elems]
+  }
+
+  private def inferColumnTypeFromRepr(using q: Quotes)(tpe: q.reflect.TypeRepr): QExpr[ColumnType] = {
+    import q.reflect.*
+    val w = tpe.widen
+    if (w =:= TypeRepr.of[Int]) '{ ColumnType.IntType }
+    else if (w =:= TypeRepr.of[Long]) '{ ColumnType.LongType }
+    else if (w =:= TypeRepr.of[Double]) '{ ColumnType.DoubleType }
+    else if (w =:= TypeRepr.of[String]) '{ ColumnType.StringType }
+    else if (w =:= TypeRepr.of[Boolean]) '{ ColumnType.BooleanType }
+    else if (w =:= TypeRepr.of[java.time.LocalDate]) '{ ColumnType.DateType }
+    else report.errorAndAbort(s"Unsupported field type ${w.show} in copy expression.")
+  }
+
+  private def compileFieldExprAny[T: Type](using
+    q: Quotes
+  )(
+    term: q.reflect.Term,
+    paramName: String,
+    labels: List[String],
+    fieldTypeRepr: q.reflect.TypeRepr,
+    nameExpr: QExpr[String]
+  ): QExpr[(String, SExpr[T, Any], ColumnType)] = {
+    import q.reflect.*
+    val w = fieldTypeRepr.widen
+    if (w =:= TypeRepr.of[Int]) {
+      val expr = compileIntExpr[T](term, paramName, labels)
+      '{ ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.IntType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (w =:= TypeRepr.of[Long]) {
+      val expr = compileLongExpr[T](term, paramName, labels)
+      '{ ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.LongType) } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (w =:= TypeRepr.of[Double]) {
+      val expr = compileDoubleExpr[T](term, paramName, labels)
+      '{
+        ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.DoubleType)
+      } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (w =:= TypeRepr.of[String]) {
+      val expr = compileStringExpr[T](term, paramName, labels)
+      '{
+        ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.StringType)
+      } // scalafix:ok DisableSyntax.asInstanceOf
+    } else if (w =:= TypeRepr.of[Boolean]) {
+      val expr = compileBooleanValueExpr[T](term, paramName, labels)
+      '{
+        ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.BooleanType)
+      } // scalafix:ok DisableSyntax.asInstanceOf
+    } else {
+      report.errorAndAbort(s"Unsupported field type ${w.show} in copy replacement expression.")
     }
   }
 
@@ -601,5 +804,27 @@ extension [T](ds: Dataset[T]) {
   ): Grouped[K, T] = {
     val (expr, colType) = ExprMacro.column(f)
     ds.groupByExpr(expr, colType)
+  }
+
+  /** Modify fields using .copy() syntax, compiled to SelectExprs at compile time.
+    *
+    * @example
+    *   {{{
+    * ds.withFields(t => t.copy(salary = t.salary * 2, name = t.name + " Jr"))
+    *   }}}
+    */
+  inline def withFields(inline f: T => T)(using m: Mirror.ProductOf[T], s: Schema[T]): Dataset[T] = {
+    val exprs = ExprMacro.compileCopy(f)
+    Dataset.SelectExprs(ds, exprs, s)
+  }
+
+  /** Project to a subset of fields by matching field names between T and U at compile time. */
+  inline def project[U](using
+    mt: Mirror.ProductOf[T],
+    mu: Mirror.ProductOf[U],
+    su: Schema[U]
+  ): Dataset[U] = {
+    val exprs = ExprMacro.projectExprs[T, U]
+    Dataset.SelectExprs(ds, exprs, su)
   }
 }

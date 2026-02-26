@@ -477,4 +477,80 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
 
     macroResult shouldBe manualResult
   }
+
+  // --- withFields (copy macro) tests ---
+
+  "withFields" should "modify a single field using .copy()" in {
+    val dataset = createDataset(testUsers)
+
+    val result = dataset.withFields(t => t.copy(age = t.age * 2)).collect.toOption.get
+
+    result shouldBe Vector(
+      User(1, "Alice", 50),
+      User(2, "Bob", 60),
+      User(3, "Charlie", 34),
+      User(4, "Diana", 130)
+    )
+  }
+
+  it should "modify multiple fields using .copy()" in {
+    val dataset = createDataset(testUsers)
+
+    val result = dataset.withFields(t => t.copy(age = t.age + 1, id = t.id * 10)).collect.toOption.get
+
+    result shouldBe Vector(
+      User(10, "Alice", 26),
+      User(20, "Bob", 31),
+      User(30, "Charlie", 18),
+      User(40, "Diana", 66)
+    )
+  }
+
+  it should "preserve unchanged fields" in {
+    val dataset = createDataset(testUsers)
+
+    // Only change age, id and name should stay the same
+    val result = dataset.withFields(t => t.copy(age = t.age + 100)).collect.toOption.get
+
+    result.map(_.id) shouldBe testUsers.map(_.id)
+    result.map(_.name) shouldBe testUsers.map(_.name)
+    result.map(_.age) shouldBe testUsers.map(_.age + 100)
+  }
+
+  // --- project macro tests ---
+
+  case class NameAge(name: String, age: Int)
+  given Schema[NameAge] = Schema.derived
+
+  case class IdOnly(id: Int)
+  given Schema[IdOnly] = Schema.derived
+
+  "project" should "select subset of fields from User to NameAge" in {
+    val dataset = createDataset(testUsers)
+
+    val result = dataset.project[NameAge].collect.toOption.get
+
+    result shouldBe Vector(
+      NameAge("Alice", 25),
+      NameAge("Bob", 30),
+      NameAge("Charlie", 17),
+      NameAge("Diana", 65)
+    )
+  }
+
+  it should "project to single field" in {
+    val dataset = createDataset(testUsers)
+
+    val result = dataset.project[IdOnly].collect.toOption.get
+
+    result shouldBe Vector(IdOnly(1), IdOnly(2), IdOnly(3), IdOnly(4))
+  }
+
+  it should "preserve data after project then filter" in {
+    val dataset = createDataset(testUsers)
+
+    val result = dataset.project[NameAge].where(_.age > 20).collect.toOption.get
+
+    result shouldBe Vector(NameAge("Alice", 25), NameAge("Bob", 30), NameAge("Diana", 65))
+  }
 }

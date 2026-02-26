@@ -235,7 +235,9 @@ object ExprInterpreter {
 
       case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] |
           _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
-          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] | _: Expr.First[Row, ?] | _: Expr.Collect[Row, ?] =>
+          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] | _: Expr.First[Row, ?] | _: Expr.Collect[Row, ?] |
+          _: Expr.PercentileApprox[Row] | _: Expr.MaxBy[Row, ?, ?] | _: Expr.MinBy[Row, ?, ?] | _: Expr.MaxN[Row, ?] |
+          _: Expr.MinN[Row, ?] | _: Expr.MaxByN[Row, ?, ?] | _: Expr.MinByN[Row, ?, ?] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
 
       case dad: Expr.DateAddDays[Row] =>
@@ -548,6 +550,10 @@ object ExprInterpreter {
         ColumnType.LongType
       case _: Expr.Max[_, _] | _: Expr.Min[_, _] | _: Expr.First[_, _] => ColumnType.AnyType
       case _: Expr.Collect[_, _] | _: Expr.Option2Iterable[_, _] => ColumnType.AnyType
+      case _: Expr.PercentileApprox[_] => ColumnType.DoubleType
+      case _: Expr.MaxBy[_, _, _] | _: Expr.MinBy[_, _, _] => ColumnType.AnyType
+      case _: Expr.MaxN[_, _] | _: Expr.MinN[_, _] | _: Expr.MaxByN[_, _, _] | _: Expr.MinByN[_, _, _] =>
+        ColumnType.AnyType
       case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] => ColumnType.DateType
       case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>
         ColumnType.IntType
@@ -947,6 +953,20 @@ object ExprInterpreter {
           Right(None)
         case _: Expr.Collect[Row, ?] =>
           Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+        case _: Expr.PercentileApprox[Row] =>
+          Right(0.0)
+        case _: Expr.MaxBy[Row, ?, ?] =>
+          Right(None)
+        case _: Expr.MinBy[Row, ?, ?] =>
+          Right(None)
+        case _: Expr.MaxN[Row, ?] =>
+          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+        case _: Expr.MinN[Row, ?] =>
+          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+        case _: Expr.MaxByN[Row, ?, ?] =>
+          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+        case _: Expr.MinByN[Row, ?, ?] =>
+          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
       }
     } else {
       (expr: @unchecked) match {
@@ -1065,6 +1085,111 @@ object ExprInterpreter {
             eval(collect.expr, columns, RowIndex(rowIdx)).toOption
           }
           Right(values.toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case pct: Expr.PercentileApprox[Row] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(pct.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          if (values.isEmpty) {
+            Right(0.0.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          } else {
+            val sorted = values.sorted
+            val idx = math.min((sorted.length * pct.percentile).toInt, sorted.length - 1)
+            Right(sorted(idx).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          }
+
+        case mb: Expr.MaxBy[Row, a, k] =>
+          val rowCount = columns.head.length
+          var bestValue: Option[a] = None // scalafix:ok DisableSyntax.var
+          var bestKey: Option[k] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            val v = eval(mb.valueExpr, columns, RowIndex(i))
+            val kv = eval(mb.orderExpr, columns, RowIndex(i))
+            (v, kv) match {
+              case (Right(value), Right(key)) =>
+                bestKey match {
+                  case None =>
+                    bestValue = Some(value)
+                    bestKey = Some(key)
+                  case Some(bk) if mb.ordering.gt(key, bk) =>
+                    bestValue = Some(value)
+                    bestKey = Some(key)
+                  case _ => ()
+                }
+              case _ => ()
+            }
+            i += 1
+          }
+          Right(bestValue.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case mb: Expr.MinBy[Row, a, k] =>
+          val rowCount = columns.head.length
+          var bestValue: Option[a] = None // scalafix:ok DisableSyntax.var
+          var bestKey: Option[k] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            val v = eval(mb.valueExpr, columns, RowIndex(i))
+            val kv = eval(mb.orderExpr, columns, RowIndex(i))
+            (v, kv) match {
+              case (Right(value), Right(key)) =>
+                bestKey match {
+                  case None =>
+                    bestValue = Some(value)
+                    bestKey = Some(key)
+                  case Some(bk) if mb.ordering.lt(key, bk) =>
+                    bestValue = Some(value)
+                    bestKey = Some(key)
+                  case _ => ()
+                }
+              case _ => ()
+            }
+            i += 1
+          }
+          Right(bestValue.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case mn: Expr.MaxN[Row, _] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(mn.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          val sorted = values.sorted(using mn.ordering.reverse)
+          Right(sorted.take(mn.n).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case mn: Expr.MinN[Row, _] =>
+          val rowCount = columns.head.length
+          val values = (0 until rowCount).flatMap { rowIdx =>
+            eval(mn.expr, columns, RowIndex(rowIdx)).toOption
+          }
+          val sorted = values.sorted(using mn.ordering)
+          Right(sorted.take(mn.n).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case mbn: Expr.MaxByN[Row, a, k] =>
+          val rowCount = columns.head.length
+          val pairs = (0 until rowCount).flatMap { rowIdx =>
+            val v = eval(mbn.valueExpr, columns, RowIndex(rowIdx))
+            val kv = eval(mbn.orderExpr, columns, RowIndex(rowIdx))
+            (v, kv) match {
+              case (Right(value), Right(key)) => Some((value, key))
+              case _ => None
+            }
+          }
+          val sorted = pairs.sortBy(_._2)(using mbn.ordering.reverse)
+          Right(sorted.take(mbn.n).map(_._1).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+
+        case mbn: Expr.MinByN[Row, a, k] =>
+          val rowCount = columns.head.length
+          val pairs = (0 until rowCount).flatMap { rowIdx =>
+            val v = eval(mbn.valueExpr, columns, RowIndex(rowIdx))
+            val kv = eval(mbn.orderExpr, columns, RowIndex(rowIdx))
+            (v, kv) match {
+              case (Right(value), Right(key)) => Some((value, key))
+              case _ => None
+            }
+          }
+          val sorted = pairs.sortBy(_._2)(using mbn.ordering)
+          Right(sorted.take(mbn.n).map(_._1).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
       }
     }
   }

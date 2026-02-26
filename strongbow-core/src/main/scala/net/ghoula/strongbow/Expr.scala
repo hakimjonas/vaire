@@ -70,6 +70,19 @@ enum Expr[Row, +A] {
   case Collect[Row, A](expr: Expr[Row, A]) extends Expr[Row, Seq[A]]
   case Option2Iterable[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Iterable[A]]
 
+  // Phase 3: Advanced aggregations
+  case PercentileApprox[Row](expr: Expr[Row, Double], percentile: Double, accuracy: Int) extends Expr[Row, Double]
+  case MaxBy[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], ordering: Ordering[K])
+      extends Expr[Row, Option[A]]
+  case MinBy[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], ordering: Ordering[K])
+      extends Expr[Row, Option[A]]
+  case MaxN[Row, A](expr: Expr[Row, A], n: Int, ordering: Ordering[A]) extends Expr[Row, Seq[A]]
+  case MinN[Row, A](expr: Expr[Row, A], n: Int, ordering: Ordering[A]) extends Expr[Row, Seq[A]]
+  case MaxByN[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], n: Int, ordering: Ordering[K])
+      extends Expr[Row, Seq[A]]
+  case MinByN[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], n: Int, ordering: Ordering[K])
+      extends Expr[Row, Seq[A]]
+
   // Phase 3: Date expressions
   case DateAddDays[Row](date: Expr[Row, java.time.LocalDate], days: Expr[Row, Int])
       extends Expr[Row, java.time.LocalDate]
@@ -141,6 +154,46 @@ object Expr {
   /** Sum of Long-valued expressions. */
   def sumLong[Row](expr: Expr[Row, Long]): Expr[Row, Long] = {
     SumLong(expr)
+  }
+
+  /** Approximate percentile of Double-valued expressions. */
+  def percentileApprox[Row](expr: Expr[Row, Double], percentile: Double, accuracy: Int = 10000): Expr[Row, Double] = {
+    PercentileApprox(expr, percentile, accuracy)
+  }
+
+  /** Approximate median (percentile = 0.5). */
+  def medianApprox[Row](expr: Expr[Row, Double], accuracy: Int = 10000): Expr[Row, Double] = {
+    PercentileApprox(expr, 0.5, accuracy)
+  }
+
+  /** Value of valueExpr at the row where orderExpr is maximum. */
+  def maxBy[Row, A, K: Ordering](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K]): Expr[Row, Option[A]] = {
+    MaxBy(valueExpr, orderExpr, summon[Ordering[K]])
+  }
+
+  /** Value of valueExpr at the row where orderExpr is minimum. */
+  def minBy[Row, A, K: Ordering](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K]): Expr[Row, Option[A]] = {
+    MinBy(valueExpr, orderExpr, summon[Ordering[K]])
+  }
+
+  /** Top N values by ordering. */
+  def maxN[Row, A: Ordering](expr: Expr[Row, A], n: Int): Expr[Row, Seq[A]] = {
+    MaxN(expr, n, summon[Ordering[A]])
+  }
+
+  /** Bottom N values by ordering. */
+  def minN[Row, A: Ordering](expr: Expr[Row, A], n: Int): Expr[Row, Seq[A]] = {
+    MinN(expr, n, summon[Ordering[A]])
+  }
+
+  /** Top N values of valueExpr ordered by orderExpr. */
+  def maxByN[Row, A, K: Ordering](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], n: Int): Expr[Row, Seq[A]] = {
+    MaxByN(valueExpr, orderExpr, n, summon[Ordering[K]])
+  }
+
+  /** Bottom N values of valueExpr ordered by orderExpr. */
+  def minByN[Row, A, K: Ordering](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], n: Int): Expr[Row, Seq[A]] = {
+    MinByN(valueExpr, orderExpr, n, summon[Ordering[K]])
   }
 
   extension [Row, A](left: Expr[Row, A]) {
@@ -261,6 +314,10 @@ object Expr {
       case _: Expr.Max[_, _] | _: Expr.Min[_, _] | _: Expr.First[_, _] => None
       case _: Expr.Collect[_, _] => Some(ColumnType.AnyType)
       case _: Expr.Option2Iterable[_, _] => Some(ColumnType.AnyType)
+      case _: Expr.PercentileApprox[_] => Some(ColumnType.DoubleType)
+      case _: Expr.MaxBy[_, _, _] | _: Expr.MinBy[_, _, _] => None
+      case _: Expr.MaxN[_, _] | _: Expr.MinN[_, _] | _: Expr.MaxByN[_, _, _] | _: Expr.MinByN[_, _, _] =>
+        Some(ColumnType.AnyType)
       case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] =>
         Some(ColumnType.DateType)
       case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>

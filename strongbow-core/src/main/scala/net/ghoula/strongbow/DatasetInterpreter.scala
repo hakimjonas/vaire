@@ -164,6 +164,25 @@ object DatasetInterpreter extends Interpreter {
           zipWithIndex(parent).map(_.asInstanceOf[MaterializedDataset[T]]) // scalafix:ok DisableSyntax.asInstanceOf
         }
 
+      case zip: Dataset.ZipWithUniqueId[_] =>
+        execute(zip.parent).flatMap { parent =>
+          // In-memory: unique IDs = sequential indices (same as zipWithIndex)
+          zipWithIndex(parent).map(_.asInstanceOf[MaterializedDataset[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+        }
+
+      case persist: Dataset.Persist[T] =>
+        execute(persist.parent)
+
+      case cp: Dataset.Checkpoint[T] =>
+        // Materialize into fresh dataset (truncates logical plan)
+        execute(cp.parent).flatMap { parent =>
+          MaterializedDataset.fromVector(parent.toVectorUnsafe)(using parent.schema)
+        }
+
+      case reb: Dataset.Rebalance[T] =>
+        // No-op in-memory: no partitions to rebalance
+        execute(reb.parent)
+
       case gba: Dataset.GroupByAgg[_, T] =>
         execute(gba.parent).flatMap { parent =>
           groupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)

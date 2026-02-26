@@ -154,6 +154,39 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     sparkResult shouldBe inMemory
   }
 
+  // --- ZipWithUniqueId ---
+
+  "ZipWithUniqueId" should "produce unique IDs with same count as parent" in {
+    given Schema[(Int, Long)] = Schema.tuple2Schema[Int, Long]
+    val col = Column.int(Array(10, 20, 30))
+    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get.zipWithUniqueId
+    val sparkResult = sparkInterpreter.execute(ds).map(_.toVectorUnsafe)
+    sparkResult match {
+      case Right(values) =>
+        values.length shouldBe 3
+        values.map(_._1).sorted shouldBe Vector(10, 20, 30)
+        // IDs should all be unique (may differ from sequential)
+        values.map(_._2).distinct.length shouldBe 3
+      case Left(err) => fail(s"Spark ZipWithUniqueId failed: $err")
+    }
+  }
+
+  // --- Persist ---
+
+  "Persist" should "produce same results as parent" in {
+    val col = Column.int(Array(1, 2, 3))
+    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get.persist
+    assertParity(ds)
+  }
+
+  // --- Rebalance ---
+
+  "Rebalance" should "produce same results as parent" in {
+    val col = Column.int(Array(1, 2, 3, 4, 5))
+    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get.rebalance(2)
+    assertParity(ds)
+  }
+
   // --- InnerJoin ---
 
   "InnerJoin" should "produce same results" in {

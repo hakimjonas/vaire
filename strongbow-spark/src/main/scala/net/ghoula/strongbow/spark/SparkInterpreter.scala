@@ -118,6 +118,26 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val parent = buildPlan(zip.parent)
         applyZipWithIndex[a, T](parent)
 
+      case zip: Dataset.ZipWithUniqueId[a] =>
+        val parent = buildPlan(zip.parent)
+        applyZipWithUniqueId[a, T](parent)
+
+      case persist: Dataset.Persist[T] =>
+        val parent = buildPlan(persist.parent)
+        SparkPlan(parent.df.persist(), parent.schema)
+
+      case cp: Dataset.Checkpoint[T] =>
+        val parent = buildPlan(cp.parent)
+        SparkPlan(parent.df.checkpoint(), parent.schema)
+
+      case reb: Dataset.Rebalance[T] =>
+        val parent = buildPlan(reb.parent)
+        val df = reb.numPartitions match {
+          case Some(n) => parent.df.repartition(n)
+          case None => parent.df.repartition()
+        }
+        SparkPlan(df, parent.schema)
+
       case jn: Dataset.InnerJoin[a, b] =>
         val left = buildPlan(jn.left)
         val right = buildPlan(jn.right)
@@ -477,6 +497,28 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
     val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
     val df = createDataFrame(indexed, tupleSchema)
+    SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+  }
+
+  private def applyZipWithUniqueId[A, T](parent: SparkPlan[A]): SparkPlan[T] = {
+    import org.apache.spark.sql.functions.monotonically_increasing_id
+    val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
+    val colNames = parent.df.columns
+    val uidDf = parent.df.withColumn("_uid", monotonically_increasing_id())
+    // Restructure: original columns become a struct, _uid becomes the second element
+    val values = uidDf
+      .collect()
+      .iterator
+      .map { row =>
+        val original = RowConverter.fromRowUnsafe(
+          org.apache.spark.sql.Row.fromSeq(colNames.indices.map(row.get)),
+          parent.schema
+        )
+        val uid = row.getLong(colNames.length)
+        (original, uid)
+      }
+      .toVector
+    val df = createDataFrame(values, tupleSchema)
     SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
   }
 

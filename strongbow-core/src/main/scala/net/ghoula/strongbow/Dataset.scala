@@ -85,6 +85,14 @@ enum Dataset[+T] {
     withReplacement: Boolean
   ) extends Dataset[T]
   case ZipWithIndex[T](parent: Dataset[T]) extends Dataset[(T, Long)]
+  case ZipWithUniqueId[T](parent: Dataset[T]) extends Dataset[(T, Long)]
+
+  // Materialization hints
+  case Persist[T](parent: Dataset[T]) extends Dataset[T]
+  case Checkpoint[T](parent: Dataset[T]) extends Dataset[T]
+
+  // Spark-only repartitioning (in-memory no-op)
+  case Rebalance[T](parent: Dataset[T], numPartitions: Option[Int]) extends Dataset[T]
 
   // Phase 1: Distributed GROUP BY with vector-based keys and aggregations
   case GroupByAgg[In, Out](
@@ -286,6 +294,44 @@ object Dataset {
       */
     inline def zipWithIndex: Dataset[(T, Long)] = {
       ZipWithIndex(ds)
+    }
+
+    /** Zip dataset with unique IDs (not necessarily sequential).
+      *
+      * In-memory: produces sequential IDs (same as zipWithIndex). Spark: uses
+      * monotonically_increasing_id() which guarantees uniqueness but not sequentiality.
+      */
+    inline def zipWithUniqueId: Dataset[(T, Long)] = {
+      ZipWithUniqueId(ds)
+    }
+
+    /** Hint to cache the materialized result.
+      *
+      * In-memory: materializes parent (no caching layer). Spark: calls df.persist().
+      */
+    inline def persist: Dataset[T] = {
+      Persist(ds)
+    }
+
+    /** Materialize and truncate the logical plan.
+      *
+      * In-memory: materializes into a fresh dataset. Spark: calls df.checkpoint().
+      */
+    inline def checkpoint: Dataset[T] = {
+      Checkpoint(ds)
+    }
+
+    /** Repartition data for balanced parallelism.
+      *
+      * In-memory: no-op (no partitions). Spark: calls df.repartition().
+      */
+    inline def rebalance: Dataset[T] = {
+      Rebalance(ds, None)
+    }
+
+    /** Repartition data into a specific number of partitions. */
+    inline def rebalance(numPartitions: Int): Dataset[T] = {
+      Rebalance(ds, Some(numPartitions))
     }
 
     /** Alias for union. */

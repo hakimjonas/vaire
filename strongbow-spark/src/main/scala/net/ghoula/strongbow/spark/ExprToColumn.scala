@@ -237,6 +237,56 @@ object ExprToColumn {
           (sparkWhen(sparkCol.isNotNull, array(sparkCol)).otherwise(array()), ColumnType.AnyType)
         }
 
+      // Advanced aggregations
+      case pct: Expr.PercentileApprox[Row] =>
+        convert(pct.expr).map { case (sparkCol, _) =>
+          (percentile_approx(sparkCol, lit(pct.percentile), lit(pct.accuracy)), ColumnType.DoubleType)
+        }
+
+      case mb: Expr.MaxBy[Row, _, _] =>
+        for {
+          (valCol, _) <- convert(mb.valueExpr)
+          (ordCol, _) <- convert(mb.orderExpr)
+        } yield (max_by(valCol, ordCol), ColumnType.AnyType)
+
+      case mb: Expr.MinBy[Row, _, _] =>
+        for {
+          (valCol, _) <- convert(mb.valueExpr)
+          (ordCol, _) <- convert(mb.orderExpr)
+        } yield (min_by(valCol, ordCol), ColumnType.AnyType)
+
+      case mn: Expr.MaxN[Row, _] =>
+        convert(mn.expr).map { case (sparkCol, _) =>
+          (slice(sort_array(collect_list(sparkCol), asc = false), 1, mn.n), ColumnType.AnyType)
+        }
+
+      case mn: Expr.MinN[Row, _] =>
+        convert(mn.expr).map { case (sparkCol, _) =>
+          (slice(sort_array(collect_list(sparkCol), asc = true), 1, mn.n), ColumnType.AnyType)
+        }
+
+      case mbn: Expr.MaxByN[Row, _, _] =>
+        for {
+          (valCol, _) <- convert(mbn.valueExpr)
+          (ordCol, _) <- convert(mbn.orderExpr)
+        } yield {
+          val zipped = arrays_zip(collect_list(valCol).as("v"), collect_list(ordCol).as("k"))
+          val sorted = sort_array(zipped, asc = false)
+          val sliced = slice(sorted, 1, mbn.n)
+          (transform(sliced, (x: SparkColumn) => x.getField("v")), ColumnType.AnyType)
+        }
+
+      case mbn: Expr.MinByN[Row, _, _] =>
+        for {
+          (valCol, _) <- convert(mbn.valueExpr)
+          (ordCol, _) <- convert(mbn.orderExpr)
+        } yield {
+          val zipped = arrays_zip(collect_list(valCol).as("v"), collect_list(ordCol).as("k"))
+          val sorted = sort_array(zipped, asc = true)
+          val sliced = slice(sorted, 1, mbn.n)
+          (transform(sliced, (x: SparkColumn) => x.getField("v")), ColumnType.AnyType)
+        }
+
       // Date expressions
       case dad: Expr.DateAddDays[Row] =>
         for {

@@ -280,6 +280,144 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     result.head shouldBe Stats(5L, 150)
   }
 
+  "PercentileApprox" should "compute approximate percentile" in {
+    val doubleColumn = Column.DoubleColumn(
+      Array(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val columns = Vector(doubleColumn)
+
+    // Median (0.5)
+    val medianExpr = Expr.percentileApprox(Expr.Cell[Double, Double]("value", ColumnIndex(0)), 0.5)
+    val median = ExprInterpreter.evalAggregation(medianExpr, columns)
+    median match {
+      case Right(v) => v should (be >= 5.0 and be <= 6.0)
+      case Left(err) => fail(s"Percentile failed: $err")
+    }
+
+    // p0 (min)
+    val p0Expr = Expr.percentileApprox(Expr.Cell[Double, Double]("value", ColumnIndex(0)), 0.0)
+    ExprInterpreter.evalAggregation(p0Expr, columns) shouldBe Right(1.0)
+  }
+
+  it should "return 0.0 for empty dataset" in {
+    val expr = Expr.percentileApprox(Expr.Cell[Double, Double]("value", ColumnIndex(0)), 0.5)
+    ExprInterpreter.evalAggregation(expr, Vector.empty) shouldBe Right(0.0)
+  }
+
+  "medianApprox" should "be a convenience for percentile 0.5" in {
+    val doubleColumn = Column.DoubleColumn(
+      Array(1.0, 2.0, 3.0, 4.0, 5.0),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val columns = Vector(doubleColumn)
+
+    val expr = Expr.medianApprox(Expr.Cell[Double, Double]("value", ColumnIndex(0)))
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(3.0)
+  }
+
+  "MaxBy" should "find value at row with maximum key" in {
+    // Two columns: name (string) and salary (int)
+    val nameCol = Column.StringColumn(Array("Alice", "Bob", "Carol"), nulls = scala.collection.immutable.BitSet.empty)
+    val salaryCol = Column.IntColumn(Array(50, 90, 70), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(nameCol, salaryCol)
+
+    val expr = Expr.maxBy[Any, String, Int](
+      Expr.Cell("name", ColumnIndex(0)),
+      Expr.Cell("salary", ColumnIndex(1))
+    )
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(Some("Bob"))
+  }
+
+  it should "return None for empty dataset" in {
+    val expr = Expr.maxBy[Any, String, Int](
+      Expr.Cell("name", ColumnIndex(0)),
+      Expr.Cell("salary", ColumnIndex(1))
+    )
+    ExprInterpreter.evalAggregation(expr, Vector.empty) shouldBe Right(None)
+  }
+
+  "MinBy" should "find value at row with minimum key" in {
+    val nameCol = Column.StringColumn(Array("Alice", "Bob", "Carol"), nulls = scala.collection.immutable.BitSet.empty)
+    val salaryCol = Column.IntColumn(Array(50, 90, 70), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(nameCol, salaryCol)
+
+    val expr = Expr.minBy[Any, String, Int](
+      Expr.Cell("name", ColumnIndex(0)),
+      Expr.Cell("salary", ColumnIndex(1))
+    )
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(Some("Alice"))
+  }
+
+  "MaxN" should "return top N values" in {
+    val intColumn = Column.IntColumn(Array(3, 1, 4, 1, 5, 9, 2), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+
+    val expr = Expr.maxN(Expr.Cell[Int, Int]("value", ColumnIndex(0)), 3)
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(Seq(9, 5, 4))
+  }
+
+  it should "return empty Seq for empty dataset" in {
+    val expr = Expr.maxN(Expr.Cell[Int, Int]("value", ColumnIndex(0)), 3)
+    ExprInterpreter.evalAggregation(expr, Vector.empty) shouldBe Right(Seq.empty)
+  }
+
+  "MinN" should "return bottom N values" in {
+    val intColumn = Column.IntColumn(Array(3, 1, 4, 1, 5, 9, 2), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(intColumn)
+
+    val expr = Expr.minN(Expr.Cell[Int, Int]("value", ColumnIndex(0)), 3)
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(Seq(1, 1, 2))
+  }
+
+  "MaxByN" should "return top N values ordered by key" in {
+    val nameCol = Column.StringColumn(
+      Array("Alice", "Bob", "Carol", "Dave"),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val salaryCol = Column.IntColumn(Array(50, 90, 70, 80), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(nameCol, salaryCol)
+
+    val expr = Expr.maxByN[Any, String, Int](
+      Expr.Cell("name", ColumnIndex(0)),
+      Expr.Cell("salary", ColumnIndex(1)),
+      2
+    )
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(Seq("Bob", "Dave"))
+  }
+
+  it should "return empty Seq for empty dataset" in {
+    val expr = Expr.maxByN[Any, String, Int](
+      Expr.Cell("name", ColumnIndex(0)),
+      Expr.Cell("salary", ColumnIndex(1)),
+      2
+    )
+    ExprInterpreter.evalAggregation(expr, Vector.empty) shouldBe Right(Seq.empty)
+  }
+
+  "MinByN" should "return bottom N values ordered by key" in {
+    val nameCol = Column.StringColumn(
+      Array("Alice", "Bob", "Carol", "Dave"),
+      nulls = scala.collection.immutable.BitSet.empty
+    )
+    val salaryCol = Column.IntColumn(Array(50, 90, 70, 80), nulls = scala.collection.immutable.BitSet.empty)
+    val columns = Vector(nameCol, salaryCol)
+
+    val expr = Expr.minByN[Any, String, Int](
+      Expr.Cell("name", ColumnIndex(0)),
+      Expr.Cell("salary", ColumnIndex(1)),
+      2
+    )
+    val result = ExprInterpreter.evalAggregation(expr, columns)
+    result shouldBe Right(Seq("Alice", "Carol"))
+  }
+
   "stddevPop" should "compute population standard deviation" in {
     val doubleColumn = Column.DoubleColumn(
       Array(2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0),

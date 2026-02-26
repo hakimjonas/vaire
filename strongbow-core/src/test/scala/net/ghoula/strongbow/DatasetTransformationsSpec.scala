@@ -79,6 +79,52 @@ class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
     nonMatching.collect.toOption.get shouldBe Vector(1, 2, 3)
   }
 
+  "zipWithUniqueId" should "add unique IDs" in {
+    val dataset = createIntDataset(Vector(10, 20, 30))
+
+    val indexed = dataset.zipWithUniqueId.collect match {
+      case Right(values) => values
+      case Left(err) => fail(s"ZipWithUniqueId failed: $err")
+    }
+
+    // In-memory: unique IDs are sequential (same as zipWithIndex)
+    indexed shouldBe Vector((10, 0L), (20, 1L), (30, 2L))
+  }
+
+  it should "produce unique IDs" in {
+    val dataset = createIntDataset((1 to 100).toVector)
+
+    val ids = dataset.zipWithUniqueId.collect.toOption.get.map(_._2)
+
+    ids.distinct.length shouldBe 100
+  }
+
+  "persist" should "return same results as parent" in {
+    val dataset = createIntDataset(Vector(1, 2, 3, 4, 5))
+
+    val result = dataset.persist.collect.toOption.get
+
+    result shouldBe Vector(1, 2, 3, 4, 5)
+  }
+
+  "checkpoint" should "return same results as parent" in {
+    val dataset = createIntDataset(Vector(1, 2, 3, 4, 5))
+
+    val result = dataset.checkpoint.collect.toOption.get
+
+    result shouldBe Vector(1, 2, 3, 4, 5)
+  }
+
+  "rebalance" should "return same results as parent (no-op in-memory)" in {
+    val dataset = createIntDataset(Vector(1, 2, 3, 4, 5))
+
+    val result = dataset.rebalance.collect.toOption.get
+    result shouldBe Vector(1, 2, 3, 4, 5)
+
+    val resultN = dataset.rebalance(4).collect.toOption.get
+    resultN shouldBe Vector(1, 2, 3, 4, 5)
+  }
+
   "Option2Iterable" should "convert Some to single-element iterable in row-level eval" in {
     val anyColumn = Column.AnyColumn(Array(Some(1), None, Some(3)), nulls = scala.collection.immutable.BitSet.empty)
     val columns = Vector(anyColumn)

@@ -53,4 +53,8 @@ object prelude {
 
   // Compile-time expression macro
   export net.ghoula.strongbow.ExprMacro
+
+  // Aggregation builder helpers and extension
+  export net.ghoula.strongbow.agg.AggBuilders as agg
+  export net.ghoula.strongbow.agg.as
 }

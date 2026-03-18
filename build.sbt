@@ -1,16 +1,16 @@
 ThisBuild / organization := "net.ghoula"
-ThisBuild / scalaVersion := "3.7.4"
+ThisBuild / scalaVersion := "3.8.2"
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-// Java 21
-ThisBuild / javacOptions ++= Seq("--release", "21")
+// Java 25
+ThisBuild / javacOptions ++= Seq("--release", "25")
 
 // Compiler flags matching Eru
 lazy val sharedScalacOptions = Seq(
   "-feature",
-  "-Xfatal-warnings",
+  "-Werror",
   "-Wunused:all",
   "-Wrecurse-with-default",
   "-no-indent",
@@ -25,7 +25,7 @@ lazy val testScalacOptions = Seq(
 val valarVersion = "0.1.0-SNAPSHOT"
 val rumilVersion = "0.1.0-SNAPSHOT"
 val eruVersion = "0.1.0-SNAPSHOT"
-val sparkVersion = "4.1.0"
+val sparkVersion = "4.1.1"
 
 lazy val root = project
   .in(file("."))
@@ -42,8 +42,8 @@ lazy val core = project
     scalacOptions ++= sharedScalacOptions,
     // ⚡ ZERO dependencies—only Scala stdlib
     libraryDependencies ++= Seq(
-      "org.scalatest" %% "scalatest" % "3.2.18" % Test,
-      "org.scalacheck" %% "scalacheck" % "1.17.0" % Test
+      "org.scalatest" %% "scalatest" % "3.2.19" % Test,
+      "org.scalacheck" %% "scalacheck" % "1.18.1" % Test
     )
   )
 
@@ -63,6 +63,7 @@ lazy val spark = project
     name := "strongbow-spark",
     scalacOptions ++= sharedScalacOptions.filterNot(o => o == "-language:strictEquality" || o == "-Wunused:all"),
     scalacOptions += "-Wunused:imports",
+    javacOptions := Seq("--release", "21"),
     libraryDependencies ++= Seq(
       ("org.apache.spark" %% "spark-sql" % sparkVersion % Provided)
         .cross(CrossVersion.for3Use2_13)
@@ -70,10 +71,32 @@ lazy val spark = project
       ("org.apache.spark" %% "spark-sql" % sparkVersion % Test)
         .cross(CrossVersion.for3Use2_13)
         .exclude("org.scala-lang.modules", "scala-xml_2.13"),
-      "org.scala-lang.modules" %% "scala-xml" % "2.3.0" % Test,
-      "org.scalatest" %% "scalatest" % "3.2.18" % Test
+      "org.scala-lang.modules" %% "scala-xml" % "2.4.0" % Test,
+      "org.scalatest" %% "scalatest" % "3.2.19" % Test
     ),
     Test / fork := true,
+    // Scala 3.8's unified scala-library uses TASTY metadata instead of ScalaSig annotations.
+    // scala-reflect 2.13 (used by Spark internals) reads ScalaSig to resolve types like
+    // Array.apply. Without ScalaSig, it fails: "class Array does not have a member apply".
+    // Fix: prepend scala-library 2.13 to the forked test classpath so scala-reflect finds
+    // ScalaSig metadata. The 2.13 classes are binary-compatible with 3.8; this only affects
+    // the annotation format that scala-reflect reads.
+    Test / fullClasspath := {
+      val cp = (Test / fullClasspath).value
+      val scalaReflectJar = cp
+        .find(_.data.getName.startsWith("scala-reflect-"))
+        .getOrElse(
+          sys.error("scala-reflect jar not found on test classpath")
+        )
+      // Derive the 2.13.x version from the scala-reflect jar already on the classpath.
+      // Coursier cache: .../org/scala-lang/scala-reflect/<ver>/ → .../org/scala-lang/scala-library/<ver>/
+      val reflectVersion = scalaReflectJar.data.getName.stripPrefix("scala-reflect-").stripSuffix(".jar")
+      val scalaLangDir = scalaReflectJar.data.getParentFile.getParentFile.getParentFile
+      val scalaLib213 = Attributed.blank(
+        scalaLangDir / "scala-library" / reflectVersion / s"scala-library-$reflectVersion.jar"
+      )
+      scalaLib213 +: cp
+    },
     Test / javaOptions ++= Seq(
       "-Xms8G",
       "-Xmx48G",

@@ -2,7 +2,7 @@ package net.ghoula.strongbow
 
 import scala.annotation.targetName
 
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.types.{ColumnIndex, Date}
 
 /** Type-safe expression language for dataset operations.
   *
@@ -109,7 +109,7 @@ enum Expr[Row, +A] {
   case Collect[Row, A](expr: Expr[Row, A]) extends Expr[Row, Seq[A]]
   case Option2Iterable[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Iterable[A]]
 
-  // Phase 3: Advanced aggregations
+
   case PercentileApprox[Row](expr: Expr[Row, Double], percentile: Double, accuracy: Int) extends Expr[Row, Double]
   case MaxBy[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], ordering: Ordering[K])
       extends Expr[Row, Option[A]]
@@ -122,19 +122,16 @@ enum Expr[Row, +A] {
   case MinByN[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], n: Int, ordering: Ordering[K])
       extends Expr[Row, Seq[A]]
 
-  // Phase 3: Date expressions
-  case DateAddDays[Row](date: Expr[Row, java.time.LocalDate], days: Expr[Row, Int])
-      extends Expr[Row, java.time.LocalDate]
-  case DateSubDays[Row](date: Expr[Row, java.time.LocalDate], days: Expr[Row, Int])
-      extends Expr[Row, java.time.LocalDate]
-  case DateAddMonths[Row](date: Expr[Row, java.time.LocalDate], months: Expr[Row, Int])
-      extends Expr[Row, java.time.LocalDate]
-  case DateDiff[Row](left: Expr[Row, java.time.LocalDate], right: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case ExtractYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case ExtractMonth[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case ExtractDay[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
 
-  // Phase 5: Window function expressions
+  case DateAddDays[Row](date: Expr[Row, Date], days: Expr[Row, Int]) extends Expr[Row, Date]
+  case DateSubDays[Row](date: Expr[Row, Date], days: Expr[Row, Int]) extends Expr[Row, Date]
+  case DateAddMonths[Row](date: Expr[Row, Date], months: Expr[Row, Int]) extends Expr[Row, Date]
+  case DateDiff[Row](left: Expr[Row, Date], right: Expr[Row, Date]) extends Expr[Row, Int]
+  case ExtractYear[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+  case ExtractMonth[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+  case ExtractDay[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+
+
   case RowNumber[Row]() extends Expr[Row, Int]
   case Rank[Row]() extends Expr[Row, Int]
   case DenseRank[Row]() extends Expr[Row, Int]
@@ -157,18 +154,16 @@ enum Expr[Row, +A] {
   case Signum[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
   case Rand[Row](seed: Long) extends Expr[Row, Double]
 
-  case DayOfWeek[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case DayOfYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case WeekOfYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case Quarter[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
-  case LastDay[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, java.time.LocalDate]
-  case NextDay[Row](date: Expr[Row, java.time.LocalDate], dayOfWeek: String) extends Expr[Row, java.time.LocalDate]
-  case MonthsBetween[Row](end: Expr[Row, java.time.LocalDate], start: Expr[Row, java.time.LocalDate])
-      extends Expr[Row, Double]
-  case DateTrunc[Row](unit: String, date: Expr[Row, java.time.LocalDate]) extends Expr[Row, java.time.LocalDate]
-  case DateFormat[Row](date: Expr[Row, java.time.LocalDate], format: String) extends Expr[Row, String]
-  case MakeDate[Row](year: Expr[Row, Int], month: Expr[Row, Int], day: Expr[Row, Int])
-      extends Expr[Row, java.time.LocalDate]
+  case DayOfWeek[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+  case DayOfYear[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+  case WeekOfYear[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+  case Quarter[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
+  case LastDay[Row](date: Expr[Row, Date]) extends Expr[Row, Date]
+  case NextDay[Row](date: Expr[Row, Date], dayOfWeek: String) extends Expr[Row, Date]
+  case MonthsBetween[Row](end: Expr[Row, Date], start: Expr[Row, Date]) extends Expr[Row, Double]
+  case DateTrunc[Row](unit: String, date: Expr[Row, Date]) extends Expr[Row, Date]
+  case DateFormat[Row](date: Expr[Row, Date], format: String) extends Expr[Row, String]
+  case MakeDate[Row](year: Expr[Row, Int], month: Expr[Row, Int], day: Expr[Row, Int]) extends Expr[Row, Date]
 
   case Variance[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
   case VariancePop[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
@@ -295,7 +290,7 @@ object Expr {
     year: Expr[Row, Int],
     month: Expr[Row, Int],
     day: Expr[Row, Int]
-  ): Expr[Row, java.time.LocalDate] = {
+  ): Expr[Row, Date] = {
     MakeDate(year, month, day)
   }
 
@@ -518,11 +513,11 @@ object Expr {
       Between(left, lower, upper, summon[Ordering[A]])
   }
 
-  extension [Row](d: Expr[Row, java.time.LocalDate]) {
-    inline def addDays(days: Expr[Row, Int]): Expr[Row, java.time.LocalDate] = DateAddDays(d, days)
-    inline def subDays(days: Expr[Row, Int]): Expr[Row, java.time.LocalDate] = DateSubDays(d, days)
-    inline def addMonths(months: Expr[Row, Int]): Expr[Row, java.time.LocalDate] = DateAddMonths(d, months)
-    inline def dateDiff(other: Expr[Row, java.time.LocalDate]): Expr[Row, Int] = DateDiff(d, other)
+  extension [Row](d: Expr[Row, Date]) {
+    inline def addDays(days: Expr[Row, Int]): Expr[Row, Date] = DateAddDays(d, days)
+    inline def subDays(days: Expr[Row, Int]): Expr[Row, Date] = DateSubDays(d, days)
+    inline def addMonths(months: Expr[Row, Int]): Expr[Row, Date] = DateAddMonths(d, months)
+    inline def dateDiff(other: Expr[Row, Date]): Expr[Row, Int] = DateDiff(d, other)
     inline def year: Expr[Row, Int] = ExtractYear(d)
     inline def month: Expr[Row, Int] = ExtractMonth(d)
     inline def day: Expr[Row, Int] = ExtractDay(d)
@@ -530,10 +525,10 @@ object Expr {
     inline def dayOfYear: Expr[Row, Int] = DayOfYear(d)
     inline def weekOfYear: Expr[Row, Int] = WeekOfYear(d)
     inline def quarter: Expr[Row, Int] = Quarter(d)
-    inline def lastDay: Expr[Row, java.time.LocalDate] = LastDay(d)
-    inline def nextDay(dayOfWeek: String): Expr[Row, java.time.LocalDate] = NextDay(d, dayOfWeek)
-    inline def monthsBetween(other: Expr[Row, java.time.LocalDate]): Expr[Row, Double] = MonthsBetween(d, other)
-    inline def dateTrunc(unit: String): Expr[Row, java.time.LocalDate] = DateTrunc(unit, d)
+    inline def lastDay: Expr[Row, Date] = LastDay(d)
+    inline def nextDay(dayOfWeek: String): Expr[Row, Date] = NextDay(d, dayOfWeek)
+    inline def monthsBetween(other: Expr[Row, Date]): Expr[Row, Double] = MonthsBetween(d, other)
+    inline def dateTrunc(unit: String): Expr[Row, Date] = DateTrunc(unit, d)
     inline def dateFormat(format: String): Expr[Row, String] = DateFormat(d, format)
   }
 

@@ -1,7 +1,7 @@
 package net.ghoula.strongbow
 
 import net.ghoula.strongbow.errors.ExecutionError
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
 
 /** Zero-cast expression interpreter using typed columnar storage.
   *
@@ -50,7 +50,7 @@ object ExprInterpreter {
               case ColumnType.BooleanType =>
                 column.getBoolean(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.DateType =>
-                java.time.LocalDate
+                Date
                   .ofEpochDay(column.getDateEpochDay(idx).toLong)
                   .asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
               case ColumnType.AnyType | ColumnType.OptionType(_) =>
@@ -468,7 +468,7 @@ object ExprInterpreter {
         for {
           l <- eval(dd.left, columns, rowIdx)
           r <- eval(dd.right, columns, rowIdx)
-        } yield java.time.temporal.ChronoUnit.DAYS.between(r, l).toInt
+        } yield java.time.temporal.ChronoUnit.DAYS.between(r.toLocalDate, l.toLocalDate).toInt
 
       case ey: Expr.ExtractYear[Row] =>
         eval(ey.date, columns, rowIdx).map(_.getYear)
@@ -487,19 +487,19 @@ object ExprInterpreter {
 
       case woy: Expr.WeekOfYear[Row] =>
         eval(woy.date, columns, rowIdx).map { d =>
-          d.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+          d.toLocalDate.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)
         }
 
       case q: Expr.Quarter[Row] =>
         eval(q.date, columns, rowIdx).map(d => (d.getMonthValue - 1) / 3 + 1)
 
       case ld: Expr.LastDay[Row] =>
-        eval(ld.date, columns, rowIdx).map(d => d.withDayOfMonth(d.lengthOfMonth()))
+        eval(ld.date, columns, rowIdx).map(d => Date.fromLocalDate(d.toLocalDate.withDayOfMonth(d.lengthOfMonth)))
 
       case nd: Expr.NextDay[Row] =>
         eval(nd.date, columns, rowIdx).map { d =>
           val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase.nn)
-          d.`with`(java.time.temporal.TemporalAdjusters.next(target))
+          Date.fromLocalDate(d.toLocalDate.`with`(java.time.temporal.TemporalAdjusters.next(target)))
         }
 
       case mb: Expr.MonthsBetween[Row] =>
@@ -507,26 +507,27 @@ object ExprInterpreter {
           e <- eval(mb.end, columns, rowIdx)
           s <- eval(mb.start, columns, rowIdx)
         } yield {
-          val period = java.time.Period.between(s, e)
+          val period = java.time.Period.between(s.toLocalDate, e.toLocalDate)
           period.toTotalMonths.toDouble + period.getDays.toDouble / 31.0
         }
 
       case dt: Expr.DateTrunc[Row] =>
         eval(dt.date, columns, rowIdx).map { d =>
-          dt.unit.toUpperCase.nn match {
-            case "YEAR" => d.withDayOfYear(1)
-            case "MONTH" => d.withDayOfMonth(1)
-            case "WEEK" => d.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+          val ld = d.toLocalDate
+          Date.fromLocalDate(dt.unit.toUpperCase.nn match {
+            case "YEAR" => ld.withDayOfYear(1)
+            case "MONTH" => ld.withDayOfMonth(1)
+            case "WEEK" => ld.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
             case "QUARTER" =>
-              val qMonth = (d.getMonthValue - 1) / 3 * 3 + 1
-              java.time.LocalDate.of(d.getYear, qMonth, 1)
-            case _ => d
-          }
+              val qMonth = (ld.getMonthValue - 1) / 3 * 3 + 1
+              java.time.LocalDate.of(ld.getYear, qMonth, 1)
+            case _ => ld
+          })
         }
 
       case df: Expr.DateFormat[Row] =>
         eval(df.date, columns, rowIdx).map { d =>
-          d.format(java.time.format.DateTimeFormatter.ofPattern(df.format))
+          d.toLocalDate.format(java.time.format.DateTimeFormatter.ofPattern(df.format))
         }
 
       case md: Expr.MakeDate[Row] =>
@@ -534,7 +535,7 @@ object ExprInterpreter {
           y <- eval(md.year, columns, rowIdx)
           m <- eval(md.month, columns, rowIdx)
           d <- eval(md.day, columns, rowIdx)
-        } yield java.time.LocalDate.of(y, m, d)
+        } yield Date(y, m, d)
 
       case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
           _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
@@ -677,7 +678,7 @@ object ExprInterpreter {
           case ColumnType.DoubleType => column.getDouble(idx)
           case ColumnType.StringType => column.getString(idx)
           case ColumnType.BooleanType => column.getBoolean(idx)
-          case ColumnType.DateType => java.time.LocalDate.ofEpochDay(column.getDateEpochDay(idx).toLong)
+          case ColumnType.DateType => Date.ofEpochDay(column.getDateEpochDay(idx).toLong)
           case ColumnType.AnyType | ColumnType.OptionType(_) => column.getValue(idx)
         }
 
@@ -1033,7 +1034,7 @@ object ExprInterpreter {
         val y = evalAny(md.year, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         val m = evalAny(md.month, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         val day = evalAny(md.day, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
-        java.time.LocalDate.of(y, m, day)
+        Date(y, m, day)
     }
   }
 
@@ -1158,7 +1159,7 @@ object ExprInterpreter {
             ) // scalafix:ok DisableSyntax.asInstanceOf
           case ColumnType.DateType =>
             val epochDay =
-              c.value.asInstanceOf[java.time.LocalDate].toEpochDay.toInt // scalafix:ok DisableSyntax.asInstanceOf
+              c.value.asInstanceOf[Date].toEpochDay.toInt // scalafix:ok DisableSyntax.asInstanceOf
             Right(Column.date(Array.fill(rowCount)(epochDay)))
           case _ =>
             Right(Column.any(Array.fill(rowCount)(c.value.asInstanceOf[Any]))) // scalafix:ok DisableSyntax.asInstanceOf

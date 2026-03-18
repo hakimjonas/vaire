@@ -3,19 +3,17 @@ package net.ghoula.strongbow
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import java.time.LocalDate
-
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
 
 class DateExprSpec extends AnyFlatSpec with Matchers {
 
-  private def makeDateColumn(dates: LocalDate*): Column = {
+  private def makeDateColumn(dates: Date*): Column = {
     Column.date(dates.map(_.toEpochDay.toInt).toArray)
   }
 
   "DateColumn" should "store and retrieve dates correctly" in {
-    val d1 = LocalDate.of(2024, 1, 15)
-    val d2 = LocalDate.of(2024, 6, 30)
+    val d1 = Date(2024, 1, 15)
+    val d2 = Date(2024, 6, 30)
     val col = makeDateColumn(d1, d2)
     col.length shouldBe 2
     col.columnType shouldBe ColumnType.DateType
@@ -24,123 +22,120 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "DateAddDays" should "add days to a date" in {
-    val d = LocalDate.of(2024, 1, 15)
+    val d = Date(2024, 1, 15)
     val dateCol = makeDateColumn(d)
     val daysCol = Column.int(Array(10))
     val columns = Vector(dateCol, daysCol)
 
     val expr = Expr.DateAddDays(
-      Expr.Cell[Any, LocalDate]("date", ColumnIndex(0)),
+      Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("days", ColumnIndex(1))
     )
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
-    result shouldBe Right(LocalDate.of(2024, 1, 25))
+    result shouldBe Right(Date(2024, 1, 25))
   }
 
   "DateSubDays" should "subtract days from a date" in {
-    val d = LocalDate.of(2024, 1, 15)
+    val d = Date(2024, 1, 15)
     val dateCol = makeDateColumn(d)
     val daysCol = Column.int(Array(5))
     val columns = Vector(dateCol, daysCol)
 
     val expr = Expr.DateSubDays(
-      Expr.Cell[Any, LocalDate]("date", ColumnIndex(0)),
+      Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("days", ColumnIndex(1))
     )
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
-    result shouldBe Right(LocalDate.of(2024, 1, 10))
+    result shouldBe Right(Date(2024, 1, 10))
   }
 
   "DateAddMonths" should "add months to a date" in {
-    val d = LocalDate.of(2024, 1, 31)
+    val d = Date(2024, 1, 31)
     val dateCol = makeDateColumn(d)
     val monthsCol = Column.int(Array(1))
     val columns = Vector(dateCol, monthsCol)
 
     val expr = Expr.DateAddMonths(
-      Expr.Cell[Any, LocalDate]("date", ColumnIndex(0)),
+      Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("months", ColumnIndex(1))
     )
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
-    // Jan 31 + 1 month = Feb 29 (2024 is a leap year)
-    result shouldBe Right(LocalDate.of(2024, 2, 29))
+    result shouldBe Right(Date(2024, 2, 29))
   }
 
   "DateDiff" should "compute difference in days" in {
-    val d1 = LocalDate.of(2024, 1, 15)
-    val d2 = LocalDate.of(2024, 1, 10)
+    val d1 = Date(2024, 1, 15)
+    val d2 = Date(2024, 1, 10)
     val col1 = makeDateColumn(d1)
     val col2 = makeDateColumn(d2)
     val columns = Vector(col1, col2)
 
     val expr = Expr.DateDiff(
-      Expr.Cell[Any, LocalDate]("d1", ColumnIndex(0)),
-      Expr.Cell[Any, LocalDate]("d2", ColumnIndex(1))
+      Expr.Cell[Any, Date]("d1", ColumnIndex(0)),
+      Expr.Cell[Any, Date]("d2", ColumnIndex(1))
     )
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
     result shouldBe Right(5)
   }
 
   "ExtractYear" should "extract year from date" in {
-    val d = LocalDate.of(2024, 6, 15)
+    val d = Date(2024, 6, 15)
     val dateCol = makeDateColumn(d)
     val columns = Vector(dateCol)
 
-    val expr = Expr.ExtractYear(Expr.Cell[Any, LocalDate]("date", ColumnIndex(0)))
+    val expr = Expr.ExtractYear(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
     result shouldBe Right(2024)
   }
 
   "ExtractMonth" should "extract month from date" in {
-    val d = LocalDate.of(2024, 6, 15)
+    val d = Date(2024, 6, 15)
     val dateCol = makeDateColumn(d)
     val columns = Vector(dateCol)
 
-    val expr = Expr.ExtractMonth(Expr.Cell[Any, LocalDate]("date", ColumnIndex(0)))
+    val expr = Expr.ExtractMonth(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
     result shouldBe Right(6)
   }
 
   "ExtractDay" should "extract day from date" in {
-    val d = LocalDate.of(2024, 6, 15)
+    val d = Date(2024, 6, 15)
     val dateCol = makeDateColumn(d)
     val columns = Vector(dateCol)
 
-    val expr = Expr.ExtractDay(Expr.Cell[Any, LocalDate]("date", ColumnIndex(0)))
+    val expr = Expr.ExtractDay(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
     result shouldBe Right(15)
   }
 
   "Date comparisons" should "work with Gt/Lt/Gte/Lte" in {
-    val d1 = LocalDate.of(2024, 6, 15)
-    val d2 = LocalDate.of(2024, 1, 10)
+    val d1 = Date(2024, 6, 15)
+    val d2 = Date(2024, 1, 10)
     val col1 = makeDateColumn(d1)
     val col2 = makeDateColumn(d2)
     val columns = Vector(col1, col2)
 
-    // Dates are stored as epoch-day ints, so Ordering[Int]-based comparison
-    // via the Cell returning LocalDate uses LocalDate's natural ordering
-    val cell1 = Expr.Cell[Any, LocalDate]("d1", ColumnIndex(0))
-    val cell2 = Expr.Cell[Any, LocalDate]("d2", ColumnIndex(1))
+    val cell1 = Expr.Cell[Any, Date]("d1", ColumnIndex(0))
+    val cell2 = Expr.Cell[Any, Date]("d2", ColumnIndex(1))
 
-    val gtExpr = Expr.Gt(cell1, cell2, summon[Ordering[LocalDate]])
+    val gtExpr = Expr.Gt(cell1, cell2, summon[Ordering[Date]])
     ExprInterpreter.eval(gtExpr, columns, RowIndex(0)) shouldBe Right(true)
 
-    val ltExpr = Expr.Lt(cell1, cell2, summon[Ordering[LocalDate]])
+    val ltExpr = Expr.Lt(cell1, cell2, summon[Ordering[Date]])
     ExprInterpreter.eval(ltExpr, columns, RowIndex(0)) shouldBe Right(false)
   }
 
-  "Date extension methods" should "work on Expr[Row, LocalDate]" in {
-    val d = LocalDate.of(2024, 3, 15)
+  "Date extension methods" should "work on Expr[Row, Date]" in {
+    val d = Date(2024, 3, 15)
     val dateCol = makeDateColumn(d)
     val daysCol = Column.int(Array(7))
     val columns = Vector(dateCol, daysCol)
 
-    val dateExpr = Expr.Cell[Any, LocalDate]("date", ColumnIndex(0))
+    val dateExpr = Expr.Cell[Any, Date]("date", ColumnIndex(0))
     val daysExpr = Expr.Cell[Any, Int]("days", ColumnIndex(1))
 
     val addResult = ExprInterpreter.eval(dateExpr.addDays(daysExpr), columns, RowIndex(0))
-    addResult shouldBe Right(LocalDate.of(2024, 3, 22))
+    addResult shouldBe Right(Date(2024, 3, 22))
 
     val yearResult = ExprInterpreter.eval(dateExpr.year, columns, RowIndex(0))
     yearResult shouldBe Right(2024)
@@ -150,9 +145,9 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "DateColumn" should "support slice operations" in {
-    val d1 = LocalDate.of(2024, 1, 1)
-    val d2 = LocalDate.of(2024, 6, 15)
-    val d3 = LocalDate.of(2024, 12, 31)
+    val d1 = Date(2024, 1, 1)
+    val d2 = Date(2024, 6, 15)
+    val d3 = Date(2024, 12, 31)
     val col = makeDateColumn(d1, d2, d3)
 
     val sliced = col.slice(Array(0, 2))
@@ -162,8 +157,8 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support concat operations" in {
-    val d1 = LocalDate.of(2024, 1, 1)
-    val d2 = LocalDate.of(2024, 6, 15)
+    val d1 = Date(2024, 1, 1)
+    val d2 = Date(2024, 6, 15)
     val col1 = makeDateColumn(d1)
     val col2 = makeDateColumn(d2)
 
@@ -178,8 +173,8 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "support Column.fromValues" in {
-    val d1 = LocalDate.of(2024, 1, 1)
-    val d2 = LocalDate.of(2024, 6, 15)
+    val d1 = Date(2024, 1, 1)
+    val d2 = Date(2024, 6, 15)
 
     val col = Column.fromValues(Vector(d1, d2), ColumnType.DateType)
     col match {
@@ -191,8 +186,8 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "Schema[LocalDate]" should "encode and decode correctly" in {
-    val d = LocalDate.of(2024, 3, 15)
+  "Schema[Date]" should "encode and decode correctly" in {
+    val d = Date(2024, 3, 15)
     val schema = Schema.dateSchema
     val encoded = schema.encode(d)
     encoded.length shouldBe 1

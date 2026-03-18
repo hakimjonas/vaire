@@ -59,7 +59,7 @@ enum Column {
       if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
     case DateColumn(data, nulls) =>
       if (nulls.contains(index)) null // scalafix:ok DisableSyntax.null
-      else java.time.LocalDate.ofEpochDay(data(index).toLong)
+      else types.Date.ofEpochDay(data(index).toLong)
     case AnyColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
   }
 

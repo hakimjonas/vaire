@@ -194,13 +194,13 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   private val dateCol = Column.date(
     Array(
-      java.time.LocalDate.of(2026, 3, 19).toEpochDay.toInt,
-      java.time.LocalDate.of(2026, 1, 1).toEpochDay.toInt,
-      java.time.LocalDate.of(2025, 12, 31).toEpochDay.toInt
+      Date(2026, 3, 19).toEpochDay.toInt,
+      Date(2026, 1, 1).toEpochDay.toInt,
+      Date(2025, 12, 31).toEpochDay.toInt
     )
   )
   private val dateColumns = Vector(dateCol)
-  private val dateCell = Expr.Cell[java.time.LocalDate, java.time.LocalDate]("d", ColumnIndex(0))
+  private val dateCell = Expr.Cell[Date, Date]("d", ColumnIndex(0))
 
   "dayOfWeek" should "return day of week (Sunday=1, Saturday=7)" in {
     val expr = dateCell.dayOfWeek
@@ -237,25 +237,25 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
   "lastDay" should "return last day of month" in {
     val expr = dateCell.lastDay
     val r = ExprInterpreter.eval(expr, dateColumns, RowIndex(0))
-    r shouldBe Right(java.time.LocalDate.of(2026, 3, 31))
+    r shouldBe Right(Date(2026, 3, 31))
   }
 
   "nextDay" should "return next occurrence of given day of week" in {
     val expr = dateCell.nextDay("MONDAY")
     val r = ExprInterpreter.eval(expr, dateColumns, RowIndex(0))
     r.isRight shouldBe true
-    r.toOption.get.getDayOfWeek shouldBe java.time.DayOfWeek.MONDAY
-    r.toOption.get.isAfter(java.time.LocalDate.of(2026, 3, 19)) shouldBe true
+    r.toOption.get.getDayOfWeek.getValue shouldBe 1
+    r.toOption.get.isAfter(Date(2026, 3, 19)) shouldBe true
   }
 
   "monthsBetween" should "compute approximate months between two dates" in {
     val dateCol2 = Column.date(
       Array(
-        java.time.LocalDate.of(2026, 6, 19).toEpochDay.toInt
+        Date(2026, 6, 19).toEpochDay.toInt
       )
     )
     val columns = Vector(dateCol, dateCol2)
-    val cell2 = Expr.Cell[java.time.LocalDate, java.time.LocalDate]("d2", ColumnIndex(1))
+    val cell2 = Expr.Cell[Date, Date]("d2", ColumnIndex(1))
     val expr = cell2.monthsBetween(dateCell)
 
     val r = ExprInterpreter.eval(expr, columns, RowIndex(0))
@@ -266,19 +266,19 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
   "dateTrunc" should "truncate to year" in {
     val expr = dateCell.dateTrunc("year")
     val r = ExprInterpreter.eval(expr, dateColumns, RowIndex(0))
-    r shouldBe Right(java.time.LocalDate.of(2026, 1, 1))
+    r shouldBe Right(Date(2026, 1, 1))
   }
 
   it should "truncate to month" in {
     val expr = dateCell.dateTrunc("month")
     val r = ExprInterpreter.eval(expr, dateColumns, RowIndex(0))
-    r shouldBe Right(java.time.LocalDate.of(2026, 3, 1))
+    r shouldBe Right(Date(2026, 3, 1))
   }
 
   it should "truncate to quarter" in {
     val expr = dateCell.dateTrunc("quarter")
     val r = ExprInterpreter.eval(expr, dateColumns, RowIndex(0))
-    r shouldBe Right(java.time.LocalDate.of(2026, 1, 1))
+    r shouldBe Right(Date(2026, 1, 1))
   }
 
   "dateFormat" should "format date as string" in {
@@ -298,7 +298,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val expr = Expr.makeDate[Int](y, m, d)
 
     val r = ExprInterpreter.eval(expr, columns, RowIndex(0))
-    r shouldBe Right(java.time.LocalDate.of(2026, 3, 19))
+    r shouldBe Right(Date(2026, 3, 19))
   }
 
   "date outputType" should "return correct types" in {

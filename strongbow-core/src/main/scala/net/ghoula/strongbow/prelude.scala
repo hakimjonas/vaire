@@ -37,7 +37,7 @@ object prelude {
   export net.ghoula.strongbow.{Interpreter, DatasetInterpreter, ExprInterpreter}
 
   // Opaque types
-  export net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+  export net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
 
   // Error types
   export net.ghoula.strongbow.errors.{SchemaError, DecodeError, ExecutionError, NonEmptyList}

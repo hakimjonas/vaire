@@ -384,11 +384,66 @@ object ExprInterpreter {
       case opt2iter: Expr.Option2Iterable[Row, _] =>
         eval(opt2iter.expr, columns, rowIdx).map(_.toList)
 
+      case sq: Expr.Sqrt[Row] =>
+        eval(sq.expr, columns, rowIdx).map(v => Math.sqrt(v))
+
+      case pw: Expr.Pow[Row] =>
+        for {
+          b <- eval(pw.base, columns, rowIdx)
+          e <- eval(pw.exponent, columns, rowIdx)
+        } yield Math.pow(b, e)
+
+      case lg: Expr.Log[Row] =>
+        eval(lg.expr, columns, rowIdx).map(v => Math.log(v))
+
+      case lg10: Expr.Log10[Row] =>
+        eval(lg10.expr, columns, rowIdx).map(v => Math.log10(v))
+
+      case lg2: Expr.Log2[Row] =>
+        eval(lg2.expr, columns, rowIdx).map(v => Math.log(v) / Math.log(2.0))
+
+      case ex: Expr.Exp[Row] =>
+        eval(ex.expr, columns, rowIdx).map(v => Math.exp(v))
+
+      case sn: Expr.Sin[Row] =>
+        eval(sn.expr, columns, rowIdx).map(v => Math.sin(v))
+
+      case cs: Expr.Cos[Row] =>
+        eval(cs.expr, columns, rowIdx).map(v => Math.cos(v))
+
+      case tn: Expr.Tan[Row] =>
+        eval(tn.expr, columns, rowIdx).map(v => Math.tan(v))
+
+      case asn: Expr.Asin[Row] =>
+        eval(asn.expr, columns, rowIdx).map(v => Math.asin(v))
+
+      case acs: Expr.Acos[Row] =>
+        eval(acs.expr, columns, rowIdx).map(v => Math.acos(v))
+
+      case atn: Expr.Atan[Row] =>
+        eval(atn.expr, columns, rowIdx).map(v => Math.atan(v))
+
+      case atn2: Expr.Atan2[Row] =>
+        for {
+          y <- eval(atn2.y, columns, rowIdx)
+          x <- eval(atn2.x, columns, rowIdx)
+        } yield Math.atan2(y, x)
+
+      case sg: Expr.Signum[Row] =>
+        eval(sg.expr, columns, rowIdx).map(v => Math.signum(v))
+
+      case rnd: Expr.Rand[Row] =>
+        Right(new java.util.Random(rnd.seed).nextDouble())
+
       case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] |
           _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
           _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] | _: Expr.First[Row, ?] | _: Expr.Collect[Row, ?] |
           _: Expr.PercentileApprox[Row] | _: Expr.MaxBy[Row, ?, ?] | _: Expr.MinBy[Row, ?, ?] | _: Expr.MaxN[Row, ?] |
-          _: Expr.MinN[Row, ?] | _: Expr.MaxByN[Row, ?, ?] | _: Expr.MinByN[Row, ?, ?] =>
+          _: Expr.MinN[Row, ?] | _: Expr.MaxByN[Row, ?, ?] | _: Expr.MinByN[Row, ?, ?] | _: Expr.Variance[Row] |
+          _: Expr.VariancePop[Row] | _: Expr.ApproxCountDistinct[Row, ?] | _: Expr.CollectSet[Row, ?] |
+          _: Expr.ExprLast[Row, ?] | _: Expr.AnyValue[Row, ?] | _: Expr.BoolAnd[Row] | _: Expr.BoolOr[Row] |
+          _: Expr.Corr[Row] | _: Expr.CovarSamp[Row] | _: Expr.CovarPop[Row] | _: Expr.Median[Row] |
+          _: Expr.Mode[Row, ?] =>
         Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
 
       case dad: Expr.DateAddDays[Row] =>
@@ -424,8 +479,66 @@ object ExprInterpreter {
       case ed: Expr.ExtractDay[Row] =>
         eval(ed.date, columns, rowIdx).map(_.getDayOfMonth)
 
+      case dow: Expr.DayOfWeek[Row] =>
+        eval(dow.date, columns, rowIdx).map(d => d.getDayOfWeek.getValue % 7 + 1)
+
+      case doy: Expr.DayOfYear[Row] =>
+        eval(doy.date, columns, rowIdx).map(_.getDayOfYear)
+
+      case woy: Expr.WeekOfYear[Row] =>
+        eval(woy.date, columns, rowIdx).map { d =>
+          d.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+        }
+
+      case q: Expr.Quarter[Row] =>
+        eval(q.date, columns, rowIdx).map(d => (d.getMonthValue - 1) / 3 + 1)
+
+      case ld: Expr.LastDay[Row] =>
+        eval(ld.date, columns, rowIdx).map(d => d.withDayOfMonth(d.lengthOfMonth()))
+
+      case nd: Expr.NextDay[Row] =>
+        eval(nd.date, columns, rowIdx).map { d =>
+          val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase.nn)
+          d.`with`(java.time.temporal.TemporalAdjusters.next(target))
+        }
+
+      case mb: Expr.MonthsBetween[Row] =>
+        for {
+          e <- eval(mb.end, columns, rowIdx)
+          s <- eval(mb.start, columns, rowIdx)
+        } yield {
+          val period = java.time.Period.between(s, e)
+          period.toTotalMonths.toDouble + period.getDays.toDouble / 31.0
+        }
+
+      case dt: Expr.DateTrunc[Row] =>
+        eval(dt.date, columns, rowIdx).map { d =>
+          dt.unit.toUpperCase.nn match {
+            case "YEAR" => d.withDayOfYear(1)
+            case "MONTH" => d.withDayOfMonth(1)
+            case "WEEK" => d.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+            case "QUARTER" =>
+              val qMonth = (d.getMonthValue - 1) / 3 * 3 + 1
+              java.time.LocalDate.of(d.getYear, qMonth, 1)
+            case _ => d
+          }
+        }
+
+      case df: Expr.DateFormat[Row] =>
+        eval(df.date, columns, rowIdx).map { d =>
+          d.format(java.time.format.DateTimeFormatter.ofPattern(df.format))
+        }
+
+      case md: Expr.MakeDate[Row] =>
+        for {
+          y <- eval(md.year, columns, rowIdx)
+          m <- eval(md.month, columns, rowIdx)
+          d <- eval(md.day, columns, rowIdx)
+        } yield java.time.LocalDate.of(y, m, d)
+
       case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
-          _: Expr.Lead[Row, ?] =>
+          _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
+          _: Expr.NthValue[Row, ?] | _: Expr.FirstValue[Row, ?] | _: Expr.LastValue[Row, ?] =>
         Left(ExecutionError.UnsupportedOperation("Window functions not supported in row-level eval"))
     }
   }
@@ -806,6 +919,121 @@ object ExprInterpreter {
         evalAny(opt2iter.expr, columns, rowIdx)
           .asInstanceOf[Option[Any]]
           .toList // scalafix:ok DisableSyntax.asInstanceOf
+
+      case sq: Expr.Sqrt[Row] =>
+        Math.sqrt(evalAny(sq.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case pw: Expr.Pow[Row] =>
+        Math.pow(
+          evalAny(pw.base, columns, rowIdx).asInstanceOf[Double],
+          evalAny(pw.exponent, columns, rowIdx).asInstanceOf[Double]
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case lg: Expr.Log[Row] =>
+        Math.log(evalAny(lg.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case lg10: Expr.Log10[Row] =>
+        Math.log10(evalAny(lg10.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case lg2: Expr.Log2[Row] =>
+        val v = evalAny(lg2.expr, columns, rowIdx).asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+        Math.log(v) / Math.log(2.0)
+
+      case ex: Expr.Exp[Row] =>
+        Math.exp(evalAny(ex.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case sn: Expr.Sin[Row] =>
+        Math.sin(evalAny(sn.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case cs: Expr.Cos[Row] =>
+        Math.cos(evalAny(cs.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case tn: Expr.Tan[Row] =>
+        Math.tan(evalAny(tn.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case asn: Expr.Asin[Row] =>
+        Math.asin(evalAny(asn.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case acs: Expr.Acos[Row] =>
+        Math.acos(evalAny(acs.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case atn: Expr.Atan[Row] =>
+        Math.atan(evalAny(atn.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case atn2: Expr.Atan2[Row] =>
+        Math.atan2(
+          evalAny(atn2.y, columns, rowIdx).asInstanceOf[Double],
+          evalAny(atn2.x, columns, rowIdx).asInstanceOf[Double]
+        ) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case sg: Expr.Signum[Row] =>
+        Math.signum(evalAny(sg.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case rnd: Expr.Rand[Row] =>
+        new java.util.Random(rnd.seed).nextDouble()
+
+      case dow: Expr.DayOfWeek[Row] =>
+        val d =
+          evalAny(dow.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        d.getDayOfWeek.getValue % 7 + 1
+
+      case doy: Expr.DayOfYear[Row] =>
+        evalAny(doy.date, columns, rowIdx)
+          .asInstanceOf[java.time.LocalDate]
+          .getDayOfYear // scalafix:ok DisableSyntax.asInstanceOf
+
+      case woy: Expr.WeekOfYear[Row] =>
+        evalAny(woy.date, columns, rowIdx)
+          .asInstanceOf[java.time.LocalDate]
+          .get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case q: Expr.Quarter[Row] =>
+        val d =
+          evalAny(q.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        (d.getMonthValue - 1) / 3 + 1
+
+      case ld: Expr.LastDay[Row] =>
+        val d =
+          evalAny(ld.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        d.withDayOfMonth(d.lengthOfMonth())
+
+      case nd: Expr.NextDay[Row] =>
+        val d =
+          evalAny(nd.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase.nn)
+        d.`with`(java.time.temporal.TemporalAdjusters.next(target))
+
+      case mb: Expr.MonthsBetween[Row] =>
+        val e =
+          evalAny(mb.end, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val s =
+          evalAny(mb.start, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        val period = java.time.Period.between(s, e)
+        period.toTotalMonths.toDouble + period.getDays.toDouble / 31.0
+
+      case dt: Expr.DateTrunc[Row] =>
+        val d =
+          evalAny(dt.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        dt.unit.toUpperCase.nn match {
+          case "YEAR" => d.withDayOfYear(1)
+          case "MONTH" => d.withDayOfMonth(1)
+          case "WEEK" => d.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+          case "QUARTER" =>
+            val qMonth = (d.getMonthValue - 1) / 3 * 3 + 1
+            java.time.LocalDate.of(d.getYear, qMonth, 1)
+          case _ => d
+        }
+
+      case df: Expr.DateFormat[Row] =>
+        val d =
+          evalAny(df.date, columns, rowIdx).asInstanceOf[java.time.LocalDate] // scalafix:ok DisableSyntax.asInstanceOf
+        d.format(java.time.format.DateTimeFormatter.ofPattern(df.format))
+
+      case md: Expr.MakeDate[Row] =>
+        val y = evalAny(md.year, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        val m = evalAny(md.month, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        val day = evalAny(md.day, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        java.time.LocalDate.of(y, m, day)
     }
   }
 
@@ -861,6 +1089,26 @@ object ExprInterpreter {
         ColumnType.IntType
       case _: Expr.RowNumber[_] | _: Expr.Rank[_] | _: Expr.DenseRank[_] => ColumnType.IntType
       case _: Expr.Lag[_, _] | _: Expr.Lead[_, _] => ColumnType.AnyType
+      case _: Expr.Sqrt[_] | _: Expr.Pow[_] | _: Expr.Log[_] | _: Expr.Log10[_] | _: Expr.Log2[_] | _: Expr.Exp[_] |
+          _: Expr.Sin[_] | _: Expr.Cos[_] | _: Expr.Tan[_] | _: Expr.Asin[_] | _: Expr.Acos[_] | _: Expr.Atan[_] |
+          _: Expr.Atan2[_] | _: Expr.Signum[_] | _: Expr.Rand[_] =>
+        ColumnType.DoubleType
+      case _: Expr.DayOfWeek[_] | _: Expr.DayOfYear[_] | _: Expr.WeekOfYear[_] | _: Expr.Quarter[_] =>
+        ColumnType.IntType
+      case _: Expr.LastDay[_] | _: Expr.NextDay[_] | _: Expr.DateTrunc[_] | _: Expr.MakeDate[_] =>
+        ColumnType.DateType
+      case _: Expr.MonthsBetween[_] => ColumnType.DoubleType
+      case _: Expr.DateFormat[_] => ColumnType.StringType
+      case _: Expr.Variance[_] | _: Expr.VariancePop[_] | _: Expr.Corr[_] | _: Expr.CovarSamp[_] | _: Expr.CovarPop[_] |
+          _: Expr.Median[_] =>
+        ColumnType.DoubleType
+      case _: Expr.ApproxCountDistinct[_, _] => ColumnType.LongType
+      case _: Expr.CollectSet[_, _] => ColumnType.AnyType
+      case _: Expr.ExprLast[_, _] | _: Expr.AnyValue[_, _] | _: Expr.Mode[_, _] => ColumnType.AnyType
+      case _: Expr.BoolAnd[_] | _: Expr.BoolOr[_] => ColumnType.BooleanType
+      case _: Expr.NTile[_] => ColumnType.IntType
+      case _: Expr.CumeDist[_] | _: Expr.PercentRank[_] => ColumnType.DoubleType
+      case _: Expr.NthValue[_, _] | _: Expr.FirstValue[_, _] | _: Expr.LastValue[_, _] => ColumnType.AnyType
     }
   }
 

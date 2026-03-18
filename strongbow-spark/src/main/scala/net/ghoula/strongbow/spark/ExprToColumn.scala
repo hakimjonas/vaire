@@ -497,6 +497,160 @@ object ExprToColumn {
           }
           (leadCol, ct)
         }
+
+      case sq: Expr.Sqrt[Row] =>
+        convert(sq.expr).map { case (sparkCol, _) => (sqrt(sparkCol), ColumnType.DoubleType) }
+
+      case pw: Expr.Pow[Row] =>
+        for {
+          (b, _) <- convert(pw.base)
+          (e, _) <- convert(pw.exponent)
+        } yield (pow(b, e), ColumnType.DoubleType)
+
+      case lg: Expr.Log[Row] =>
+        convert(lg.expr).map { case (sparkCol, _) => (log(sparkCol), ColumnType.DoubleType) }
+
+      case lg10: Expr.Log10[Row] =>
+        convert(lg10.expr).map { case (sparkCol, _) => (log10(sparkCol), ColumnType.DoubleType) }
+
+      case lg2: Expr.Log2[Row] =>
+        convert(lg2.expr).map { case (sparkCol, _) => (log2(sparkCol), ColumnType.DoubleType) }
+
+      case ex: Expr.Exp[Row] =>
+        convert(ex.expr).map { case (sparkCol, _) => (exp(sparkCol), ColumnType.DoubleType) }
+
+      case sn: Expr.Sin[Row] =>
+        convert(sn.expr).map { case (sparkCol, _) => (sin(sparkCol), ColumnType.DoubleType) }
+
+      case cs: Expr.Cos[Row] =>
+        convert(cs.expr).map { case (sparkCol, _) => (cos(sparkCol), ColumnType.DoubleType) }
+
+      case tn: Expr.Tan[Row] =>
+        convert(tn.expr).map { case (sparkCol, _) => (tan(sparkCol), ColumnType.DoubleType) }
+
+      case asn: Expr.Asin[Row] =>
+        convert(asn.expr).map { case (sparkCol, _) => (asin(sparkCol), ColumnType.DoubleType) }
+
+      case acs: Expr.Acos[Row] =>
+        convert(acs.expr).map { case (sparkCol, _) => (acos(sparkCol), ColumnType.DoubleType) }
+
+      case atn: Expr.Atan[Row] =>
+        convert(atn.expr).map { case (sparkCol, _) => (atan(sparkCol), ColumnType.DoubleType) }
+
+      case atn2: Expr.Atan2[Row] =>
+        for {
+          (y, _) <- convert(atn2.y)
+          (x, _) <- convert(atn2.x)
+        } yield (atan2(y, x), ColumnType.DoubleType)
+
+      case sg: Expr.Signum[Row] =>
+        convert(sg.expr).map { case (sparkCol, _) => (signum(sparkCol), ColumnType.DoubleType) }
+
+      case rnd: Expr.Rand[Row] =>
+        Right((rand(rnd.seed), ColumnType.DoubleType))
+
+      case dow: Expr.DayOfWeek[Row] =>
+        convert(dow.date).map { case (d, _) => (dayofweek(d), ColumnType.IntType) }
+
+      case doy: Expr.DayOfYear[Row] =>
+        convert(doy.date).map { case (d, _) => (dayofyear(d), ColumnType.IntType) }
+
+      case woy: Expr.WeekOfYear[Row] =>
+        convert(woy.date).map { case (d, _) => (weekofyear(d), ColumnType.IntType) }
+
+      case q: Expr.Quarter[Row] =>
+        convert(q.date).map { case (d, _) => (quarter(d), ColumnType.IntType) }
+
+      case ld: Expr.LastDay[Row] =>
+        convert(ld.date).map { case (d, _) => (last_day(d), ColumnType.DateType) }
+
+      case nd: Expr.NextDay[Row] =>
+        convert(nd.date).map { case (d, _) => (next_day(d, nd.dayOfWeek), ColumnType.DateType) }
+
+      case mb: Expr.MonthsBetween[Row] =>
+        for {
+          (e, _) <- convert(mb.end)
+          (s, _) <- convert(mb.start)
+        } yield (months_between(e, s), ColumnType.DoubleType)
+
+      case dt: Expr.DateTrunc[Row] =>
+        convert(dt.date).map { case (d, _) => (date_trunc(dt.unit, d), ColumnType.DateType) }
+
+      case df: Expr.DateFormat[Row] =>
+        convert(df.date).map { case (d, _) => (date_format(d, df.format), ColumnType.StringType) }
+
+      case md: Expr.MakeDate[Row] =>
+        for {
+          (y, _) <- convert(md.year)
+          (m, _) <- convert(md.month)
+          (d, _) <- convert(md.day)
+        } yield (make_date(y, m, d), ColumnType.DateType)
+
+      case v: Expr.Variance[Row] =>
+        convert(v.expr).map { case (sparkCol, _) => (var_samp(sparkCol), ColumnType.DoubleType) }
+
+      case vp: Expr.VariancePop[Row] =>
+        convert(vp.expr).map { case (sparkCol, _) => (var_pop(sparkCol), ColumnType.DoubleType) }
+
+      case acd: Expr.ApproxCountDistinct[Row, _] =>
+        convert(acd.expr).map { case (sparkCol, _) => (approx_count_distinct(sparkCol), ColumnType.LongType) }
+
+      case cs: Expr.CollectSet[Row, _] =>
+        convert(cs.expr).map { case (sparkCol, _) => (collect_set(sparkCol), ColumnType.AnyType) }
+
+      case el: Expr.ExprLast[Row, _] =>
+        convert(el.expr).map { case (sparkCol, ct) => (last(sparkCol), ct) }
+
+      case av: Expr.AnyValue[Row, _] =>
+        convert(av.expr).map { case (sparkCol, ct) => (any_value(sparkCol), ct) }
+
+      case ba: Expr.BoolAnd[Row] =>
+        convert(ba.expr).map { case (sparkCol, _) => (bool_and(sparkCol), ColumnType.BooleanType) }
+
+      case bo: Expr.BoolOr[Row] =>
+        convert(bo.expr).map { case (sparkCol, _) => (bool_or(sparkCol), ColumnType.BooleanType) }
+
+      case cr: Expr.Corr[Row] =>
+        for {
+          (l, _) <- convert(cr.left)
+          (r, _) <- convert(cr.right)
+        } yield (corr(l, r), ColumnType.DoubleType)
+
+      case cvs: Expr.CovarSamp[Row] =>
+        for {
+          (l, _) <- convert(cvs.left)
+          (r, _) <- convert(cvs.right)
+        } yield (covar_samp(l, r), ColumnType.DoubleType)
+
+      case cvp: Expr.CovarPop[Row] =>
+        for {
+          (l, _) <- convert(cvp.left)
+          (r, _) <- convert(cvp.right)
+        } yield (covar_pop(l, r), ColumnType.DoubleType)
+
+      case med: Expr.Median[Row] =>
+        convert(med.expr).map { case (sparkCol, _) => (median(sparkCol), ColumnType.DoubleType) }
+
+      case md: Expr.Mode[Row, _] =>
+        convert(md.expr).map { case (sparkCol, ct) => (mode(sparkCol), ct) }
+
+      case nt: Expr.NTile[Row] =>
+        Right((ntile(nt.n), ColumnType.IntType))
+
+      case _: Expr.CumeDist[Row] =>
+        Right((cume_dist(), ColumnType.DoubleType))
+
+      case _: Expr.PercentRank[Row] =>
+        Right((percent_rank(), ColumnType.DoubleType))
+
+      case nv: Expr.NthValue[Row, _] =>
+        convert(nv.expr).map { case (sparkCol, ct) => (nth_value(sparkCol, nv.n), ct) }
+
+      case fv: Expr.FirstValue[Row, _] =>
+        convert(fv.expr).map { case (sparkCol, ct) => (first_value(sparkCol), ct) }
+
+      case lv: Expr.LastValue[Row, _] =>
+        convert(lv.expr).map { case (sparkCol, ct) => (last_value(sparkCol), ct) }
     }
   }
 

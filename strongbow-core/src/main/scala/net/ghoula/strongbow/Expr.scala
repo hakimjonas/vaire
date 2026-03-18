@@ -140,6 +140,56 @@ enum Expr[Row, +A] {
   case DenseRank[Row]() extends Expr[Row, Int]
   case Lag[Row, A](expr: Expr[Row, A], offset: Int, default: Option[A]) extends Expr[Row, A]
   case Lead[Row, A](expr: Expr[Row, A], offset: Int, default: Option[A]) extends Expr[Row, A]
+
+  case Sqrt[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Pow[Row](base: Expr[Row, Double], exponent: Expr[Row, Double]) extends Expr[Row, Double]
+  case Log[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Log10[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Log2[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Exp[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Sin[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Cos[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Tan[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Asin[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Acos[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Atan[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Atan2[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Double]
+  case Signum[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Rand[Row](seed: Long) extends Expr[Row, Double]
+
+  case DayOfWeek[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+  case DayOfYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+  case WeekOfYear[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+  case Quarter[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, Int]
+  case LastDay[Row](date: Expr[Row, java.time.LocalDate]) extends Expr[Row, java.time.LocalDate]
+  case NextDay[Row](date: Expr[Row, java.time.LocalDate], dayOfWeek: String) extends Expr[Row, java.time.LocalDate]
+  case MonthsBetween[Row](end: Expr[Row, java.time.LocalDate], start: Expr[Row, java.time.LocalDate])
+      extends Expr[Row, Double]
+  case DateTrunc[Row](unit: String, date: Expr[Row, java.time.LocalDate]) extends Expr[Row, java.time.LocalDate]
+  case DateFormat[Row](date: Expr[Row, java.time.LocalDate], format: String) extends Expr[Row, String]
+  case MakeDate[Row](year: Expr[Row, Int], month: Expr[Row, Int], day: Expr[Row, Int])
+      extends Expr[Row, java.time.LocalDate]
+
+  case Variance[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case VariancePop[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case ApproxCountDistinct[Row, A](expr: Expr[Row, A]) extends Expr[Row, Long]
+  case CollectSet[Row, A](expr: Expr[Row, A]) extends Expr[Row, Seq[A]]
+  case ExprLast[Row, A](expr: Expr[Row, A]) extends Expr[Row, Option[A]]
+  case AnyValue[Row, A](expr: Expr[Row, A]) extends Expr[Row, Option[A]]
+  case BoolAnd[Row](expr: Expr[Row, Boolean]) extends Expr[Row, Boolean]
+  case BoolOr[Row](expr: Expr[Row, Boolean]) extends Expr[Row, Boolean]
+  case Corr[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case CovarSamp[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case CovarPop[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case Median[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Mode[Row, A](expr: Expr[Row, A]) extends Expr[Row, Option[A]]
+
+  case NTile[Row](n: Int) extends Expr[Row, Int]
+  case CumeDist[Row]() extends Expr[Row, Double]
+  case PercentRank[Row]() extends Expr[Row, Double]
+  case NthValue[Row, A](expr: Expr[Row, A], n: Int) extends Expr[Row, A]
+  case FirstValue[Row, A](expr: Expr[Row, A]) extends Expr[Row, A]
+  case LastValue[Row, A](expr: Expr[Row, A]) extends Expr[Row, A]
 }
 
 object Expr {
@@ -235,6 +285,85 @@ object Expr {
     MinByN(valueExpr, orderExpr, n, summon[Ordering[K]])
   }
 
+  /** Random double with a fixed seed for reproducibility. */
+  def rand[Row](seed: Long): Expr[Row, Double] = {
+    Rand(seed)
+  }
+
+  /** Construct a date from year, month, day integer expressions. */
+  def makeDate[Row](
+    year: Expr[Row, Int],
+    month: Expr[Row, Int],
+    day: Expr[Row, Int]
+  ): Expr[Row, java.time.LocalDate] = {
+    MakeDate(year, month, day)
+  }
+
+  /** Sample variance. */
+  def variance[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
+    Variance(expr)
+  }
+
+  /** Population variance. */
+  def variancePop[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
+    VariancePop(expr)
+  }
+
+  /** Approximate count of distinct values. */
+  def approxCountDistinct[Row, A](expr: Expr[Row, A]): Expr[Row, Long] = {
+    ApproxCountDistinct(expr)
+  }
+
+  /** Collect distinct values into a set. */
+  def collectSet[Row, A](expr: Expr[Row, A]): Expr[Row, Seq[A]] = {
+    CollectSet(expr)
+  }
+
+  /** Last value in a group. */
+  def last[Row, A](expr: Expr[Row, A]): Expr[Row, Option[A]] = {
+    ExprLast(expr)
+  }
+
+  /** Any arbitrary value from a group. */
+  def anyValue[Row, A](expr: Expr[Row, A]): Expr[Row, Option[A]] = {
+    AnyValue(expr)
+  }
+
+  /** True if all values are true. */
+  def boolAnd[Row](expr: Expr[Row, Boolean]): Expr[Row, Boolean] = {
+    BoolAnd(expr)
+  }
+
+  /** True if any value is true. */
+  def boolOr[Row](expr: Expr[Row, Boolean]): Expr[Row, Boolean] = {
+    BoolOr(expr)
+  }
+
+  /** Pearson correlation coefficient. */
+  def corr[Row](left: Expr[Row, Double], right: Expr[Row, Double]): Expr[Row, Double] = {
+    Corr(left, right)
+  }
+
+  /** Sample covariance. */
+  def covarSamp[Row](left: Expr[Row, Double], right: Expr[Row, Double]): Expr[Row, Double] = {
+    CovarSamp(left, right)
+  }
+
+  /** Population covariance. */
+  def covarPop[Row](left: Expr[Row, Double], right: Expr[Row, Double]): Expr[Row, Double] = {
+    CovarPop(left, right)
+  }
+
+  /** Median value. */
+  def median[Row](expr: Expr[Row, Double]): Expr[Row, Double] = {
+    Median(expr)
+  }
+
+  /** Most frequent value. */
+  def mode[Row, A](expr: Expr[Row, A]): Expr[Row, Option[A]] = {
+    Mode(expr)
+  }
+
   extension [Row, A](left: Expr[Row, A]) {
 
     /** Rename this expression for output. */
@@ -317,6 +446,20 @@ object Expr {
     inline def round(scale: Int): Expr[Row, Double] = Round(left, scale)
     inline def floor: Expr[Row, Double] = Floor(left)
     inline def ceil: Expr[Row, Double] = Ceil(left)
+    inline def sqrt: Expr[Row, Double] = Sqrt(left)
+    inline def pow(exponent: Expr[Row, Double]): Expr[Row, Double] = Pow(left, exponent)
+    inline def log: Expr[Row, Double] = Log(left)
+    inline def log10: Expr[Row, Double] = Log10(left)
+    inline def log2: Expr[Row, Double] = Log2(left)
+    inline def exp: Expr[Row, Double] = Exp(left)
+    inline def sin: Expr[Row, Double] = Sin(left)
+    inline def cos: Expr[Row, Double] = Cos(left)
+    inline def tan: Expr[Row, Double] = Tan(left)
+    inline def asin: Expr[Row, Double] = Asin(left)
+    inline def acos: Expr[Row, Double] = Acos(left)
+    inline def atan: Expr[Row, Double] = Atan(left)
+    inline def atan2(x: Expr[Row, Double]): Expr[Row, Double] = Atan2(left, x)
+    inline def signum: Expr[Row, Double] = Signum(left)
   }
 
   extension [Row](left: Expr[Row, Boolean]) {
@@ -383,6 +526,15 @@ object Expr {
     inline def year: Expr[Row, Int] = ExtractYear(d)
     inline def month: Expr[Row, Int] = ExtractMonth(d)
     inline def day: Expr[Row, Int] = ExtractDay(d)
+    inline def dayOfWeek: Expr[Row, Int] = DayOfWeek(d)
+    inline def dayOfYear: Expr[Row, Int] = DayOfYear(d)
+    inline def weekOfYear: Expr[Row, Int] = WeekOfYear(d)
+    inline def quarter: Expr[Row, Int] = Quarter(d)
+    inline def lastDay: Expr[Row, java.time.LocalDate] = LastDay(d)
+    inline def nextDay(dayOfWeek: String): Expr[Row, java.time.LocalDate] = NextDay(d, dayOfWeek)
+    inline def monthsBetween(other: Expr[Row, java.time.LocalDate]): Expr[Row, Double] = MonthsBetween(d, other)
+    inline def dateTrunc(unit: String): Expr[Row, java.time.LocalDate] = DateTrunc(unit, d)
+    inline def dateFormat(format: String): Expr[Row, String] = DateFormat(d, format)
   }
 
   /** Infer the output ColumnType of an expression, if statically known. */
@@ -433,6 +585,26 @@ object Expr {
       case _: Expr.RowNumber[_] | _: Expr.Rank[_] | _: Expr.DenseRank[_] =>
         Some(ColumnType.IntType)
       case _: Expr.Lag[_, _] | _: Expr.Lead[_, _] => None
+      case _: Expr.Sqrt[_] | _: Expr.Pow[_] | _: Expr.Log[_] | _: Expr.Log10[_] | _: Expr.Log2[_] | _: Expr.Exp[_] |
+          _: Expr.Sin[_] | _: Expr.Cos[_] | _: Expr.Tan[_] | _: Expr.Asin[_] | _: Expr.Acos[_] | _: Expr.Atan[_] |
+          _: Expr.Atan2[_] | _: Expr.Signum[_] | _: Expr.Rand[_] =>
+        Some(ColumnType.DoubleType)
+      case _: Expr.DayOfWeek[_] | _: Expr.DayOfYear[_] | _: Expr.WeekOfYear[_] | _: Expr.Quarter[_] =>
+        Some(ColumnType.IntType)
+      case _: Expr.LastDay[_] | _: Expr.NextDay[_] | _: Expr.DateTrunc[_] | _: Expr.MakeDate[_] =>
+        Some(ColumnType.DateType)
+      case _: Expr.MonthsBetween[_] => Some(ColumnType.DoubleType)
+      case _: Expr.DateFormat[_] => Some(ColumnType.StringType)
+      case _: Expr.Variance[_] | _: Expr.VariancePop[_] | _: Expr.Corr[_] | _: Expr.CovarSamp[_] | _: Expr.CovarPop[_] |
+          _: Expr.Median[_] =>
+        Some(ColumnType.DoubleType)
+      case _: Expr.ApproxCountDistinct[_, _] => Some(ColumnType.LongType)
+      case _: Expr.CollectSet[_, _] => Some(ColumnType.AnyType)
+      case _: Expr.ExprLast[_, _] | _: Expr.AnyValue[_, _] | _: Expr.Mode[_, _] => None
+      case _: Expr.BoolAnd[_] | _: Expr.BoolOr[_] => Some(ColumnType.BooleanType)
+      case _: Expr.NTile[_] => Some(ColumnType.IntType)
+      case _: Expr.CumeDist[_] | _: Expr.PercentRank[_] => Some(ColumnType.DoubleType)
+      case _: Expr.NthValue[_, _] | _: Expr.FirstValue[_, _] | _: Expr.LastValue[_, _] => None
     }
   }
 }

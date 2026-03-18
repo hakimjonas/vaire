@@ -190,6 +190,155 @@ object ExprToColumn {
       case lk: Expr.Like[Row] =>
         convert(lk.expr).map { case (sparkCol, _) => (sparkCol.like(lk.pattern), ColumnType.BooleanType) }
 
+      case lo: Expr.Lower[Row] =>
+        convert(lo.expr).map { case (sparkCol, _) => (lower(sparkCol), ColumnType.StringType) }
+
+      case up: Expr.Upper[Row] =>
+        convert(up.expr).map { case (sparkCol, _) => (upper(sparkCol), ColumnType.StringType) }
+
+      case tr: Expr.Trim[Row] =>
+        convert(tr.expr).map { case (sparkCol, _) => (trim(sparkCol), ColumnType.StringType) }
+
+      case lt: Expr.LTrim[Row] =>
+        convert(lt.expr).map { case (sparkCol, _) => (ltrim(sparkCol), ColumnType.StringType) }
+
+      case rt: Expr.RTrim[Row] =>
+        convert(rt.expr).map { case (sparkCol, _) => (rtrim(sparkCol), ColumnType.StringType) }
+
+      case ss: Expr.Substring[Row] =>
+        convert(ss.expr).map { case (sparkCol, _) =>
+          (substring(sparkCol, ss.pos, ss.len), ColumnType.StringType)
+        }
+
+      case sr: Expr.StringReplace[Row] =>
+        convert(sr.expr).map { case (sparkCol, _) =>
+          (regexp_replace(sparkCol, java.util.regex.Pattern.quote(sr.search), sr.replacement), ColumnType.StringType)
+        }
+
+      case rr: Expr.RegexpReplace[Row] =>
+        convert(rr.expr).map { case (sparkCol, _) =>
+          (regexp_replace(sparkCol, rr.pattern, rr.replacement), ColumnType.StringType)
+        }
+
+      case re: Expr.RegexpExtract[Row] =>
+        convert(re.expr).map { case (sparkCol, _) =>
+          (regexp_extract(sparkCol, re.pattern, re.groupIdx), ColumnType.StringType)
+        }
+
+      case sp: Expr.StringSplit[Row] =>
+        convert(sp.expr).map { case (sparkCol, _) =>
+          (split(sparkCol, sp.delimiter), ColumnType.AnyType)
+        }
+
+      case sw: Expr.StartsWith[Row] =>
+        for {
+          (e, _) <- convert(sw.expr)
+          (p, _) <- convert(sw.prefix)
+        } yield (e.startsWith(p), ColumnType.BooleanType)
+
+      case ew: Expr.EndsWith[Row] =>
+        for {
+          (e, _) <- convert(ew.expr)
+          (s, _) <- convert(ew.suffix)
+        } yield (e.endsWith(s), ColumnType.BooleanType)
+
+      case sc: Expr.StringContains[Row] =>
+        for {
+          (e, _) <- convert(sc.expr)
+          (s, _) <- convert(sc.substr)
+        } yield (e.contains(s), ColumnType.BooleanType)
+
+      case cw: Expr.ConcatWs[Row] =>
+        val results = cw.exprs.map(convert)
+        val firstError = results.collectFirst { case Left(err) => err }
+        firstError match {
+          case Some(err) => Left(err)
+          case scala.None =>
+            val cols = results.collect { case Right((c, _)) => c }
+            Right((concat_ws(cw.separator, cols*), ColumnType.StringType))
+        }
+
+      case co: Expr.Coalesce[Row, _] =>
+        val results = co.exprs.map(convert)
+        val firstError = results.collectFirst { case Left(err) => err }
+        firstError match {
+          case Some(err) => Left(err)
+          case scala.None =>
+            val cols = results.collect { case Right((c, _)) => c }
+            val ct = results.collectFirst { case Right((_, t)) => t }.getOrElse(ColumnType.AnyType)
+            Right((coalesce(cols*), ct))
+        }
+
+      case in: Expr.IsNull[Row, _] =>
+        convert(in.expr).map { case (sparkCol, _) => (sparkCol.isNull, ColumnType.BooleanType) }
+
+      case inn: Expr.IsNotNull[Row, _] =>
+        convert(inn.expr).map { case (sparkCol, _) => (sparkCol.isNotNull, ColumnType.BooleanType) }
+
+      case inV: Expr.In[Row, _] =>
+        convert(inV.expr).map { case (sparkCol, _) =>
+          val litValues = inV.values.map(v => toLit(v))
+          (sparkCol.isin(litValues*), ColumnType.BooleanType)
+        }
+
+      case btw: Expr.Between[Row, _] =>
+        for {
+          (e, _) <- convert(btw.expr)
+          (lo, _) <- convert(btw.lower)
+          (hi, _) <- convert(btw.upper)
+        } yield (e.between(lo, hi), ColumnType.BooleanType)
+
+      case m: Expr.Mod[Row] =>
+        for {
+          (l, _) <- convert(m.left)
+          (r, _) <- convert(m.right)
+        } yield (l % r, ColumnType.IntType)
+
+      case ml: Expr.ModLong[Row] =>
+        for {
+          (l, _) <- convert(ml.left)
+          (r, _) <- convert(ml.right)
+        } yield (l % r, ColumnType.LongType)
+
+      case ab: Expr.Abs[Row] =>
+        convert(ab.expr).map { case (sparkCol, _) => (abs(sparkCol), ColumnType.IntType) }
+
+      case abl: Expr.AbsLong[Row] =>
+        convert(abl.expr).map { case (sparkCol, _) => (abs(sparkCol), ColumnType.LongType) }
+
+      case abd: Expr.AbsDouble[Row] =>
+        convert(abd.expr).map { case (sparkCol, _) => (abs(sparkCol), ColumnType.DoubleType) }
+
+      case neg: Expr.Negate[Row] =>
+        convert(neg.expr).map { case (sparkCol, _) => (negate(sparkCol), ColumnType.IntType) }
+
+      case negl: Expr.NegateLong[Row] =>
+        convert(negl.expr).map { case (sparkCol, _) => (negate(sparkCol), ColumnType.LongType) }
+
+      case negd: Expr.NegateDouble[Row] =>
+        convert(negd.expr).map { case (sparkCol, _) => (negate(sparkCol), ColumnType.DoubleType) }
+
+      case rnd: Expr.Round[Row] =>
+        convert(rnd.expr).map { case (sparkCol, _) => (round(sparkCol, rnd.scale), ColumnType.DoubleType) }
+
+      case fl: Expr.Floor[Row] =>
+        convert(fl.expr).map { case (sparkCol, _) => (floor(sparkCol), ColumnType.DoubleType) }
+
+      case cl: Expr.Ceil[Row] =>
+        convert(cl.expr).map { case (sparkCol, _) => (ceil(sparkCol), ColumnType.DoubleType) }
+
+      case ctl: Expr.CastToLong[Row] =>
+        convert(ctl.expr).map { case (sparkCol, _) => (sparkCol.cast("long"), ColumnType.LongType) }
+
+      case ctd: Expr.CastToDouble[Row] =>
+        convert(ctd.expr).map { case (sparkCol, _) => (sparkCol.cast("double"), ColumnType.DoubleType) }
+
+      case cltd: Expr.CastLongToDouble[Row] =>
+        convert(cltd.expr).map { case (sparkCol, _) => (sparkCol.cast("double"), ColumnType.DoubleType) }
+
+      case cts: Expr.CastToString[Row, _] =>
+        convert(cts.expr).map { case (sparkCol, _) => (sparkCol.cast("string"), ColumnType.StringType) }
+
       // Aggregations
       case s: Expr.Sum[Row] =>
         convert(s.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.IntType) }

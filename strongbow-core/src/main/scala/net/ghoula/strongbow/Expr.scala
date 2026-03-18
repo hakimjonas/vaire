@@ -51,6 +51,45 @@ enum Expr[Row, +A] {
   case Length[Row](expr: Expr[Row, String]) extends Expr[Row, Int]
   case Like[Row](expr: Expr[Row, String], pattern: String) extends Expr[Row, Boolean]
 
+  case Lower[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Upper[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Trim[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case LTrim[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case RTrim[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Substring[Row](expr: Expr[Row, String], pos: Int, len: Int) extends Expr[Row, String]
+  case StringReplace[Row](expr: Expr[Row, String], search: String, replacement: String) extends Expr[Row, String]
+  case RegexpReplace[Row](expr: Expr[Row, String], pattern: String, replacement: String) extends Expr[Row, String]
+  case RegexpExtract[Row](expr: Expr[Row, String], pattern: String, groupIdx: Int) extends Expr[Row, String]
+  case StringSplit[Row](expr: Expr[Row, String], delimiter: String) extends Expr[Row, Seq[String]]
+  case StartsWith[Row](expr: Expr[Row, String], prefix: Expr[Row, String]) extends Expr[Row, Boolean]
+  case EndsWith[Row](expr: Expr[Row, String], suffix: Expr[Row, String]) extends Expr[Row, Boolean]
+  case StringContains[Row](expr: Expr[Row, String], substr: Expr[Row, String]) extends Expr[Row, Boolean]
+  case ConcatWs[Row](separator: String, exprs: Vector[Expr[Row, String]]) extends Expr[Row, String]
+
+  case Coalesce[Row, A](exprs: Vector[Expr[Row, A]]) extends Expr[Row, A]
+  case IsNull[Row, A](expr: Expr[Row, A]) extends Expr[Row, Boolean]
+  case IsNotNull[Row, A](expr: Expr[Row, A]) extends Expr[Row, Boolean]
+  case In[Row, A](expr: Expr[Row, A], values: Vector[A]) extends Expr[Row, Boolean]
+  case Between[Row, A](expr: Expr[Row, A], lower: Expr[Row, A], upper: Expr[Row, A], ordering: Ordering[A])
+      extends Expr[Row, Boolean]
+
+  case Mod[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
+  case ModLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case Abs[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case AbsLong[Row](expr: Expr[Row, Long]) extends Expr[Row, Long]
+  case AbsDouble[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Negate[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case NegateLong[Row](expr: Expr[Row, Long]) extends Expr[Row, Long]
+  case NegateDouble[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Round[Row](expr: Expr[Row, Double], scale: Int) extends Expr[Row, Double]
+  case Floor[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Ceil[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+
+  case CastToLong[Row](expr: Expr[Row, Int]) extends Expr[Row, Long]
+  case CastToDouble[Row](expr: Expr[Row, Int]) extends Expr[Row, Double]
+  case CastLongToDouble[Row](expr: Expr[Row, Long]) extends Expr[Row, Double]
+  case CastToString[Row, A](expr: Expr[Row, A]) extends Expr[Row, String]
+
   case IsDefined[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Boolean]
   case GetOrElse[Row, A](expr: Expr[Row, Option[A]], default: A) extends Expr[Row, A]
 
@@ -235,6 +274,13 @@ object Expr {
     inline def -(right: Expr[Row, Int]): Expr[Row, Int] = Sub(left, right)
     inline def *(right: Expr[Row, Int]): Expr[Row, Int] = Mul(left, right)
     inline def /(right: Expr[Row, Int]): Expr[Row, Int] = Div(left, right)
+    @targetName("modInt")
+    inline def %(right: Expr[Row, Int]): Expr[Row, Int] = Mod(left, right)
+    inline def abs: Expr[Row, Int] = Abs(left)
+    inline def negate: Expr[Row, Int] = Negate(left)
+    inline def castToLong: Expr[Row, Long] = CastToLong(left)
+    @targetName("castIntToDouble")
+    inline def castToDouble: Expr[Row, Double] = CastToDouble(left)
   }
 
   extension [Row](left: Expr[Row, Long]) {
@@ -246,6 +292,13 @@ object Expr {
     inline def *(right: Expr[Row, Long]): Expr[Row, Long] = MulLong(left, right)
     @targetName("divLong")
     inline def /(right: Expr[Row, Long]): Expr[Row, Long] = DivLong(left, right)
+    @targetName("modLong")
+    inline def %(right: Expr[Row, Long]): Expr[Row, Long] = ModLong(left, right)
+    @targetName("absLong")
+    inline def abs: Expr[Row, Long] = AbsLong(left)
+    @targetName("negateLong")
+    inline def negate: Expr[Row, Long] = NegateLong(left)
+    inline def castToDouble: Expr[Row, Double] = CastLongToDouble(left)
   }
 
   extension [Row](left: Expr[Row, Double]) {
@@ -257,6 +310,13 @@ object Expr {
     inline def *(right: Expr[Row, Double]): Expr[Row, Double] = MulDouble(left, right)
     @targetName("divDouble")
     inline def /(right: Expr[Row, Double]): Expr[Row, Double] = DivDouble(left, right)
+    @targetName("absDouble")
+    inline def abs: Expr[Row, Double] = AbsDouble(left)
+    @targetName("negateDouble")
+    inline def negate: Expr[Row, Double] = NegateDouble(left)
+    inline def round(scale: Int): Expr[Row, Double] = Round(left, scale)
+    inline def floor: Expr[Row, Double] = Floor(left)
+    inline def ceil: Expr[Row, Double] = Ceil(left)
   }
 
   extension [Row](left: Expr[Row, Boolean]) {
@@ -269,11 +329,50 @@ object Expr {
     inline def ++(right: Expr[Row, String]): Expr[Row, String] = Concat(left, right)
     inline def length: Expr[Row, Int] = Length(left)
     inline def like(pattern: String): Expr[Row, Boolean] = Like(left, pattern)
+
+    inline def lower: Expr[Row, String] = Lower(left)
+    inline def upper: Expr[Row, String] = Upper(left)
+    inline def trim: Expr[Row, String] = Trim(left)
+    inline def ltrim: Expr[Row, String] = LTrim(left)
+    inline def rtrim: Expr[Row, String] = RTrim(left)
+    inline def substring(pos: Int, len: Int): Expr[Row, String] = Substring(left, pos, len)
+    inline def replace(search: String, replacement: String): Expr[Row, String] =
+      StringReplace(left, search, replacement)
+    inline def regexpReplace(pattern: String, replacement: String): Expr[Row, String] =
+      RegexpReplace(left, pattern, replacement)
+    inline def regexpExtract(pattern: String, groupIdx: Int): Expr[Row, String] = RegexpExtract(left, pattern, groupIdx)
+    inline def split(delimiter: String): Expr[Row, Seq[String]] = StringSplit(left, delimiter)
+    inline def startsWith(prefix: Expr[Row, String]): Expr[Row, Boolean] = StartsWith(left, prefix)
+    inline def endsWith(suffix: Expr[Row, String]): Expr[Row, Boolean] = EndsWith(left, suffix)
+    inline def contains(substr: Expr[Row, String]): Expr[Row, Boolean] = StringContains(left, substr)
   }
 
   extension [Row, A](e: Expr[Row, Option[A]]) {
     inline def isDefined: Expr[Row, Boolean] = IsDefined(e)
     inline def getOrElse(default: A): Expr[Row, A] = GetOrElse(e, default)
+  }
+
+  /** Return the first non-null value from a list of expressions. */
+  def coalesce[Row, A](exprs: Expr[Row, A]*): Expr[Row, A] = {
+    Coalesce(exprs.toVector)
+  }
+
+  /** Concatenate strings with a separator, skipping nulls. */
+  def concatWs[Row](separator: String, exprs: Expr[Row, String]*): Expr[Row, String] = {
+    ConcatWs(separator, exprs.toVector)
+  }
+
+  extension [Row, A](left: Expr[Row, A]) {
+    inline def isNull: Expr[Row, Boolean] = IsNull(left)
+    inline def isNotNull: Expr[Row, Boolean] = IsNotNull(left)
+    inline def in(values: Vector[A]): Expr[Row, Boolean] = In(left, values)
+    inline def castToString: Expr[Row, String] = CastToString(left)
+  }
+
+  extension [Row, A: Ordering](left: Expr[Row, A]) {
+    @targetName("betweenOrdered")
+    inline def between(lower: Expr[Row, A], upper: Expr[Row, A]): Expr[Row, Boolean] =
+      Between(left, lower, upper, summon[Ordering[A]])
   }
 
   extension [Row](d: Expr[Row, java.time.LocalDate]) {
@@ -292,20 +391,29 @@ object Expr {
       case _: Expr.Cell[_, _] => None
       case _: Expr.Const[_, _] => None
       case n: Expr.Named[_, _] => n.expr.outputType
-      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Sum[_] =>
+      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Sum[_] | _: Expr.Mod[_] |
+          _: Expr.Abs[_] | _: Expr.Negate[_] =>
         Some(ColumnType.IntType)
-      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] | _: Expr.SumLong[_] =>
+      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] | _: Expr.SumLong[_] |
+          _: Expr.ModLong[_] | _: Expr.AbsLong[_] | _: Expr.NegateLong[_] | _: Expr.CastToLong[_] =>
         Some(ColumnType.LongType)
       case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] |
-          _: Expr.SumDouble[_] =>
+          _: Expr.SumDouble[_] | _: Expr.AbsDouble[_] | _: Expr.NegateDouble[_] | _: Expr.Round[_] | _: Expr.Floor[_] |
+          _: Expr.Ceil[_] | _: Expr.CastToDouble[_] | _: Expr.CastLongToDouble[_] =>
         Some(ColumnType.DoubleType)
       case _: Expr.Gt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lt[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
           _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] |
-          _: Expr.Like[_] =>
+          _: Expr.Like[_] | _: Expr.StartsWith[_] | _: Expr.EndsWith[_] | _: Expr.StringContains[_] |
+          _: Expr.IsNull[_, _] | _: Expr.IsNotNull[_, _] | _: Expr.In[_, _] | _: Expr.Between[_, _] =>
         Some(ColumnType.BooleanType)
       case w: Expr.When[_, _] => w.thenExpr.outputType
-      case _: Expr.Concat[_] => Some(ColumnType.StringType)
+      case _: Expr.Concat[_] | _: Expr.Lower[_] | _: Expr.Upper[_] | _: Expr.Trim[_] | _: Expr.LTrim[_] |
+          _: Expr.RTrim[_] | _: Expr.Substring[_] | _: Expr.StringReplace[_] | _: Expr.RegexpReplace[_] |
+          _: Expr.RegexpExtract[_] | _: Expr.ConcatWs[_] | _: Expr.CastToString[_, _] =>
+        Some(ColumnType.StringType)
+      case _: Expr.StringSplit[_] => Some(ColumnType.AnyType)
       case _: Expr.Length[_] => Some(ColumnType.IntType)
+      case c: Expr.Coalesce[_, _] => c.exprs.headOption.flatMap(_.outputType)
       case g: Expr.GetOrElse[_, _] => g.expr.outputType
       case _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
         Some(ColumnType.LongType)

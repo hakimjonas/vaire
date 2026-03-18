@@ -230,6 +230,157 @@ object ExprInterpreter {
           v <- eval(like.expr, columns, rowIdx)
         } yield likeToRegex(like.pattern).matches(v)
 
+      case lo: Expr.Lower[Row] =>
+        eval(lo.expr, columns, rowIdx).map(_.toLowerCase)
+
+      case up: Expr.Upper[Row] =>
+        eval(up.expr, columns, rowIdx).map(_.toUpperCase)
+
+      case tr: Expr.Trim[Row] =>
+        eval(tr.expr, columns, rowIdx).map(_.trim)
+
+      case lt: Expr.LTrim[Row] =>
+        eval(lt.expr, columns, rowIdx).map(_.stripLeading.nn)
+
+      case rt: Expr.RTrim[Row] =>
+        eval(rt.expr, columns, rowIdx).map(_.stripTrailing.nn)
+
+      case ss: Expr.Substring[Row] =>
+        eval(ss.expr, columns, rowIdx).map { s =>
+          val start = Math.max(ss.pos - 1, 0)
+          val end = Math.min(start + ss.len, s.length)
+          if (start >= s.length) "" else s.substring(start, end)
+        }
+
+      case sr: Expr.StringReplace[Row] =>
+        eval(sr.expr, columns, rowIdx).map(_.replace(sr.search, sr.replacement))
+
+      case rr: Expr.RegexpReplace[Row] =>
+        eval(rr.expr, columns, rowIdx).map(_.replaceAll(rr.pattern, rr.replacement))
+
+      case re: Expr.RegexpExtract[Row] =>
+        eval(re.expr, columns, rowIdx).map { s =>
+          val m = java.util.regex.Pattern.compile(re.pattern).matcher(s)
+          if (m.find()) m.group(re.groupIdx) else ""
+        }
+
+      case sp: Expr.StringSplit[Row] =>
+        eval(sp.expr, columns, rowIdx).map(s => s.split(sp.delimiter, -1).toSeq)
+
+      case sw: Expr.StartsWith[Row] =>
+        for {
+          v <- eval(sw.expr, columns, rowIdx)
+          p <- eval(sw.prefix, columns, rowIdx)
+        } yield v.startsWith(p)
+
+      case ew: Expr.EndsWith[Row] =>
+        for {
+          v <- eval(ew.expr, columns, rowIdx)
+          s <- eval(ew.suffix, columns, rowIdx)
+        } yield v.endsWith(s)
+
+      case sc: Expr.StringContains[Row] =>
+        for {
+          v <- eval(sc.expr, columns, rowIdx)
+          s <- eval(sc.substr, columns, rowIdx)
+        } yield v.contains(s)
+
+      case cw: Expr.ConcatWs[Row] =>
+        cw.exprs
+          .foldLeft[Either[ExecutionError, Vector[String]]](Right(Vector.empty)) {
+            case (Right(acc), e) => eval(e, columns, rowIdx).map(acc :+ _)
+            case (err, _) => err
+          }
+          .map(_.mkString(cw.separator))
+
+      case co: Expr.Coalesce[Row, _] =>
+        co.exprs
+          .foldLeft[Either[ExecutionError, Option[A]]](Right(None)) {
+            case (Right(None), e) =>
+              eval(e, columns, rowIdx).map(v => Option(v))
+            case (found, _) => found
+          }
+          .flatMap {
+            case Some(v) => Right(v)
+            case None => Left(ExecutionError.UnsupportedOperation("Coalesce: all expressions were null"))
+          }
+
+      case in: Expr.IsNull[Row, _] =>
+        eval(in.expr, columns, rowIdx).map(v => Option(v).isEmpty)
+
+      case inn: Expr.IsNotNull[Row, _] =>
+        eval(inn.expr, columns, rowIdx).map(v => Option(v).isDefined)
+
+      case inV: Expr.In[Row, _] =>
+        eval(inV.expr, columns, rowIdx).map(v => inV.values.contains(v))
+
+      case btw: Expr.Between[Row, _] =>
+        for {
+          v <- eval(btw.expr, columns, rowIdx)
+          lo <- eval(btw.lower, columns, rowIdx)
+          hi <- eval(btw.upper, columns, rowIdx)
+        } yield btw.ordering.gteq(v, lo) && btw.ordering.lteq(v, hi)
+
+      case m: Expr.Mod[Row] =>
+        for {
+          l <- eval(m.left, columns, rowIdx)
+          r <- eval(m.right, columns, rowIdx)
+          result <-
+            if (r == 0) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
+            else Right(l % r)
+        } yield result
+
+      case ml: Expr.ModLong[Row] =>
+        for {
+          l <- eval(ml.left, columns, rowIdx)
+          r <- eval(ml.right, columns, rowIdx)
+          result <-
+            if (r == 0L) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
+            else Right(l % r)
+        } yield result
+
+      case ab: Expr.Abs[Row] =>
+        eval(ab.expr, columns, rowIdx).map(v => Math.abs(v))
+
+      case abl: Expr.AbsLong[Row] =>
+        eval(abl.expr, columns, rowIdx).map(v => Math.abs(v))
+
+      case abd: Expr.AbsDouble[Row] =>
+        eval(abd.expr, columns, rowIdx).map(v => Math.abs(v))
+
+      case neg: Expr.Negate[Row] =>
+        eval(neg.expr, columns, rowIdx).map(v => -v)
+
+      case negl: Expr.NegateLong[Row] =>
+        eval(negl.expr, columns, rowIdx).map(v => -v)
+
+      case negd: Expr.NegateDouble[Row] =>
+        eval(negd.expr, columns, rowIdx).map(v => -v)
+
+      case rnd: Expr.Round[Row] =>
+        eval(rnd.expr, columns, rowIdx).map { v =>
+          val bd = BigDecimal(v).setScale(rnd.scale, BigDecimal.RoundingMode.HALF_UP)
+          bd.toDouble
+        }
+
+      case fl: Expr.Floor[Row] =>
+        eval(fl.expr, columns, rowIdx).map(v => Math.floor(v))
+
+      case cl: Expr.Ceil[Row] =>
+        eval(cl.expr, columns, rowIdx).map(v => Math.ceil(v))
+
+      case ctl: Expr.CastToLong[Row] =>
+        eval(ctl.expr, columns, rowIdx).map(_.toLong)
+
+      case ctd: Expr.CastToDouble[Row] =>
+        eval(ctd.expr, columns, rowIdx).map(_.toDouble)
+
+      case cltd: Expr.CastLongToDouble[Row] =>
+        eval(cltd.expr, columns, rowIdx).map(_.toDouble)
+
+      case cts: Expr.CastToString[Row, _] =>
+        eval(cts.expr, columns, rowIdx).map(v => String.valueOf(v))
+
       case opt2iter: Expr.Option2Iterable[Row, _] =>
         eval(opt2iter.expr, columns, rowIdx).map(_.toList)
 
@@ -359,6 +510,37 @@ object ExprInterpreter {
       case like: Expr.Like[Row] =>
         val v = evalAny(like.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
         likeToRegex(like.pattern).matches(v)
+
+      case sw: Expr.StartsWith[Row] =>
+        val v = evalAny(sw.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        val p = evalAny(sw.prefix, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        v.startsWith(p)
+
+      case ew: Expr.EndsWith[Row] =>
+        val v = evalAny(ew.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        val s = evalAny(ew.suffix, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        v.endsWith(s)
+
+      case sc: Expr.StringContains[Row] =>
+        val v = evalAny(sc.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        val s = evalAny(sc.substr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        v.contains(s)
+
+      case in: Expr.IsNull[Row, _] =>
+        Option(evalAny(in.expr, columns, rowIdx)).isEmpty
+
+      case inn: Expr.IsNotNull[Row, _] =>
+        Option(evalAny(inn.expr, columns, rowIdx)).isDefined
+
+      case inV: Expr.In[Row, _] =>
+        val v = evalAny(inV.expr, columns, rowIdx)
+        inV.values.contains(v)
+
+      case btw: Expr.Between[Row, a] =>
+        val v = evalAny(btw.expr, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        val lo = evalAny(btw.lower, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        val hi = evalAny(btw.upper, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
+        btw.ordering.gteq(v, lo) && btw.ordering.lteq(v, hi)
     }
   }
 
@@ -462,9 +644,118 @@ object ExprInterpreter {
         if (cond) evalAny(when.thenExpr, columns, rowIdx)
         else evalAny(when.elseExpr, columns, rowIdx)
 
+      case lo: Expr.Lower[Row] =>
+        evalAny(lo.expr, columns, rowIdx).asInstanceOf[String].toLowerCase // scalafix:ok DisableSyntax.asInstanceOf
+
+      case up: Expr.Upper[Row] =>
+        evalAny(up.expr, columns, rowIdx).asInstanceOf[String].toUpperCase // scalafix:ok DisableSyntax.asInstanceOf
+
+      case tr: Expr.Trim[Row] =>
+        evalAny(tr.expr, columns, rowIdx).asInstanceOf[String].trim // scalafix:ok DisableSyntax.asInstanceOf
+
+      case lt: Expr.LTrim[Row] =>
+        evalAny(lt.expr, columns, rowIdx).asInstanceOf[String].stripLeading.nn // scalafix:ok DisableSyntax.asInstanceOf
+
+      case rt: Expr.RTrim[Row] =>
+        evalAny(rt.expr, columns, rowIdx)
+          .asInstanceOf[String]
+          .stripTrailing
+          .nn // scalafix:ok DisableSyntax.asInstanceOf
+
+      case ss: Expr.Substring[Row] =>
+        val s = evalAny(ss.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        val start = Math.max(ss.pos - 1, 0)
+        val end = Math.min(start + ss.len, s.length)
+        if (start >= s.length) "" else s.substring(start, end)
+
+      case sr: Expr.StringReplace[Row] =>
+        evalAny(sr.expr, columns, rowIdx)
+          .asInstanceOf[String]
+          .replace(sr.search, sr.replacement) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case rr: Expr.RegexpReplace[Row] =>
+        evalAny(rr.expr, columns, rowIdx)
+          .asInstanceOf[String]
+          .replaceAll(rr.pattern, rr.replacement) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case re: Expr.RegexpExtract[Row] =>
+        val s = evalAny(re.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        val m = java.util.regex.Pattern.compile(re.pattern).matcher(s)
+        if (m.find()) m.group(re.groupIdx) else ""
+
+      case sp: Expr.StringSplit[Row] =>
+        val s = evalAny(sp.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        s.split(sp.delimiter, -1).toSeq
+
+      case cw: Expr.ConcatWs[Row] =>
+        val strs =
+          cw.exprs.map(e => evalAny(e, columns, rowIdx).asInstanceOf[String]) // scalafix:ok DisableSyntax.asInstanceOf
+        strs.mkString(cw.separator)
+
+      case co: Expr.Coalesce[Row, _] =>
+        co.exprs.iterator
+          .map(e => evalAny(e, columns, rowIdx))
+          .find(v => Option(v).isDefined)
+          .orNull // scalafix:ok DisableSyntax.null
+
+      case m: Expr.Mod[Row] =>
+        val l = evalAny(m.left, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(m.right, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        if (r == 0)
+          throw new ArithmeticException(s"Division by zero at row ${rowIdx.toInt}") // scalafix:ok DisableSyntax.throw
+        l % r
+
+      case ml: Expr.ModLong[Row] =>
+        val l = evalAny(ml.left, columns, rowIdx).asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(ml.right, columns, rowIdx).asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+        if (r == 0L)
+          throw new ArithmeticException(s"Division by zero at row ${rowIdx.toInt}") // scalafix:ok DisableSyntax.throw
+        l % r
+
+      case ab: Expr.Abs[Row] =>
+        Math.abs(evalAny(ab.expr, columns, rowIdx).asInstanceOf[Int]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case abl: Expr.AbsLong[Row] =>
+        Math.abs(evalAny(abl.expr, columns, rowIdx).asInstanceOf[Long]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case abd: Expr.AbsDouble[Row] =>
+        Math.abs(evalAny(abd.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case neg: Expr.Negate[Row] =>
+        -evalAny(neg.expr, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case negl: Expr.NegateLong[Row] =>
+        -evalAny(negl.expr, columns, rowIdx).asInstanceOf[Long] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case negd: Expr.NegateDouble[Row] =>
+        -evalAny(negd.expr, columns, rowIdx).asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+
+      case rnd: Expr.Round[Row] =>
+        val v = evalAny(rnd.expr, columns, rowIdx).asInstanceOf[Double] // scalafix:ok DisableSyntax.asInstanceOf
+        BigDecimal(v).setScale(rnd.scale, BigDecimal.RoundingMode.HALF_UP).toDouble
+
+      case fl: Expr.Floor[Row] =>
+        Math.floor(evalAny(fl.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case cl: Expr.Ceil[Row] =>
+        Math.ceil(evalAny(cl.expr, columns, rowIdx).asInstanceOf[Double]) // scalafix:ok DisableSyntax.asInstanceOf
+
+      case ctl: Expr.CastToLong[Row] =>
+        evalAny(ctl.expr, columns, rowIdx).asInstanceOf[Int].toLong // scalafix:ok DisableSyntax.asInstanceOf
+
+      case ctd: Expr.CastToDouble[Row] =>
+        evalAny(ctd.expr, columns, rowIdx).asInstanceOf[Int].toDouble // scalafix:ok DisableSyntax.asInstanceOf
+
+      case cltd: Expr.CastLongToDouble[Row] =>
+        evalAny(cltd.expr, columns, rowIdx).asInstanceOf[Long].toDouble // scalafix:ok DisableSyntax.asInstanceOf
+
+      case cts: Expr.CastToString[Row, _] =>
+        String.valueOf(evalAny(cts.expr, columns, rowIdx))
+
       case boolExpr: (Expr.Gt[Row, _] | Expr.Lt[Row, _] | Expr.Gte[Row, _] | Expr.Lte[Row, _] | Expr.Eq[Row, _] |
-            Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _] |
-            Expr.Like[Row]) =>
+            Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _] | Expr.Like[Row] |
+            Expr.StartsWith[Row] | Expr.EndsWith[Row] | Expr.StringContains[Row] | Expr.IsNull[Row, _] |
+            Expr.IsNotNull[Row, _] | Expr.In[Row, _] | Expr.Between[Row, _]) =>
         evalBoolean(
           boolExpr.asInstanceOf[Expr[Row, Boolean]],
           columns,
@@ -531,17 +822,28 @@ object ExprInterpreter {
           case _ => ColumnType.AnyType
         }
       case n: Expr.Named[_, _] => inferExprColumnType(n.expr, columns)
-      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Length[_] =>
+      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Length[_] | _: Expr.Mod[_] |
+          _: Expr.Abs[_] | _: Expr.Negate[_] =>
         ColumnType.IntType
-      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] =>
+      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] | _: Expr.ModLong[_] |
+          _: Expr.AbsLong[_] | _: Expr.NegateLong[_] | _: Expr.CastToLong[_] =>
         ColumnType.LongType
-      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] =>
+      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] |
+          _: Expr.AbsDouble[_] | _: Expr.NegateDouble[_] | _: Expr.Round[_] | _: Expr.Floor[_] | _: Expr.Ceil[_] |
+          _: Expr.CastToDouble[_] | _: Expr.CastLongToDouble[_] =>
         ColumnType.DoubleType
-      case _: Expr.Concat[_] => ColumnType.StringType
+      case _: Expr.Concat[_] | _: Expr.Lower[_] | _: Expr.Upper[_] | _: Expr.Trim[_] | _: Expr.LTrim[_] |
+          _: Expr.RTrim[_] | _: Expr.Substring[_] | _: Expr.StringReplace[_] | _: Expr.RegexpReplace[_] |
+          _: Expr.RegexpExtract[_] | _: Expr.ConcatWs[_] | _: Expr.CastToString[_, _] =>
+        ColumnType.StringType
+      case _: Expr.StringSplit[_] => ColumnType.AnyType
       case _: Expr.Gt[_, _] | _: Expr.Lt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
           _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] |
-          _: Expr.Like[_] =>
+          _: Expr.Like[_] | _: Expr.StartsWith[_] | _: Expr.EndsWith[_] | _: Expr.StringContains[_] |
+          _: Expr.IsNull[_, _] | _: Expr.IsNotNull[_, _] | _: Expr.In[_, _] | _: Expr.Between[_, _] =>
         ColumnType.BooleanType
+      case c: Expr.Coalesce[_, _] =>
+        c.exprs.headOption.map(e => inferExprColumnType(e, columns)).getOrElse(ColumnType.AnyType)
       case w: Expr.When[_, _] => inferExprColumnType(w.thenExpr, columns)
       case g: Expr.GetOrElse[_, _] => inferExprColumnType(g.expr, columns)
       case _: Expr.Sum[_] => ColumnType.IntType

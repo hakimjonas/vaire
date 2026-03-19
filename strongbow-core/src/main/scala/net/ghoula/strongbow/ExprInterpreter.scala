@@ -580,10 +580,11 @@ object ExprInterpreter {
         for {
           arr <- eval(ea.expr, columns, rowIdx)
           idx <- eval(ea.index, columns, rowIdx)
-        } yield {
-          val i = if (idx > 0) idx - 1 else arr.size + idx
-          arr(i)
-        }
+          resolved = if (idx > 0) idx - 1 else arr.size + idx
+          result <-
+            if (resolved >= 0 && resolved < arr.size) Right(arr(resolved))
+            else Left(ExecutionError.IndexOutOfBounds(resolved, arr.size))
+        } yield result
 
       case as: Expr.ArraySlice[Row, _] =>
         eval(as.expr, columns, rowIdx).map { arr =>
@@ -610,7 +611,10 @@ object ExprInterpreter {
         for {
           ks <- eval(mfa.keys, columns, rowIdx)
           vs <- eval(mfa.values, columns, rowIdx)
-        } yield ks.zip(vs).toMap
+          result <-
+            if (ks.size == vs.size) Right(ks.zip(vs).toMap)
+            else Left(ExecutionError.InvalidValue(s"MapFromArrays: keys length ${ks.size} != values length ${vs.size}"))
+        } yield result
 
       case mc: Expr.MapConcat[Row, _, _] =>
         for {

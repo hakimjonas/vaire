@@ -107,6 +107,24 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right(3)
   }
 
+  it should "return IndexOutOfBounds for positive index past end" in {
+    val expr = arrCell.elementAt(Expr.const(10))
+    val result = ExprInterpreter.eval(expr, arrColumns, RowIndex(0))
+    result.isLeft shouldBe true
+  }
+
+  it should "return IndexOutOfBounds for zero index" in {
+    val expr = arrCell.elementAt(Expr.const(0))
+    val result = ExprInterpreter.eval(expr, arrColumns, RowIndex(0))
+    result.isLeft shouldBe true
+  }
+
+  it should "return IndexOutOfBounds for negative index past start" in {
+    val expr = arrCell.elementAt(Expr.const(-10))
+    val result = ExprInterpreter.eval(expr, arrColumns, RowIndex(0))
+    result.isLeft shouldBe true
+  }
+
   "ArraySlice" should "return a sub-array" in {
     val expr = arrCell.arraySlice(1, 2)
     val result = ExprInterpreter.eval(expr, arrColumns, RowIndex(0))
@@ -163,6 +181,19 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val expr = Expr.mapFromArrays(keysCell, valsCell)
     val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
     result shouldBe Right(Map("a" -> 1, "b" -> 2, "c" -> 3))
+  }
+
+  it should "return error when key and value arrays have different lengths" in {
+    val keysData: Array[Any] = Array(Seq("a", "b"))
+    val valsData: Array[Any] = Array(Seq(1, 2, 3))
+    val keysCol = Column.any(keysData)
+    val valsCol = Column.any(valsData)
+    val columns = Vector(keysCol, valsCol)
+    val keysCell = Expr.Cell[Any, Seq[String]]("keys", ColumnIndex(0))
+    val valsCell = Expr.Cell[Any, Seq[Int]]("vals", ColumnIndex(1))
+    val expr = Expr.mapFromArrays(keysCell, valsCell)
+    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    result.isLeft shouldBe true
   }
 
   "MapConcat" should "merge two maps" in {

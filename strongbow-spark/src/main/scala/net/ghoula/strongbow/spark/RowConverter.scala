@@ -139,7 +139,7 @@ object RowConverter {
         }
         Column.date(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
 
-      case ColumnType.AnyType | ColumnType.OptionType(_) =>
+      case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         val data = new Array[Any](rowCount)
         val nulls = scala.collection.mutable.BitSet.empty
         var i = 0 // scalafix:ok DisableSyntax.var

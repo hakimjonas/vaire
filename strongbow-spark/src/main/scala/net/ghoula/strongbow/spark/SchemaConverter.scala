@@ -1,12 +1,14 @@
 package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.types.{
+  ArrayType => SparkArrayType,
   BooleanType => SparkBooleanType,
   DataType => SparkDataType,
   DateType => SparkDateType,
   DoubleType => SparkDoubleType,
   IntegerType => SparkIntegerType,
   LongType => SparkLongType,
+  MapType => SparkMapType,
   StringType => SparkStringType,
   StructField,
   StructType
@@ -39,6 +41,8 @@ object SchemaConverter {
     case ColumnType.BooleanType => SparkBooleanType
     case ColumnType.DateType => SparkDateType
     case ColumnType.OptionType(inner) => toSparkType(inner)
+    case ColumnType.ArrayType(elem) => SparkArrayType(toSparkType(elem), containsNull = true)
+    case ColumnType.MapType(key, value) => SparkMapType(toSparkType(key), toSparkType(value), valueContainsNull = true)
     case ColumnType.AnyType => SparkStringType // fallback
   }
 
@@ -50,6 +54,8 @@ object SchemaConverter {
     case SparkStringType => ColumnType.StringType
     case SparkBooleanType => ColumnType.BooleanType
     case SparkDateType => ColumnType.DateType
+    case at: SparkArrayType => ColumnType.ArrayType(fromSparkType(at.elementType))
+    case mt: SparkMapType => ColumnType.MapType(fromSparkType(mt.keyType), fromSparkType(mt.valueType))
     case _ => ColumnType.AnyType
   }
 }

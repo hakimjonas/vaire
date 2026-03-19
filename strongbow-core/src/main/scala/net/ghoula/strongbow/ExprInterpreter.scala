@@ -53,7 +53,7 @@ object ExprInterpreter {
                 Date
                   .ofEpochDay(column.getDateEpochDay(idx).toLong)
                   .asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.AnyType | ColumnType.OptionType(_) =>
+              case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
                 column.getValue(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
             }
             Right(value)
@@ -537,6 +537,87 @@ object ExprInterpreter {
           d <- eval(md.day, columns, rowIdx)
         } yield Date(y, m, d)
 
+      case as: Expr.ArraySize[Row, _] =>
+        eval(as.expr, columns, rowIdx).map(_.size)
+
+      case ac: Expr.ArrayContains[Row, _] =>
+        for {
+          arr <- eval(ac.expr, columns, rowIdx)
+          v <- eval(ac.value, columns, rowIdx)
+        } yield arr.contains(v)
+
+      case _: Expr.Explode[Row, _] =>
+        Left(ExecutionError.UnsupportedOperation("Explode requires Dataset-level handling"))
+
+      case asrt: Expr.ArraySort[Row, _] =>
+        eval(asrt.expr, columns, rowIdx).map(_.sorted(using asrt.ordering))
+
+      case ad: Expr.ArrayDistinct[Row, _] =>
+        eval(ad.expr, columns, rowIdx).map(_.distinct)
+
+      case au: Expr.ArrayUnion[Row, _] =>
+        for {
+          l <- eval(au.left, columns, rowIdx)
+          r <- eval(au.right, columns, rowIdx)
+        } yield (l ++ r).distinct
+
+      case ai: Expr.ArrayIntersect[Row, _] =>
+        for {
+          l <- eval(ai.left, columns, rowIdx)
+          r <- eval(ai.right, columns, rowIdx)
+        } yield l.intersect(r)
+
+      case ae: Expr.ArrayExcept[Row, _] =>
+        for {
+          l <- eval(ae.left, columns, rowIdx)
+          r <- eval(ae.right, columns, rowIdx)
+        } yield l.diff(r)
+
+      case fl: Expr.Flatten[Row, _] =>
+        eval(fl.expr, columns, rowIdx).map(_.flatten)
+
+      case ea: Expr.ElementAt[Row, _] =>
+        for {
+          arr <- eval(ea.expr, columns, rowIdx)
+          idx <- eval(ea.index, columns, rowIdx)
+        } yield {
+          val i = if (idx > 0) idx - 1 else arr.size + idx
+          arr(i)
+        }
+
+      case as: Expr.ArraySlice[Row, _] =>
+        eval(as.expr, columns, rowIdx).map { arr =>
+          val start = Math.max(as.start - 1, 0)
+          arr.slice(start, start + as.length)
+        }
+
+      case mk: Expr.MapKeys[Row, _, _] =>
+        eval(mk.expr, columns, rowIdx).map(_.keys.toSeq)
+
+      case mv: Expr.MapValues[Row, _, _] =>
+        eval(mv.expr, columns, rowIdx).map(_.values.toSeq)
+
+      case mck: Expr.MapContainsKey[Row, _, _] =>
+        for {
+          m <- eval(mck.expr, columns, rowIdx)
+          k <- eval(mck.key, columns, rowIdx)
+        } yield m.contains(k)
+
+      case me: Expr.MapEntries[Row, _, _] =>
+        eval(me.expr, columns, rowIdx).map(_.toSeq)
+
+      case mfa: Expr.MapFromArrays[Row, _, _] =>
+        for {
+          ks <- eval(mfa.keys, columns, rowIdx)
+          vs <- eval(mfa.values, columns, rowIdx)
+        } yield ks.zip(vs).toMap
+
+      case mc: Expr.MapConcat[Row, _, _] =>
+        for {
+          l <- eval(mc.left, columns, rowIdx)
+          r <- eval(mc.right, columns, rowIdx)
+        } yield l ++ r
+
       case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
           _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
           _: Expr.NthValue[Row, ?] | _: Expr.FirstValue[Row, ?] | _: Expr.LastValue[Row, ?] =>
@@ -655,6 +736,16 @@ object ExprInterpreter {
         val lo = evalAny(btw.lower, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
         val hi = evalAny(btw.upper, columns, rowIdx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
         btw.ordering.gteq(v, lo) && btw.ordering.lteq(v, hi)
+
+      case ac: Expr.ArrayContains[Row, _] =>
+        val arr = evalAny(ac.expr, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val v = evalAny(ac.value, columns, rowIdx)
+        arr.contains(v)
+
+      case mck: Expr.MapContainsKey[Row, _, _] =>
+        val m = evalAny(mck.expr, columns, rowIdx).asInstanceOf[Map[Any, Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val k = evalAny(mck.key, columns, rowIdx)
+        m.contains(k)
     }
   }
 
@@ -679,7 +770,8 @@ object ExprInterpreter {
           case ColumnType.StringType => column.getString(idx)
           case ColumnType.BooleanType => column.getBoolean(idx)
           case ColumnType.DateType => Date.ofEpochDay(column.getDateEpochDay(idx).toLong)
-          case ColumnType.AnyType | ColumnType.OptionType(_) => column.getValue(idx)
+          case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
+            column.getValue(idx)
         }
 
       case add: Expr.Add[Row] =>
@@ -869,7 +961,8 @@ object ExprInterpreter {
       case boolExpr: (Expr.Gt[Row, _] | Expr.Lt[Row, _] | Expr.Gte[Row, _] | Expr.Lte[Row, _] | Expr.Eq[Row, _] |
             Expr.Neq[Row, _] | Expr.And[Row] | Expr.Or[Row] | Expr.Not[Row] | Expr.IsDefined[Row, _] | Expr.Like[Row] |
             Expr.StartsWith[Row] | Expr.EndsWith[Row] | Expr.StringContains[Row] | Expr.IsNull[Row, _] |
-            Expr.IsNotNull[Row, _] | Expr.In[Row, _] | Expr.Between[Row, _]) =>
+            Expr.IsNotNull[Row, _] | Expr.In[Row, _] | Expr.Between[Row, _] | Expr.ArrayContains[Row, _] |
+            Expr.MapContainsKey[Row, _, _]) =>
         evalBoolean(
           boolExpr.asInstanceOf[Expr[Row, Boolean]],
           columns,
@@ -1035,6 +1128,82 @@ object ExprInterpreter {
         val m = evalAny(md.month, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         val day = evalAny(md.day, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
         Date(y, m, day)
+
+      case as: Expr.ArraySize[Row, _] =>
+        evalAny(as.expr, columns, rowIdx).asInstanceOf[Seq[Any]].size // scalafix:ok DisableSyntax.asInstanceOf
+
+      case ac: Expr.ArrayContains[Row, _] =>
+        val arr = evalAny(ac.expr, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val v = evalAny(ac.value, columns, rowIdx)
+        arr.contains(v)
+
+      case ad: Expr.ArrayDistinct[Row, _] =>
+        evalAny(ad.expr, columns, rowIdx).asInstanceOf[Seq[Any]].distinct // scalafix:ok DisableSyntax.asInstanceOf
+
+      case au: Expr.ArrayUnion[Row, _] =>
+        val l = evalAny(au.left, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(au.right, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        (l ++ r).distinct
+
+      case ai: Expr.ArrayIntersect[Row, _] =>
+        val l = evalAny(ai.left, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(ai.right, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        l.intersect(r)
+
+      case ae: Expr.ArrayExcept[Row, _] =>
+        val l = evalAny(ae.left, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(ae.right, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        l.diff(r)
+
+      case fl: Expr.Flatten[Row, _] =>
+        evalAny(fl.expr, columns, rowIdx)
+          .asInstanceOf[Seq[Seq[Any]]]
+          .flatten // scalafix:ok DisableSyntax.asInstanceOf
+
+      case ea: Expr.ElementAt[Row, _] =>
+        val arr = evalAny(ea.expr, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val idx = evalAny(ea.index, columns, rowIdx).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+        val i = if (idx > 0) idx - 1 else arr.size + idx
+        arr(i)
+
+      case as: Expr.ArraySlice[Row, _] =>
+        val arr = evalAny(as.expr, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val start = Math.max(as.start - 1, 0)
+        arr.slice(start, start + as.length)
+
+      case asrt: Expr.ArraySort[Row, a] =>
+        val arr = evalAny(asrt.expr, columns, rowIdx).asInstanceOf[Seq[a]] // scalafix:ok DisableSyntax.asInstanceOf
+        arr.sorted(using asrt.ordering)
+
+      case mk: Expr.MapKeys[Row, _, _] =>
+        evalAny(mk.expr, columns, rowIdx)
+          .asInstanceOf[Map[Any, Any]]
+          .keys
+          .toSeq // scalafix:ok DisableSyntax.asInstanceOf
+
+      case mv: Expr.MapValues[Row, _, _] =>
+        evalAny(mv.expr, columns, rowIdx)
+          .asInstanceOf[Map[Any, Any]]
+          .values
+          .toSeq // scalafix:ok DisableSyntax.asInstanceOf
+
+      case mck: Expr.MapContainsKey[Row, _, _] =>
+        val m = evalAny(mck.expr, columns, rowIdx).asInstanceOf[Map[Any, Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val k = evalAny(mck.key, columns, rowIdx)
+        m.contains(k)
+
+      case me: Expr.MapEntries[Row, _, _] =>
+        evalAny(me.expr, columns, rowIdx).asInstanceOf[Map[Any, Any]].toSeq // scalafix:ok DisableSyntax.asInstanceOf
+
+      case mfa: Expr.MapFromArrays[Row, _, _] =>
+        val ks = evalAny(mfa.keys, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val vs = evalAny(mfa.values, columns, rowIdx).asInstanceOf[Seq[Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        ks.zip(vs).toMap
+
+      case mc: Expr.MapConcat[Row, _, _] =>
+        val l = evalAny(mc.left, columns, rowIdx).asInstanceOf[Map[Any, Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        val r = evalAny(mc.right, columns, rowIdx).asInstanceOf[Map[Any, Any]] // scalafix:ok DisableSyntax.asInstanceOf
+        l ++ r
     }
   }
 
@@ -1110,6 +1279,14 @@ object ExprInterpreter {
       case _: Expr.NTile[_] => ColumnType.IntType
       case _: Expr.CumeDist[_] | _: Expr.PercentRank[_] => ColumnType.DoubleType
       case _: Expr.NthValue[_, _] | _: Expr.FirstValue[_, _] | _: Expr.LastValue[_, _] => ColumnType.AnyType
+      case _: Expr.ArraySize[_, _] => ColumnType.IntType
+      case _: Expr.ArrayContains[_, _] | _: Expr.MapContainsKey[_, _, _] => ColumnType.BooleanType
+      case _: Expr.Explode[_, _] | _: Expr.ElementAt[_, _] => ColumnType.AnyType
+      case _: Expr.ArraySort[_, _] | _: Expr.ArrayDistinct[_, _] | _: Expr.ArrayUnion[_, _] |
+          _: Expr.ArrayIntersect[_, _] | _: Expr.ArrayExcept[_, _] | _: Expr.Flatten[_, _] | _: Expr.ArraySlice[_, _] |
+          _: Expr.MapKeys[_, _, _] | _: Expr.MapValues[_, _, _] | _: Expr.MapEntries[_, _, _] =>
+        ColumnType.AnyType
+      case _: Expr.MapFromArrays[_, _, _] | _: Expr.MapConcat[_, _, _] => ColumnType.AnyType
     }
   }
 

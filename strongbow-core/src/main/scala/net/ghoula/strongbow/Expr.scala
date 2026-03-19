@@ -109,7 +109,6 @@ enum Expr[Row, +A] {
   case Collect[Row, A](expr: Expr[Row, A]) extends Expr[Row, Seq[A]]
   case Option2Iterable[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Iterable[A]]
 
-
   case PercentileApprox[Row](expr: Expr[Row, Double], percentile: Double, accuracy: Int) extends Expr[Row, Double]
   case MaxBy[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], ordering: Ordering[K])
       extends Expr[Row, Option[A]]
@@ -122,7 +121,6 @@ enum Expr[Row, +A] {
   case MinByN[Row, A, K](valueExpr: Expr[Row, A], orderExpr: Expr[Row, K], n: Int, ordering: Ordering[K])
       extends Expr[Row, Seq[A]]
 
-
   case DateAddDays[Row](date: Expr[Row, Date], days: Expr[Row, Int]) extends Expr[Row, Date]
   case DateSubDays[Row](date: Expr[Row, Date], days: Expr[Row, Int]) extends Expr[Row, Date]
   case DateAddMonths[Row](date: Expr[Row, Date], months: Expr[Row, Int]) extends Expr[Row, Date]
@@ -130,7 +128,6 @@ enum Expr[Row, +A] {
   case ExtractYear[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
   case ExtractMonth[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
   case ExtractDay[Row](date: Expr[Row, Date]) extends Expr[Row, Int]
-
 
   case RowNumber[Row]() extends Expr[Row, Int]
   case Rank[Row]() extends Expr[Row, Int]
@@ -185,6 +182,25 @@ enum Expr[Row, +A] {
   case NthValue[Row, A](expr: Expr[Row, A], n: Int) extends Expr[Row, A]
   case FirstValue[Row, A](expr: Expr[Row, A]) extends Expr[Row, A]
   case LastValue[Row, A](expr: Expr[Row, A]) extends Expr[Row, A]
+
+  case ArraySize[Row, A](expr: Expr[Row, Seq[A]]) extends Expr[Row, Int]
+  case ArrayContains[Row, A](expr: Expr[Row, Seq[A]], value: Expr[Row, A]) extends Expr[Row, Boolean]
+  case Explode[Row, A](expr: Expr[Row, Seq[A]]) extends Expr[Row, A]
+  case ArraySort[Row, A](expr: Expr[Row, Seq[A]], ordering: Ordering[A]) extends Expr[Row, Seq[A]]
+  case ArrayDistinct[Row, A](expr: Expr[Row, Seq[A]]) extends Expr[Row, Seq[A]]
+  case ArrayUnion[Row, A](left: Expr[Row, Seq[A]], right: Expr[Row, Seq[A]]) extends Expr[Row, Seq[A]]
+  case ArrayIntersect[Row, A](left: Expr[Row, Seq[A]], right: Expr[Row, Seq[A]]) extends Expr[Row, Seq[A]]
+  case ArrayExcept[Row, A](left: Expr[Row, Seq[A]], right: Expr[Row, Seq[A]]) extends Expr[Row, Seq[A]]
+  case Flatten[Row, A](expr: Expr[Row, Seq[Seq[A]]]) extends Expr[Row, Seq[A]]
+  case ElementAt[Row, A](expr: Expr[Row, Seq[A]], index: Expr[Row, Int]) extends Expr[Row, A]
+  case ArraySlice[Row, A](expr: Expr[Row, Seq[A]], start: Int, length: Int) extends Expr[Row, Seq[A]]
+
+  case MapKeys[Row, K, V](expr: Expr[Row, Map[K, V]]) extends Expr[Row, Seq[K]]
+  case MapValues[Row, K, V](expr: Expr[Row, Map[K, V]]) extends Expr[Row, Seq[V]]
+  case MapContainsKey[Row, K, V](expr: Expr[Row, Map[K, V]], key: Expr[Row, K]) extends Expr[Row, Boolean]
+  case MapEntries[Row, K, V](expr: Expr[Row, Map[K, V]]) extends Expr[Row, Seq[(K, V)]]
+  case MapFromArrays[Row, K, V](keys: Expr[Row, Seq[K]], values: Expr[Row, Seq[V]]) extends Expr[Row, Map[K, V]]
+  case MapConcat[Row, K, V](left: Expr[Row, Map[K, V]], right: Expr[Row, Map[K, V]]) extends Expr[Row, Map[K, V]]
 }
 
 object Expr {
@@ -532,6 +548,34 @@ object Expr {
     inline def dateFormat(format: String): Expr[Row, String] = DateFormat(d, format)
   }
 
+  extension [Row, A](e: Expr[Row, Seq[A]]) {
+    inline def arraySize: Expr[Row, Int] = ArraySize(e)
+    inline def arrayContains(value: Expr[Row, A]): Expr[Row, Boolean] = ArrayContains(e, value)
+    inline def explode: Expr[Row, A] = Explode(e)
+    inline def arraySort(using ordering: Ordering[A]): Expr[Row, Seq[A]] = ArraySort(e, ordering)
+    inline def arrayDistinct: Expr[Row, Seq[A]] = ArrayDistinct(e)
+    inline def arrayUnion(other: Expr[Row, Seq[A]]): Expr[Row, Seq[A]] = ArrayUnion(e, other)
+    inline def arrayIntersect(other: Expr[Row, Seq[A]]): Expr[Row, Seq[A]] = ArrayIntersect(e, other)
+    inline def arrayExcept(other: Expr[Row, Seq[A]]): Expr[Row, Seq[A]] = ArrayExcept(e, other)
+    inline def elementAt(index: Expr[Row, Int]): Expr[Row, A] = ElementAt(e, index)
+    inline def arraySlice(start: Int, length: Int): Expr[Row, Seq[A]] = ArraySlice(e, start, length)
+  }
+
+  extension [Row, A](e: Expr[Row, Seq[Seq[A]]]) {
+    inline def flatten: Expr[Row, Seq[A]] = Flatten(e)
+  }
+
+  extension [Row, K, V](e: Expr[Row, Map[K, V]]) {
+    inline def mapKeys: Expr[Row, Seq[K]] = MapKeys(e)
+    inline def mapValues: Expr[Row, Seq[V]] = MapValues(e)
+    inline def mapContainsKey(key: Expr[Row, K]): Expr[Row, Boolean] = MapContainsKey(e, key)
+    inline def mapEntries: Expr[Row, Seq[(K, V)]] = MapEntries(e)
+    inline def mapConcat(other: Expr[Row, Map[K, V]]): Expr[Row, Map[K, V]] = MapConcat(e, other)
+  }
+
+  def mapFromArrays[Row, K, V](keys: Expr[Row, Seq[K]], values: Expr[Row, Seq[V]]): Expr[Row, Map[K, V]] =
+    MapFromArrays(keys, values)
+
   /** Infer the output ColumnType of an expression, if statically known. */
   extension [Row, A](expr: Expr[Row, A]) {
     def outputType: Option[ColumnType] = (expr: @unchecked) match {
@@ -600,6 +644,14 @@ object Expr {
       case _: Expr.NTile[_] => Some(ColumnType.IntType)
       case _: Expr.CumeDist[_] | _: Expr.PercentRank[_] => Some(ColumnType.DoubleType)
       case _: Expr.NthValue[_, _] | _: Expr.FirstValue[_, _] | _: Expr.LastValue[_, _] => None
+      case _: Expr.ArraySize[_, _] => Some(ColumnType.IntType)
+      case _: Expr.ArrayContains[_, _] | _: Expr.MapContainsKey[_, _, _] => Some(ColumnType.BooleanType)
+      case _: Expr.Explode[_, _] | _: Expr.ElementAt[_, _] => None
+      case _: Expr.ArraySort[_, _] | _: Expr.ArrayDistinct[_, _] | _: Expr.ArrayUnion[_, _] |
+          _: Expr.ArrayIntersect[_, _] | _: Expr.ArrayExcept[_, _] | _: Expr.Flatten[_, _] | _: Expr.ArraySlice[_, _] |
+          _: Expr.MapKeys[_, _, _] | _: Expr.MapValues[_, _, _] | _: Expr.MapEntries[_, _, _] =>
+        Some(ColumnType.AnyType)
+      case _: Expr.MapFromArrays[_, _, _] | _: Expr.MapConcat[_, _, _] => Some(ColumnType.AnyType)
     }
   }
 }

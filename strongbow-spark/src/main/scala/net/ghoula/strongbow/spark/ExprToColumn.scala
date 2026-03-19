@@ -651,6 +651,83 @@ object ExprToColumn {
 
       case lv: Expr.LastValue[Row, _] =>
         convert(lv.expr).map { case (sparkCol, ct) => (last_value(sparkCol), ct) }
+
+      case as: Expr.ArraySize[Row, _] =>
+        convert(as.expr).map { case (sparkCol, _) => (size(sparkCol), ColumnType.IntType) }
+
+      case ac: Expr.ArrayContains[Row, _] =>
+        for {
+          (arrCol, _) <- convert(ac.expr)
+          (valCol, _) <- convert(ac.value)
+        } yield (array_contains(arrCol, valCol), ColumnType.BooleanType)
+
+      case ex: Expr.Explode[Row, _] =>
+        convert(ex.expr).map { case (sparkCol, _) => (explode(sparkCol), ColumnType.AnyType) }
+
+      case asrt: Expr.ArraySort[Row, _] =>
+        convert(asrt.expr).map { case (sparkCol, _) => (sort_array(sparkCol), ColumnType.AnyType) }
+
+      case ad: Expr.ArrayDistinct[Row, _] =>
+        convert(ad.expr).map { case (sparkCol, _) => (array_distinct(sparkCol), ColumnType.AnyType) }
+
+      case au: Expr.ArrayUnion[Row, _] =>
+        for {
+          (l, _) <- convert(au.left)
+          (r, _) <- convert(au.right)
+        } yield (array_union(l, r), ColumnType.AnyType)
+
+      case ai: Expr.ArrayIntersect[Row, _] =>
+        for {
+          (l, _) <- convert(ai.left)
+          (r, _) <- convert(ai.right)
+        } yield (array_intersect(l, r), ColumnType.AnyType)
+
+      case ae: Expr.ArrayExcept[Row, _] =>
+        for {
+          (l, _) <- convert(ae.left)
+          (r, _) <- convert(ae.right)
+        } yield (array_except(l, r), ColumnType.AnyType)
+
+      case fl: Expr.Flatten[Row, _] =>
+        convert(fl.expr).map { case (sparkCol, _) => (flatten(sparkCol), ColumnType.AnyType) }
+
+      case ea: Expr.ElementAt[Row, _] =>
+        for {
+          (arrCol, _) <- convert(ea.expr)
+          (idxCol, _) <- convert(ea.index)
+        } yield (element_at(arrCol, idxCol), ColumnType.AnyType)
+
+      case as: Expr.ArraySlice[Row, _] =>
+        convert(as.expr).map { case (sparkCol, _) =>
+          (slice(sparkCol, as.start, as.length), ColumnType.AnyType)
+        }
+
+      case mk: Expr.MapKeys[Row, _, _] =>
+        convert(mk.expr).map { case (sparkCol, _) => (map_keys(sparkCol), ColumnType.AnyType) }
+
+      case mv: Expr.MapValues[Row, _, _] =>
+        convert(mv.expr).map { case (sparkCol, _) => (map_values(sparkCol), ColumnType.AnyType) }
+
+      case mck: Expr.MapContainsKey[Row, _, _] =>
+        for {
+          (mapCol, _) <- convert(mck.expr)
+          (keyCol, _) <- convert(mck.key)
+        } yield (array_contains(map_keys(mapCol), keyCol), ColumnType.BooleanType)
+
+      case me: Expr.MapEntries[Row, _, _] =>
+        convert(me.expr).map { case (sparkCol, _) => (map_entries(sparkCol), ColumnType.AnyType) }
+
+      case mfa: Expr.MapFromArrays[Row, _, _] =>
+        for {
+          (keysCol, _) <- convert(mfa.keys)
+          (valsCol, _) <- convert(mfa.values)
+        } yield (map_from_arrays(keysCol, valsCol), ColumnType.AnyType)
+
+      case mc: Expr.MapConcat[Row, _, _] =>
+        for {
+          (l, _) <- convert(mc.left)
+          (r, _) <- convert(mc.right)
+        } yield (map_concat(l, r), ColumnType.AnyType)
     }
   }
 

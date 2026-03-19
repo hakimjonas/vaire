@@ -337,6 +337,8 @@ object Column {
     case ColumnType.DateType => DateColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.AnyType => AnyColumn(Array.empty[Any], BitSet.empty)
     case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any], BitSet.empty)
+    case ColumnType.ArrayType(_) => AnyColumn(Array.empty[Any], BitSet.empty)
+    case ColumnType.MapType(_, _) => AnyColumn(Array.empty[Any], BitSet.empty)
   }
 
   /** Create a column from a vector of values.
@@ -459,7 +461,7 @@ object Column {
 
         result.map(builder => DateColumn(builder.result().toArray, nullIndices))
 
-      case ColumnType.AnyType | ColumnType.OptionType(_) =>
+      case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         Right(AnyColumn(values.toArray, nullIndices))
     }
   }

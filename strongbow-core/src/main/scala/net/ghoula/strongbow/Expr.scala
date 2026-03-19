@@ -201,6 +201,18 @@ enum Expr[Row, +A] {
   case MapEntries[Row, K, V](expr: Expr[Row, Map[K, V]]) extends Expr[Row, Seq[(K, V)]]
   case MapFromArrays[Row, K, V](keys: Expr[Row, Seq[K]], values: Expr[Row, Seq[V]]) extends Expr[Row, Map[K, V]]
   case MapConcat[Row, K, V](left: Expr[Row, Map[K, V]], right: Expr[Row, Map[K, V]]) extends Expr[Row, Map[K, V]]
+
+  case Md5[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Sha1[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Sha2[Row](expr: Expr[Row, String], bitLength: Int) extends Expr[Row, String]
+
+  case UrlEncode[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case UrlDecode[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Base64Encode[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Base64Decode[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Hex[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+
+  case GetJsonObject[Row](expr: Expr[Row, String], path: String) extends Expr[Row, String]
 }
 
 object Expr {
@@ -499,6 +511,15 @@ object Expr {
     inline def startsWith(prefix: Expr[Row, String]): Expr[Row, Boolean] = StartsWith(left, prefix)
     inline def endsWith(suffix: Expr[Row, String]): Expr[Row, Boolean] = EndsWith(left, suffix)
     inline def contains(substr: Expr[Row, String]): Expr[Row, Boolean] = StringContains(left, substr)
+    inline def md5: Expr[Row, String] = Md5(left)
+    inline def sha1: Expr[Row, String] = Sha1(left)
+    inline def sha2(bitLength: Int): Expr[Row, String] = Sha2(left, bitLength)
+    inline def urlEncode: Expr[Row, String] = UrlEncode(left)
+    inline def urlDecode: Expr[Row, String] = UrlDecode(left)
+    inline def base64Encode: Expr[Row, String] = Base64Encode(left)
+    inline def base64Decode: Expr[Row, String] = Base64Decode(left)
+    inline def hex: Expr[Row, String] = Hex(left)
+    inline def getJsonObject(path: String): Expr[Row, String] = GetJsonObject(left, path)
   }
 
   extension [Row, A](e: Expr[Row, Option[A]]) {
@@ -652,6 +673,9 @@ object Expr {
           _: Expr.MapKeys[_, _, _] | _: Expr.MapValues[_, _, _] | _: Expr.MapEntries[_, _, _] =>
         Some(ColumnType.AnyType)
       case _: Expr.MapFromArrays[_, _, _] | _: Expr.MapConcat[_, _, _] => Some(ColumnType.AnyType)
+      case _: Expr.Md5[_] | _: Expr.Sha1[_] | _: Expr.Sha2[_] | _: Expr.UrlEncode[_] | _: Expr.UrlDecode[_] |
+          _: Expr.Base64Encode[_] | _: Expr.Base64Decode[_] | _: Expr.Hex[_] | _: Expr.GetJsonObject[_] =>
+        Some(ColumnType.StringType)
     }
   }
 }

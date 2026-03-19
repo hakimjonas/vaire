@@ -728,6 +728,33 @@ object ExprToColumn {
           (l, _) <- convert(mc.left)
           (r, _) <- convert(mc.right)
         } yield (map_concat(l, r), ColumnType.AnyType)
+
+      case m: Expr.Md5[Row] =>
+        convert(m.expr).map { case (sparkCol, _) => (md5(sparkCol), ColumnType.StringType) }
+
+      case s: Expr.Sha1[Row] =>
+        convert(s.expr).map { case (sparkCol, _) => (sha1(sparkCol), ColumnType.StringType) }
+
+      case s2: Expr.Sha2[Row] =>
+        convert(s2.expr).map { case (sparkCol, _) => (sha2(sparkCol, s2.bitLength), ColumnType.StringType) }
+
+      case ue: Expr.UrlEncode[Row] =>
+        convert(ue.expr).map { case (sparkCol, _) => (url_encode(sparkCol), ColumnType.StringType) }
+
+      case ud: Expr.UrlDecode[Row] =>
+        convert(ud.expr).map { case (sparkCol, _) => (url_decode(sparkCol), ColumnType.StringType) }
+
+      case b64e: Expr.Base64Encode[Row] =>
+        convert(b64e.expr).map { case (sparkCol, _) => (base64(sparkCol), ColumnType.StringType) }
+
+      case b64d: Expr.Base64Decode[Row] =>
+        convert(b64d.expr).map { case (sparkCol, _) => (unbase64(sparkCol).cast("string"), ColumnType.StringType) }
+
+      case hx: Expr.Hex[Row] =>
+        convert(hx.expr).map { case (sparkCol, _) => (hex(sparkCol), ColumnType.StringType) }
+
+      case gjo: Expr.GetJsonObject[Row] =>
+        convert(gjo.expr).map { case (sparkCol, _) => (get_json_object(sparkCol, gjo.path), ColumnType.StringType) }
     }
   }
 

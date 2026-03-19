@@ -622,6 +622,40 @@ object ExprInterpreter {
           r <- eval(mc.right, columns, rowIdx)
         } yield l ++ r
 
+      case md: Expr.Md5[Row] =>
+        eval(md.expr, columns, rowIdx).map(s =>
+          hexEncode(java.security.MessageDigest.getInstance("MD5").nn.digest(s.getBytes("UTF-8")).nn)
+        )
+
+      case sh: Expr.Sha1[Row] =>
+        eval(sh.expr, columns, rowIdx).map(s =>
+          hexEncode(java.security.MessageDigest.getInstance("SHA-1").nn.digest(s.getBytes("UTF-8")).nn)
+        )
+
+      case sh2: Expr.Sha2[Row] =>
+        eval(sh2.expr, columns, rowIdx).map { s =>
+          val algo = sha2Algorithm(sh2.bitLength)
+          hexEncode(java.security.MessageDigest.getInstance(algo).nn.digest(s.getBytes("UTF-8")).nn)
+        }
+
+      case ue: Expr.UrlEncode[Row] =>
+        eval(ue.expr, columns, rowIdx).map(s => java.net.URLEncoder.encode(s, "UTF-8").nn)
+
+      case ud: Expr.UrlDecode[Row] =>
+        eval(ud.expr, columns, rowIdx).map(s => java.net.URLDecoder.decode(s, "UTF-8").nn)
+
+      case b64e: Expr.Base64Encode[Row] =>
+        eval(b64e.expr, columns, rowIdx).map(s => java.util.Base64.getEncoder.nn.encodeToString(s.getBytes("UTF-8")).nn)
+
+      case b64d: Expr.Base64Decode[Row] =>
+        eval(b64d.expr, columns, rowIdx).map(s => new String(java.util.Base64.getDecoder.nn.decode(s), "UTF-8"))
+
+      case hx: Expr.Hex[Row] =>
+        eval(hx.expr, columns, rowIdx).map(s => hexEncode(s.getBytes("UTF-8")))
+
+      case _: Expr.GetJsonObject[Row] =>
+        Left(ExecutionError.UnsupportedOperation("GetJsonObject requires strongbow-io module"))
+
       case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
           _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
           _: Expr.NthValue[Row, ?] | _: Expr.FirstValue[Row, ?] | _: Expr.LastValue[Row, ?] =>
@@ -1208,6 +1242,44 @@ object ExprInterpreter {
         val l = evalAny(mc.left, columns, rowIdx).asInstanceOf[Map[Any, Any]] // scalafix:ok DisableSyntax.asInstanceOf
         val r = evalAny(mc.right, columns, rowIdx).asInstanceOf[Map[Any, Any]] // scalafix:ok DisableSyntax.asInstanceOf
         l ++ r
+
+      case md: Expr.Md5[Row] =>
+        val s = evalAny(md.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        hexEncode(java.security.MessageDigest.getInstance("MD5").nn.digest(s.getBytes("UTF-8")).nn)
+
+      case sh: Expr.Sha1[Row] =>
+        val s = evalAny(sh.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        hexEncode(java.security.MessageDigest.getInstance("SHA-1").nn.digest(s.getBytes("UTF-8")).nn)
+
+      case sh2: Expr.Sha2[Row] =>
+        val s = evalAny(sh2.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        val algo = sha2Algorithm(sh2.bitLength)
+        hexEncode(java.security.MessageDigest.getInstance(algo).nn.digest(s.getBytes("UTF-8")).nn)
+
+      case ue: Expr.UrlEncode[Row] =>
+        val s = evalAny(ue.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        java.net.URLEncoder.encode(s, "UTF-8").nn
+
+      case ud: Expr.UrlDecode[Row] =>
+        val s = evalAny(ud.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        java.net.URLDecoder.decode(s, "UTF-8").nn
+
+      case b64e: Expr.Base64Encode[Row] =>
+        val s = evalAny(b64e.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        java.util.Base64.getEncoder.nn.encodeToString(s.getBytes("UTF-8")).nn
+
+      case b64d: Expr.Base64Decode[Row] =>
+        val s = evalAny(b64d.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        new String(java.util.Base64.getDecoder.nn.decode(s), "UTF-8")
+
+      case hx: Expr.Hex[Row] =>
+        val s = evalAny(hx.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        hexEncode(s.getBytes("UTF-8"))
+
+      case _: Expr.GetJsonObject[Row] =>
+        throw new UnsupportedOperationException(
+          "GetJsonObject requires strongbow-io module"
+        ) // scalafix:ok DisableSyntax.throw
     }
   }
 
@@ -1291,6 +1363,9 @@ object ExprInterpreter {
           _: Expr.MapKeys[_, _, _] | _: Expr.MapValues[_, _, _] | _: Expr.MapEntries[_, _, _] =>
         ColumnType.AnyType
       case _: Expr.MapFromArrays[_, _, _] | _: Expr.MapConcat[_, _, _] => ColumnType.AnyType
+      case _: Expr.Md5[_] | _: Expr.Sha1[_] | _: Expr.Sha2[_] | _: Expr.UrlEncode[_] | _: Expr.UrlDecode[_] |
+          _: Expr.Base64Encode[_] | _: Expr.Base64Decode[_] | _: Expr.Hex[_] | _: Expr.GetJsonObject[_] =>
+        ColumnType.StringType
     }
   }
 
@@ -1924,6 +1999,17 @@ object ExprInterpreter {
           Right(sorted.take(mbn.n).map(_._1).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
       }
     }
+  }
+
+  private def hexEncode(bytes: Array[Byte]): String =
+    bytes.map(b => String.format("%02x", b)).mkString
+
+  private def sha2Algorithm(bitLength: Int): String = bitLength match {
+    case 0 | 256 => "SHA-256"
+    case 224 => "SHA-224"
+    case 384 => "SHA-384"
+    case 512 => "SHA-512"
+    case _ => "SHA-256"
   }
 
   /** Convert a SQL LIKE pattern to a regex. `%` → `.*`, `_` → `.`, others escaped. */

@@ -94,7 +94,6 @@ enum Dataset[+T] {
   // Spark-only repartitioning (in-memory no-op)
   case Rebalance[T](parent: Dataset[T], numPartitions: Option[Int]) extends Dataset[T]
 
-  // Phase 1: Distributed GROUP BY with vector-based keys and aggregations
   case GroupByAgg[In, Out](
     parent: Dataset[In],
     keySpecs: Vector[KeySpec[In]],
@@ -102,13 +101,11 @@ enum Dataset[+T] {
     schema: Schema[Out]
   ) extends Dataset[Out]
 
-  // Phase 2: Multi-column ORDER BY
   case SortByExprs[T](
     parent: Dataset[T],
     sortKeys: Vector[SortSpec[T]]
   ) extends Dataset[T]
 
-  // Phase 4: Left semi-join for IN/EXISTS subqueries
   case LeftSemiJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -118,7 +115,6 @@ enum Dataset[+T] {
     rightKeyType: ColumnType
   ) extends Dataset[A]
 
-  // Phase 5: Window functions — appends window columns to parent
   case WithWindow[In, Out](
     parent: Dataset[In],
     windowExprs: Vector[WindowExprSpec[In]],

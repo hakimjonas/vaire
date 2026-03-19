@@ -753,7 +753,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  // Phase 1: GROUP BY + Aggregate
   private def groupByAgg[In, Out](
     dataset: MaterializedDataset[In],
     keySpecs: Vector[KeySpec[In]],
@@ -816,7 +815,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  // Phase 2: Multi-column ORDER BY
   private def sortByExprs[T](
     dataset: MaterializedDataset[T],
     sortKeys: Vector[SortSpec[T]]
@@ -901,7 +899,6 @@ object DatasetInterpreter extends Interpreter {
           )
     }
 
-  // Phase 4: Left semi-join
   private def leftSemiJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -928,7 +925,6 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  // Phase 5: Window functions
   private def withWindow[In, Out](
     dataset: MaterializedDataset[In],
     windowExprs: Vector[WindowExprSpec[In]],

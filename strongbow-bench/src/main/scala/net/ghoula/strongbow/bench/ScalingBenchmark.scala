@@ -10,7 +10,7 @@ import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.WindowSpec
 import net.ghoula.strongbow.types.ColumnIndex
 
-/** Multi-scale benchmarks to find where Longbow's advantages matter.
+/** Multi-scale benchmarks for Strongbow columnar evaluation.
   *
   * Tests at realistic single-machine scales:
   *   - 100K rows: 10x current baseline
@@ -515,10 +515,10 @@ object ScalingBenchmark {
   }
 
   def main(args: Array[String]): Unit = {
-    println("Longbow Scaling Benchmark")
+    println("Strongbow Scaling Benchmark")
     println("=".repeat(80))
     println("Testing at multiple scales:")
-    println("  - 10K rows: Crossbow comparison baseline")
+    println("  - 10K rows: baseline")
     println("  - 100K rows: 10x")
     println("  - 200K rows: 20x")
     println("  - 400K rows: 40x")
@@ -528,7 +528,6 @@ object ScalingBenchmark {
 
     val allResults = scala.collection.mutable.ArrayBuffer[ScaleResult]()
 
-    // 10K rows (Crossbow comparison)
     allResults ++= benchmarkScale(10000, 100)
 
     // 100K rows

@@ -4,6 +4,12 @@ ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
+val forgejoHost = sys.env.getOrElse("FORGEJO_HOST", "localhost")
+val forgejoUrl = s"http://$forgejoHost:3000"
+ThisBuild / resolvers ++= Seq(
+  ("local-forgejo" at s"$forgejoUrl/api/packages/hakim/maven").withAllowInsecureProtocol(true)
+)
+
 // Java 25
 ThisBuild / javacOptions ++= Seq("--release", "25")
 
@@ -23,7 +29,8 @@ lazy val testScalacOptions = Seq(
 
 // Dependencies
 val valarVersion = "0.1.0-SNAPSHOT"
-val rumilVersion = "0.1.0-SNAPSHOT"
+val saratiVersion = "0.1.0+1-2ddf1386"
+val rumilVersion = "0.2.0+2-281247c0"
 val eruVersion = "0.1.0-SNAPSHOT"
 val sparkVersion = "4.1.1"
 
@@ -40,8 +47,9 @@ lazy val core = project
   .settings(
     name := "strongbow-core",
     scalacOptions ++= sharedScalacOptions,
-    // ⚡ ZERO dependencies—only Scala stdlib
     libraryDependencies ++= Seq(
+      "net.ghoula" %% "rumil-parsers" % rumilVersion,
+      "net.ghoula" %% "sarati" % saratiVersion,
       "org.scalatest" %% "scalatest" % "3.2.19" % Test,
       "org.scalacheck" %% "scalacheck" % "1.18.1" % Test
     )
@@ -124,18 +132,6 @@ lazy val spark = project
 //     scalacOptions ++= sharedScalacOptions,
 //     libraryDependencies ++= Seq(
 //       "net.ghoula" %% "valar-core" % valarVersion
-//     )
-//   )
-//
-// lazy val io = project
-//   .in(file("strongbow-io"))
-//   .dependsOn(core, columnar)
-//   .settings(
-//     name := "strongbow-io",
-//     scalacOptions ++= sharedScalacOptions,
-//     libraryDependencies ++= Seq(
-//       "net.ghoula" %% "rumil-core" % rumilVersion,
-//       "net.ghoula" %% "eru-core" % eruVersion
 //     )
 //   )
 //

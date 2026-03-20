@@ -1,5 +1,8 @@
 package net.ghoula.strongbow
 
+import net.ghoula.sarati.ast.json.JsonValue
+import parsers.json.{formatJson, parseJson}
+
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
 
@@ -653,8 +656,8 @@ object ExprInterpreter {
       case hx: Expr.Hex[Row] =>
         eval(hx.expr, columns, rowIdx).map(s => hexEncode(s.getBytes("UTF-8")))
 
-      case _: Expr.GetJsonObject[Row] =>
-        Left(ExecutionError.UnsupportedOperation("GetJsonObject requires strongbow-io module"))
+      case gjo: Expr.GetJsonObject[Row] =>
+        eval(gjo.expr, columns, rowIdx).flatMap(s => extractJsonPath(s, gjo.path))
 
       case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
           _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
@@ -1276,10 +1279,12 @@ object ExprInterpreter {
         val s = evalAny(hx.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
         hexEncode(s.getBytes("UTF-8"))
 
-      case _: Expr.GetJsonObject[Row] =>
-        throw new UnsupportedOperationException(
-          "GetJsonObject requires strongbow-io module"
-        ) // scalafix:ok DisableSyntax.throw
+      case gjo: Expr.GetJsonObject[Row] =>
+        val s = evalAny(gjo.expr, columns, rowIdx).asInstanceOf[String] // scalafix:ok DisableSyntax.asInstanceOf
+        extractJsonPath(s, gjo.path) match {
+          case Right(v) => v
+          case Left(_) => null // scalafix:ok DisableSyntax.null
+        }
     }
   }
 
@@ -2010,6 +2015,40 @@ object ExprInterpreter {
     case 384 => "SHA-384"
     case 512 => "SHA-512"
     case _ => "SHA-256"
+  }
+
+  private def extractJsonPath(jsonStr: String, path: String): Either[ExecutionError, String] = {
+    parseJson(jsonStr) match {
+      case parser.core.Result.Success(jsonValue, _) =>
+        walkJsonPath(jsonValue, parseJsonDotPath(path)) match {
+          case Some(JsonValue.Str(s)) => Right(s)
+          case Some(JsonValue.Null) =>
+            Right(null) // scalafix:ok DisableSyntax.null
+          case Some(JsonValue.Bool(b)) => Right(b.toString)
+          case Some(JsonValue.Number(n)) =>
+            Right(if (n == n.toLong.toDouble) n.toLong.toString else n.toString)
+          case Some(compound) => Right(formatJson(compound))
+          case None => Right(null) // scalafix:ok DisableSyntax.null
+        }
+      case _ =>
+        Left(ExecutionError.InvalidValue(s"Invalid JSON: ${jsonStr.take(100)}"))
+    }
+  }
+
+  private def parseJsonDotPath(path: String): List[String] = {
+    val stripped = if (path.startsWith("$.")) path.drop(2) else if (path.startsWith("$")) path.drop(1) else path
+    stripped.split('.').filter(_.nonEmpty).toList
+  }
+
+  private def walkJsonPath(value: JsonValue, segments: List[String]): Option[JsonValue] = {
+    segments match {
+      case Nil => Some(value)
+      case head :: tail =>
+        value match {
+          case JsonValue.Object(fields) => fields.get(head).flatMap(walkJsonPath(_, tail))
+          case _ => None
+        }
+    }
   }
 
   /** Convert a SQL LIKE pattern to a regex. `%` → `.*`, `_` → `.`, others escaped. */

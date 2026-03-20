@@ -3,7 +3,6 @@ package net.ghoula.strongbow
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
 
@@ -106,10 +105,47 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right("776f726c64")
   }
 
-  "GetJsonObject" should "return UnsupportedOperation" in {
-    val expr = cell.getJsonObject("$.key")
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
-    result shouldBe Left(ExecutionError.UnsupportedOperation("GetJsonObject requires strongbow-io module"))
+  "GetJsonObject" should "extract a top-level field" in {
+    val jsonData: Array[String] = Array("""{"name":"Alice","age":30}""", """{"name":"Bob"}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    ExprInterpreter.eval(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(0)) shouldBe Right("Alice")
+    ExprInterpreter.eval(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(1)) shouldBe Right("Bob")
+  }
+
+  it should "extract nested fields" in {
+    val jsonData: Array[String] = Array("""{"a":{"b":{"c":"deep"}}}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    ExprInterpreter.eval(jsonCell.getJsonObject("$.a.b.c"), jsonColumns, RowIndex(0)) shouldBe Right("deep")
+  }
+
+  it should "return numeric values as strings" in {
+    val jsonData: Array[String] = Array("""{"count":42,"price":9.99}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    ExprInterpreter.eval(jsonCell.getJsonObject("$.count"), jsonColumns, RowIndex(0)) shouldBe Right("42")
+    ExprInterpreter.eval(jsonCell.getJsonObject("$.price"), jsonColumns, RowIndex(0)) shouldBe Right("9.99")
+  }
+
+  it should "return null for missing path" in {
+    val jsonData: Array[String] = Array("""{"name":"Alice"}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    val result = ExprInterpreter.eval(jsonCell.getJsonObject("$.missing"), jsonColumns, RowIndex(0))
+    result shouldBe Right(null) // scalafix:ok DisableSyntax.null
+  }
+
+  it should "return error for invalid JSON" in {
+    val jsonData: Array[String] = Array("not json")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    ExprInterpreter.eval(jsonCell.getJsonObject("$.key"), jsonColumns, RowIndex(0)).isLeft shouldBe true
   }
 
   "outputType" should "return StringType for all Phase 4 expressions" in {

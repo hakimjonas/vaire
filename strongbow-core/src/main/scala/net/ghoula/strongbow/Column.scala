@@ -49,7 +49,12 @@ enum Column[+A] {
     case AnyColumn(_, nulls) => nulls.contains(index.toInt)
   }
 
-  /** Get value at index. Returns null if the value is null. */
+  /** Untyped single-value extraction for interop boundaries.
+    *
+    * Returns Any because Column[+A] in a heterogeneous Vector[Column[?]] erases the type parameter.
+    * For typed access, pattern match the Column variant directly to get the typed Array. Returns
+    * null for SQL NULL rows (BitSet is authoritative).
+    */
   inline def getValue(index: Int): Any = this match {
     case IntColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
     case LongColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null

@@ -1,56 +1,27 @@
 package net.ghoula.strongbow
 
-/** Unified public prelude for Longbow.
-  *
-  * Usage: import net.ghoula.strongbow.prelude.*
-  *
-  * This prelude re-exports the complete public surface so users get a single canonical import with
-  * no exposure of internal packages.
+/** Single canonical import for the Strongbow public API.
   *
   * @example
   *   {{{
   * import net.ghoula.strongbow.prelude.*
   *
-  * // All types available
   * val plan: Dataset[Int] = Dataset.fromColumns(cols, schema) match {
   *   case Right(ds) => ds.filter(Expr.cell("value", ColumnIndex(0)) > Expr.const(18))
   *   case Left(errors) => ???
   * }
-  *
-  * // Expression DSL
-  * val expr: Expr[Int, Boolean] =
-  *   Expr.cell("age", ColumnIndex(0)) > Expr.const(18)
   *   }}}
   */
 object prelude {
-  // Core types and companion objects
   export net.ghoula.strongbow.{Dataset, Expr, Column, ColumnType, Schema}
-
-  // Materialized result
   export net.ghoula.strongbow.MaterializedDataset
-
-  // Interpreters
   export net.ghoula.strongbow.{Interpreter, DatasetInterpreter, ExprInterpreter}
-
-  // Opaque types
   export net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
-
-  // Error types
   export net.ghoula.strongbow.errors.{SchemaError, DecodeError, ExecutionError, NonEmptyList}
-
-  // Action methods
   export net.ghoula.strongbow.DatasetActions.*
-
-  // Typed spec types for N-ary operations
   export net.ghoula.strongbow.specs.{SortSpec, KeySpec, AggSpec, WindowExprSpec}
-
-  // Debug/explain utilities
   export net.ghoula.strongbow.DatasetExplainer
-
-  // Compile-time expression macro
   export net.ghoula.strongbow.ExprMacro
-
-  // Aggregation builder helpers and extension
   export net.ghoula.strongbow.agg.AggBuilders as agg
   export net.ghoula.strongbow.agg.as
 }

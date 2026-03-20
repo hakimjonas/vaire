@@ -43,7 +43,7 @@ object SchemaConverter {
     case ColumnType.OptionType(inner) => toSparkType(inner)
     case ColumnType.ArrayType(elem) => SparkArrayType(toSparkType(elem), containsNull = true)
     case ColumnType.MapType(key, value) => SparkMapType(toSparkType(key), toSparkType(value), valueContainsNull = true)
-    case ColumnType.AnyType => SparkStringType // fallback
+    case ColumnType.AnyType => SparkStringType
   }
 
   /** Convert a Spark DataType to a Strongbow ColumnType. */

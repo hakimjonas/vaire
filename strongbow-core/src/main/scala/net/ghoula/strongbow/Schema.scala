@@ -169,7 +169,7 @@ object Schema {
 
   /** Schema for Option[A] - nullable columns with presence bit */
   given optionSchema[A](using inner: Schema[A]): Schema[Option[A]] with {
-    def columnCount: Int = inner.columnCount + 1 // Extra column for presence bit
+    def columnCount: Int = inner.columnCount + 1
 
     def columnNames: Vector[String] =
       Vector("_isDefined") ++ inner.columnNames.map("_value_" + _)

@@ -62,7 +62,6 @@ final case class MaterializedDataset[T](
     val newRows = toVectorUnsafe.map(f)
     val encodedRows = newRows.map(schemaU.encode)
 
-    // Transpose to get columns
     val newColumnsOrError = if (encodedRows.isEmpty) {
       Right(Vector.empty)
     } else {
@@ -82,13 +81,11 @@ final case class MaterializedDataset[T](
   def show(n: Int = 20): String = {
     val sb = new StringBuilder
 
-    // Header
     sb.append(schema.columnNames.mkString(" | "))
     sb.append("\n")
     sb.append("-" * (schema.columnNames.map(_.length).sum + (columnCount - 1) * 3))
     sb.append("\n")
 
-    // Rows
     val limit = math.min(n, rowCount)
     (0 until limit).foreach { rowIdx =>
       val values = columns.map(_.getValue(rowIdx))

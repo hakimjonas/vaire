@@ -87,10 +87,8 @@ enum Dataset[T] {
   case ZipWithIndex[T](parent: Dataset[T]) extends Dataset[(T, Long)]
   case ZipWithUniqueId[T](parent: Dataset[T]) extends Dataset[(T, Long)]
 
-
   case Persist[T](parent: Dataset[T]) extends Dataset[T]
   case Checkpoint[T](parent: Dataset[T]) extends Dataset[T]
-
 
   case Rebalance[T](parent: Dataset[T], numPartitions: Option[Int]) extends Dataset[T]
 
@@ -121,7 +119,6 @@ enum Dataset[T] {
     windowSpec: WindowSpec[In],
     schema: Schema[Out]
   ) extends Dataset[Out]
-
 
   case Aggregate[T, R](
     parent: Dataset[T],

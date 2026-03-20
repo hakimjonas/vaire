@@ -31,7 +31,6 @@ object ExprToColumn {
       case named: Expr.Named[Row, _] =>
         convert(named.expr).map { case (sparkCol, ct) => (sparkCol.as(named.name), ct) }
 
-
       case add: Expr.Add[Row] =>
         for {
           (l, _) <- convert(add.left)
@@ -55,7 +54,6 @@ object ExprToColumn {
           (l, _) <- convert(d.left)
           (r, _) <- convert(d.right)
         } yield ((l / r).cast("int"), ColumnType.IntType)
-
 
       case add: Expr.AddLong[Row] =>
         for {
@@ -81,7 +79,6 @@ object ExprToColumn {
           (r, _) <- convert(d.right)
         } yield ((l / r).cast("long"), ColumnType.LongType)
 
-
       case add: Expr.AddDouble[Row] =>
         for {
           (l, _) <- convert(add.left)
@@ -105,7 +102,6 @@ object ExprToColumn {
           (l, _) <- convert(d.left)
           (r, _) <- convert(d.right)
         } yield (l / r, ColumnType.DoubleType)
-
 
       case gt: Expr.Gt[Row, _] =>
         for {
@@ -143,7 +139,6 @@ object ExprToColumn {
           (r, _) <- convert(neq.right)
         } yield (l =!= r, ColumnType.BooleanType)
 
-
       case and: Expr.And[Row] =>
         for {
           (l, _) <- convert(and.left)
@@ -159,14 +154,12 @@ object ExprToColumn {
       case not: Expr.Not[Row] =>
         convert(not.expr).map { case (sparkCol, _) => (!sparkCol, ColumnType.BooleanType) }
 
-
       case w: Expr.When[Row, _] =>
         for {
           (cond, _) <- convert(w.condition)
           (thenCol, thenType) <- convert(w.thenExpr)
           (elseCol, _) <- convert(w.elseExpr)
         } yield (sparkWhen(cond, thenCol).otherwise(elseCol), thenType)
-
 
       case cat: Expr.Concat[Row] =>
         for {
@@ -177,7 +170,6 @@ object ExprToColumn {
       case len: Expr.Length[Row] =>
         convert(len.expr).map { case (sparkCol, _) => (length(sparkCol), ColumnType.IntType) }
 
-
       case isDef: Expr.IsDefined[Row, _] =>
         convert(isDef.expr).map { case (sparkCol, _) => (sparkCol.isNotNull, ColumnType.BooleanType) }
 
@@ -185,7 +177,6 @@ object ExprToColumn {
         for {
           (e, ct) <- convert(goe.expr)
         } yield (sparkWhen(e.isNull, toLit(goe.default)).otherwise(e), ct)
-
 
       case lk: Expr.Like[Row] =>
         convert(lk.expr).map { case (sparkCol, _) => (sparkCol.like(lk.pattern), ColumnType.BooleanType) }
@@ -339,7 +330,6 @@ object ExprToColumn {
       case cts: Expr.CastToString[Row, _] =>
         convert(cts.expr).map { case (sparkCol, _) => (sparkCol.cast("string"), ColumnType.StringType) }
 
-
       case s: Expr.Sum[Row] =>
         convert(s.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.IntType) }
 
@@ -385,7 +375,6 @@ object ExprToColumn {
         convert(opt2iter.expr).map { case (sparkCol, _) =>
           (sparkWhen(sparkCol.isNotNull, array(sparkCol)).otherwise(array()), ColumnType.AnyType)
         }
-
 
       case pct: Expr.PercentileApprox[Row] =>
         convert(pct.expr).map { case (sparkCol, _) =>
@@ -435,7 +424,6 @@ object ExprToColumn {
           val sliced = slice(sorted, 1, mbn.n)
           (transform(sliced, (x: SparkColumn) => x.getField("v")), ColumnType.AnyType)
         }
-
 
       case dad: Expr.DateAddDays[Row] =>
         for {

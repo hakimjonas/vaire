@@ -1690,15 +1690,11 @@ object ExprInterpreter {
 
   /** Evaluate aggregation expression over entire dataset.
     *
-    * Aggregations operate on all rows to produce a single value. GADT pattern matching refines the
-    * return type A for each case — e.g. matching Expr.Sum[Row] refines A to Int, so Right(total)
-    * where total: Int typechecks as Either[ExecutionError, A] without any cast.
-    *
-    * Fixed-type aggregations (Sum, Avg, StdDev, etc.) operate on typed columns directly via
-    * evalColumn for columnar performance. Generic aggregations (Max, Collect, etc.) use per-row
-    * eval to preserve GADT type evidence through the existential type parameter.
-    *
-    * Zero asInstanceOf — all type safety comes from GADT refinement.
+    * Aggregations operate on all rows to produce a single value. Returns Any because the result is
+    * consumed by DatasetInterpreter via Column.fromValues which takes Vector[Any]. The GADT type
+    * parameter A is used internally for typed column dispatch but erased at the return boundary.
+    * Fixed-type aggregations (Sum, Avg, StdDev) operate on typed columns via evalColumn. Generic
+    * aggregations (Max, Collect) use Column GADT pattern matching for typed access.
     */
   def evalAggregation[Row, A](
     expr: Expr[Row, A],

@@ -136,6 +136,12 @@ object ExprMacro {
     }
   }
 
+  /** Compile a .copy() lambda into a Vector of (name, Expr, ColumnType) triples.
+    *
+    * Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args)). This macro
+    * extracts the val bindings and copy call, resolves each argument through bindings, and emits
+    * Cell for unchanged fields or compiled Expr for replacement fields.
+    */
   private def compileCopyImpl[T: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
     f: QExpr[T => T]
   )(using q: Quotes): QExpr[Vector[(String, SExpr[T, Any], ColumnType)]] = {
@@ -147,14 +153,10 @@ object ExprMacro {
     val (paramName, body) = extractLambdaBody(term)
     val unwrapped = unwrapTerm(body)
 
-    // Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args))
-    // Extract the val bindings and the copy call
     val (valBindings, copyArgs) = unwrapped match {
-      // Simple direct copy (no default args needed — all fields provided)
       case Apply(Select(Ident(name), "copy"), argList) if name == paramName =>
         (Map.empty[String, Term], argList)
 
-      // Desugared copy with Block: vals for defaults/explicit args, then copy call
       case Block(stats, Apply(Select(Ident(name), "copy"), argList)) if name == paramName =>
         val bindings = stats.collect { case ValDef(vname, _, Some(rhs)) =>
           vname -> rhs
@@ -173,22 +175,18 @@ object ExprMacro {
       )
     }
 
-    // Resolve each copy argument through val bindings to find the actual expression
     def resolveArg(arg: Term): Term = arg match {
       case NamedArg(_, value) => resolveArg(value)
       case Ident(ref) => valBindings.getOrElse(ref, arg)
       case other => other
     }
 
-    // Check if a resolved expression is an unchanged field reference (default)
     def isDefault(resolved: Term, fieldName: String): Boolean = resolved match {
-      // Direct field access (t.fieldName) or copy$default$N accessor
       case Select(Ident(name), field) =>
         name == paramName && (field == fieldName || field.startsWith("copy$default$"))
       case _ => false
     }
 
-    // For each field, check if the argument is unchanged or a replacement
     val fieldExprs: List[QExpr[(String, SExpr[T, Any], ColumnType)]] =
       labels.zip(elemTypes).zipWithIndex.map { case ((fieldName, fieldTypeRepr), fieldIdx) =>
         val rawArg = copyArgs(fieldIdx)
@@ -198,16 +196,13 @@ object ExprMacro {
         val idxExpr = QExpr(colIdx)
 
         if (isDefault(resolved, fieldName)) {
-          // Unchanged field → emit Cell
           val ct = inferColumnTypeFromRepr(fieldTypeRepr)
           '{ ($nameExpr, SExpr.Cell[T, Any]($nameExpr, ColumnIndex($idxExpr)), $ct) }
         } else {
-          // Replacement expression → compile it based on field type
           compileFieldExprAny[T](resolved, paramName, labels, fieldTypeRepr, nameExpr)
         }
       }
 
-    // Build the Vector at compile time
     fieldExprs match {
       case Nil => '{ Vector.empty }
       case head :: Nil => '{ Vector($head) }

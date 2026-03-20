@@ -288,28 +288,88 @@ typed eval path — nulls are metadata, not values.
 For GetJsonObject, the result column's `nulls` BitSet marks missing paths.
 No `Right(null)` needed.
 
-## Expected Outcome
+## Status
 
-- `evalColumn` is the single evaluation path — columnar, typed, exhaustive
-- `evalAggregation` operates on typed columns directly
-- `eval`, `evalAny`, `evalBoolean`, `evalColumnRowByRow` deleted
-  (~1200+ lines removed)
-- Zero `asInstanceOf` for primitive column types
-- Small number of unavoidable casts for AnyColumn (custom types, collection
-  elements) — these are the true storage boundary, same category as Arrow's
-  untyped buffer access
-- Memory pressure dramatically reduced — primitive array allocations instead
-  of boxed Either allocations per row per expression node
-- All 356 tests pass (rewritten to use columnar evaluation)
-- `sbt prepare` clean
+### Phase 1: Make evalColumn Exhaustive — DONE
 
-## Verification
+evalColumn handles all 167 Expr cases as column transformations. Zero
+asInstanceOf. evalColumnRowByRow deleted. vectorizedComparison replaced
+with typedComparison (typed paths per primitive) + equalityComparison.
+
+### Phase 2: Rewrite evalAggregation — DONE
+
+Fixed-type aggregations (Sum, Avg, StdDev, Variance, Corr, etc.) operate
+on typed columns directly. Generic aggregations (Max, Min, First, Collect,
+etc.) use per-row eval with GADT type variable binding for type safety.
+Zero asInstanceOf in evalAggregation.
+
+### Phase 3: Delete evalAny + evalBoolean — NEXT
+
+Delete `evalAny` (~500 lines, 143 casts) and `evalBoolean` (~120 lines,
+24 casts). Update DatasetInterpreter.filter to use evalColumn with
+BooleanColumn mask. Keep `eval` — evalAggregation depends on it for 16
+generic aggregation cases. Target: 175 → 7 casts.
+
+### Phase 4: Update DatasetInterpreter — NEXT
+
+Replace DatasetInterpreter.filter's evalBoolean call with columnar
+boolean-mask filtering via evalColumn.
+
+### Phase 5: GADT Column — FUTURE
+
+Parameterize the Column enum as `Column[+A]`:
+
+```scala
+enum Column[+A] {
+  case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
+  case LongColumn(data: Array[Long], nulls: BitSet) extends Column[Long]
+  case DoubleColumn(data: Array[Double], nulls: BitSet) extends Column[Double]
+  case StringColumn(data: Array[String], nulls: BitSet) extends Column[String]
+  case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
+  case DateColumn(data: Array[Int], nulls: BitSet) extends Column[Date]
+  case AnyColumn(data: Array[Any], nulls: BitSet) extends Column[Any]
+}
+```
+
+This enables double GADT refinement: Expr gives the type parameter `a`,
+Column[a] confirms it via pattern matching. The compiler proves types
+through without any cast — including the 7 Cell boundary casts that
+currently exist in eval.
+
+With GADT Column:
+- evalColumn returns `Column[A]` instead of `Column`
+- evalAggregation's generic cases pattern match on `Column[a]` to get
+  typed array access without per-row eval
+- eval becomes unnecessary — all evaluation is columnar
+- MaterializedDataset holds `Vector[Column[?]]` (existential wildcard)
+
+This is a foundational change to the storage layer that ripples through
+MaterializedDataset, DatasetInterpreter, Schema, RowConverter, and all
+tests. It would make strongbow the only columnar engine with compile-time
+type-safe column access through GADT refinement — genuinely novel compared
+to Arrow, Polars, and DuckDB which all use runtime dispatch.
+
+Not blocked by Phases 3-4. Orthogonal to evalAny/evalBoolean deletion.
+Becomes a focused effort on the storage layer once the evaluation layer
+is clean.
+
+**Target after Phase 5: zero asInstanceOf in the entire ExprInterpreter.**
+
+## Current Cast Count
+
+| Method | Casts | Status |
+|---|---|---|
+| evalColumn | 0 | Done |
+| evalAggregation | 0 | Done |
+| eval | 7 (Cell boundary) | Kept — needed by evalAggregation |
+| evalAny | 143 | Deleting in Phase 3 |
+| evalBoolean | 24 | Deleting in Phase 3 |
+| **Total** | **175** | **→ 7 after Phase 3, → 0 after Phase 5** |
+
+## Verification (after Phase 3)
 
 - `sbt prepare` passes
 - `sbt core/test` — all tests pass
 - `sbt spark/compile` — spark module compiles
-- `grep -c 'asInstanceOf' ExprInterpreter.scala` — target: <10 (AnyColumn
-  fallback paths only)
-- Zero `asInstanceOf` in any primitive column evaluation path
-- Benchmark: filter + arithmetic on 1M rows should show measurable reduction
-  in GC pressure vs current implementation
+- `grep -c 'asInstanceOf' ExprInterpreter.scala` — target: 7
+- All 7 casts in eval Cell boundary, zero elsewhere

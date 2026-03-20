@@ -261,7 +261,7 @@ object DatasetInterpreter extends Interpreter {
     dataset: MaterializedDataset[T],
     predicate: Expr[T, Boolean]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
-    ExprInterpreter.evalColumn(predicate, dataset.columns, ColumnType.BooleanType).map {
+    ExprInterpreter.evalColumn(predicate, dataset.columns, ColumnType.BooleanType).flatMap {
       case Column.BooleanColumn(data, _) =>
         val rowIndices = new Array[Int](data.length)
         var count = 0 // scalafix:ok DisableSyntax.var
@@ -275,11 +275,9 @@ object DatasetInterpreter extends Interpreter {
         }
         val indices = java.util.Arrays.copyOf(rowIndices, count)
         val newColumns = dataset.columns.map(_.slice(indices))
-        MaterializedDataset(newColumns, dataset.schema)
+        Right(MaterializedDataset(newColumns, dataset.schema))
       case other =>
-        throw new IllegalStateException( // scalafix:ok DisableSyntax.throw
-          s"Expected BooleanColumn from boolean predicate, got ${other.columnType}"
-        )
+        Left(ExecutionError.TypeMismatch("BooleanColumn", other.columnType.toString, "filter"))
     }
   }
 

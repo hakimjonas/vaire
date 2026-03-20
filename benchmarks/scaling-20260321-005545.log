@@ -1,0 +1,159 @@
+tee: benchmarks/scaling-20260321-005226.log: No such file or directory
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by scala.runtime.LazyVals$ (file:/home/hakim/.sdkman/candidates/sbt/1.12.6/bin/sbt-launch.jar)
+WARNING: Please consider reporting this to the maintainers of class scala.runtime.LazyVals$
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+WARNING: A terminally deprecated method in sun.misc.Unsafe has been called
+WARNING: sun.misc.Unsafe::objectFieldOffset has been called by scala.runtime.LazyVals$ (file:/home/hakim/.sdkman/candidates/sbt/1.12.6/bin/sbt-launch.jar)
+WARNING: Please consider reporting this to the maintainers of class scala.runtime.LazyVals$
+WARNING: sun.misc.Unsafe::objectFieldOffset will be removed in a future release
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by com.sun.jna.Native in an unnamed module (file:/home/hakim/.sbt/boot/scala-2.12.21/org.scala-sbt/sbt/1.12.6/jna-5.12.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+[info] welcome to sbt 1.12.6 (Oracle Corporation Java 27-ea)
+[info] loading global plugins from /home/hakim/.sbt/1.0/plugins
+[info] loading settings for project strongbow-build from plugins.sbt...
+[info] loading project definition from /home/hakim/examples/strongbow/project
+[info] loading settings for project root from build.sbt...
+[info] set current project to strongbow (in build file:/home/hakim/examples/strongbow/)
+[info] running (fork) net.ghoula.strongbow.bench.ScalingBenchmark 
+[info] Strongbow Scaling Benchmark
+[info] ================================================================================
+[info] Testing at multiple scales:
+[info]   - 10K rows: baseline
+[info]   - 100K rows: 10x
+[info]   - 200K rows: 20x
+[info]   - 400K rows: 40x
+[info] Goal: Show where memory efficiency and zero-GC compound
+[info] ================================================================================
+[info] ============================================================
+[info] Scale: 10K rows, 100 groups
+[info] ============================================================
+[info]   Filter... 0,67 ms (alloc: 0,7 MB, heap: 56 MB, GC: 0)
+[info]   GroupBy... 0,59 ms (alloc: 1,6 MB, heap: 68 MB, GC: 0)
+[info]   Sort... 0,81 ms (alloc: 1,0 MB, heap: 62 MB, GC: 0)
+[info]   Limit... 0,01 ms (alloc: 0,1 MB, heap: 54 MB, GC: 0)
+[info]   Union... 0,05 ms (alloc: 0,2 MB, heap: 56 MB, GC: 0)
+[info]   Distinct... 0,53 ms (alloc: 1,7 MB, heap: 70 MB, GC: 0)
+[info]   Join... 16,14 ms (alloc: 61,0 MB, heap: 656 MB, GC: 0)
+[info]   GroupByAgg... 0,79 ms (alloc: 2,8 MB, heap: 76 MB, GC: 0)
+[info]   SortByExprs... 2,40 ms (alloc: 20,1 MB, heap: 232 MB, GC: 0)
+[info]   WithWindow... 2,00 ms (alloc: 17,0 MB, heap: 204 MB, GC: 0)
+[info] ============================================================
+[info] Scale: 100K rows, 1000 groups
+[info] ============================================================
+[info]   Filter... 1,29 ms (alloc: 5,5 MB, heap: 136 MB, GC: 0)
+[info]   GroupBy... 4,63 ms (alloc: 15,5 MB, heap: 202 MB, GC: 0)
+[info]   Sort... 14,74 ms (alloc: 6,9 MB, heap: 128 MB, GC: 0)
+[info]   Limit... 0,04 ms (alloc: 0,6 MB, heap: 94 MB, GC: 0)
+[info]   Union... 0,45 ms (alloc: 2,3 MB, heap: 94 MB, GC: 0)
+[info]   Distinct... 6,45 ms (alloc: 16,6 MB, heap: 214 MB, GC: 0)
+[info]   Join... 125,08 ms (alloc: 709,2 MB, heap: 6732 MB, GC: 0)
+[info]   GroupByAgg... 7,09 ms (alloc: 27,5 MB, heap: 330 MB, GC: 0)
+[info]   SortByExprs... 46,15 ms (alloc: 427,4 MB, heap: 3966 MB, GC: 0)
+[info]   WithWindow... 29,37 ms (alloc: 169,9 MB, heap: 1636 MB, GC: 0)
+[info] ============================================================
+[info] Scale: 200K rows, 2000 groups
+[info] ============================================================
+[info]   Filter... 2,55 ms (alloc: 10,9 MB, heap: 180 MB, GC: 0)
+[info]   GroupBy... 10,65 ms (alloc: 31,1 MB, heap: 350 MB, GC: 0)
+[info]   Sort... 31,98 ms (alloc: 13,7 MB, heap: 202 MB, GC: 0)
+[info]   Limit... 0,05 ms (alloc: 1,1 MB, heap: 102 MB, GC: 0)
+[info]   Union... 0,27 ms (alloc: 4,6 MB, heap: 134 MB, GC: 0)
+[info]   Distinct... 14,44 ms (alloc: 33,2 MB, heap: 372 MB, GC: 0)
+[info]   Join... 267,64 ms (alloc: 1418,8 MB, heap: 13210 MB, GC: 0)
+[info]   GroupByAgg... 17,39 ms (alloc: 55,0 MB, heap: 606 MB, GC: 0)
+[info]   SortByExprs... 100,09 ms (alloc: 909,7 MB, heap: 8344 MB, GC: 0)
+[info]   WithWindow... 63,63 ms (alloc: 339,8 MB, heap: 3186 MB, GC: 0)
+[info] ============================================================
+[info] Scale: 400K rows, 4000 groups
+[info] ============================================================
+[info]   Filter... 5,24 ms (alloc: 21,9 MB, heap: 302 MB, GC: 0)
+[info]   GroupBy... 25,49 ms (alloc: 62,1 MB, heap: 646 MB, GC: 0)
+[info]   Sort... 63,95 ms (alloc: 27,5 MB, heap: 348 MB, GC: 0)
+[info]   Limit... 0,13 ms (alloc: 2,3 MB, heap: 118 MB, GC: 0)
+[info]   Union... 0,56 ms (alloc: 9,2 MB, heap: 190 MB, GC: 0)
+[info]   Distinct... 39,85 ms (alloc: 66,5 MB, heap: 712 MB, GC: 0)
+[info]   Join... 601,78 ms (alloc: 2839,1 MB, heap: 26064 MB, GC: 0)
+[info]   GroupByAgg... 43,94 ms (alloc: 110,1 MB, heap: 1162 MB, GC: 0)
+[info]   SortByExprs... 229,06 ms (alloc: 1929,1 MB, heap: 17594 MB, GC: 0)
+[info]   WithWindow... 137,88 ms (alloc: 679,5 MB, heap: 6322 MB, GC: 0)
+[info] ================================================================================
+[info] SCALING SUMMARY
+[info] ================================================================================
+[info] Time Performance (Median)
+[info] --------------------------------------------------------------------------------
+[info] Operation             10K           100K           200K           400K
+[info] --------------------------------------------------------------------------------
+[info] Filter            0,67 ms        1,29 ms        2,55 ms        5,24 ms
+[info] GroupBy           0,59 ms        4,63 ms       10,65 ms       25,49 ms
+[info] Sort              0,81 ms       14,74 ms       31,98 ms       63,95 ms
+[info] Limit             0,01 ms        0,04 ms        0,05 ms        0,13 ms
+[info] Union             0,05 ms        0,45 ms        0,27 ms        0,56 ms
+[info] Distinct          0,53 ms        6,45 ms       14,44 ms       39,85 ms
+[info] Join             16,14 ms      125,08 ms      267,64 ms      601,78 ms
+[info] GroupByAgg        0,79 ms        7,09 ms       17,39 ms       43,94 ms
+[info] SortByExprs        2,40 ms       46,15 ms      100,09 ms      229,06 ms
+[info] WithWindow        2,00 ms       29,37 ms       63,63 ms      137,88 ms
+[info] Memory Efficiency (Allocated per operation)
+[info] --------------------------------------------------------------------------------
+[info] Operation             10K           100K           200K           400K
+[info] --------------------------------------------------------------------------------
+[info] Filter            0,70 MB        5,48 MB       10,94 MB       21,89 MB
+[info] GroupBy           1,57 MB       15,53 MB       31,06 MB       62,13 MB
+[info] Sort              1,00 MB        6,86 MB       13,73 MB       27,45 MB
+[info] Limit             0,06 MB        0,57 MB        1,15 MB        2,29 MB
+[info] Union             0,23 MB        2,29 MB        4,58 MB        9,16 MB
+[info] Distinct          1,71 MB       16,62 MB       33,24 MB       66,47 MB
+[info] Join             60,95 MB      709,19 MB     1418,81 MB     2839,08 MB
+[info] GroupByAgg        2,76 MB       27,52 MB       55,04 MB      110,07 MB
+[info] SortByExprs       20,08 MB      427,36 MB      909,67 MB     1929,12 MB
+[info] WithWindow       17,01 MB      169,94 MB      339,78 MB      679,54 MB
+[info] Peak Heap Usage
+[info] --------------------------------------------------------------------------------
+[info] Operation             10K           100K           200K           400K
+[info] --------------------------------------------------------------------------------
+[info] Filter              56 MB         136 MB         180 MB         302 MB
+[info] GroupBy             68 MB         202 MB         350 MB         646 MB
+[info] Sort                62 MB         128 MB         202 MB         348 MB
+[info] Limit               54 MB          94 MB         102 MB         118 MB
+[info] Union               56 MB          94 MB         134 MB         190 MB
+[info] Distinct            70 MB         214 MB         372 MB         712 MB
+[info] Join               656 MB        6732 MB       13210 MB       26064 MB
+[info] GroupByAgg          76 MB         330 MB         606 MB        1162 MB
+[info] SortByExprs         232 MB        3966 MB        8344 MB       17594 MB
+[info] WithWindow         204 MB        1636 MB        3186 MB        6322 MB
+[info] GC Collections
+[info] --------------------------------------------------------------------------------
+[info] Operation             10K           100K           200K           400K
+[info] --------------------------------------------------------------------------------
+[info] Filter                  0              0              0              0
+[info] GroupBy                 0              0              0              0
+[info] Sort                    0              0              0              0
+[info] Limit                   0              0              0              0
+[info] Union                   0              0              0              0
+[info] Distinct                0              0              0              0
+[info] Join                    0              0              0              0
+[info] GroupByAgg              0              0              0              0
+[info] SortByExprs              0              0              0              0
+[info] WithWindow              0              0              0              0
+[info] GC Overhead %
+[info] --------------------------------------------------------------------------------
+[info] Operation             10K           100K           200K           400K
+[info] --------------------------------------------------------------------------------
+[info] Filter               0,0%           0,0%           0,0%           0,0%
+[info] GroupBy              0,0%           0,0%           0,0%           0,0%
+[info] Sort                 0,0%           0,0%           0,0%           0,0%
+[info] Limit                0,0%           0,0%           0,0%           0,0%
+[info] Union                0,0%           0,0%           0,0%           0,0%
+[info] Distinct             0,0%           0,0%           0,0%           0,0%
+[info] Join                 0,0%           0,0%           0,0%           0,0%
+[info] GroupByAgg           0,0%           0,0%           0,0%           0,0%
+[info] SortByExprs           0,0%           0,0%           0,0%           0,0%
+[info] WithWindow           0,0%           0,0%           0,0%           0,0%
+[info] ================================================================================
+[info] Benchmark complete!
+[info] ================================================================================
+[success] Total time: 197 s (0:03:17.0), completed 21 Mar 2026, 00.55.45

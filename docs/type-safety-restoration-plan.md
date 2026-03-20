@@ -175,16 +175,26 @@ case gt: Expr.Gt[Row, a] =>
   }
 ```
 
-Wait — that last case still has `asInstanceOf`. For non-primitive orderings
-(custom types stored in AnyColumn), we can't avoid reading via `getValue`
-which returns `Any`. But we can limit this to the AnyColumn fallback and
-keep all primitive paths cast-free.
+### Decision: Zero Casts in evalColumn (Implemented)
 
-**Revised target**: 0 casts for primitive column types (Int, Long, Double,
-String, Boolean, Date). A small number of casts for AnyColumn operations
-where type erasure is unavoidable (custom types, collection elements).
-This matches the Column storage model — typed columns have typed access,
-AnyColumn has untyped access.
+After analysis of real pipeline patterns (dwh/dwh-core), we determined:
+
+- **Option types** are stored as separate typed columns (BooleanColumn +
+  typed value column), NOT AnyColumn. No cast needed for nullable fields.
+- **Ordered comparisons** (Gt, Lt, Gte, Lte, Between) on AnyColumn return
+  UnsupportedOperation. No real pipeline compares untyped columns. If typed
+  comparison is needed, the data should be in typed columns.
+- **Equality comparisons** (Eq, Neq) use `getValue` which returns `Any` and
+  `Objects.equals` which accepts `Any`. Zero casts.
+- **ArraySort** on AnyColumn returns UnsupportedOperation. Collection
+  sorting belongs in opaque `map` or typed column paths.
+- **MapContainsKey** uses `m.keys.exists(Objects.equals(_, key))` — no cast.
+- **MapConcat** uses `(l.toSeq ++ r.toSeq).toMap` — no cast.
+- **Date Const** uses `case v: java.time.LocalDate =>` pattern match —
+  opaque type erases to LocalDate at runtime.
+
+Result: **0 asInstanceOf in evalColumn and all its helpers.** Achieved and
+verified with 356 passing tests.
 
 ### Phase 2: Rewrite evalAggregation as Column-Level
 

@@ -3,6 +3,8 @@ package net.ghoula.strongbow
 import net.ghoula.sarati.ast.json.JsonValue
 import parsers.json.{formatJson, parseJson}
 
+import scala.collection.immutable.BitSet
+
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
 
@@ -1399,31 +1401,39 @@ object ExprInterpreter {
         evalColumn(named.expr, columns, columnType)
 
       case c: Expr.Const[_, _] =>
-        columnType match {
-          case ColumnType.IntType =>
-            Right(Column.int(Array.fill(rowCount)(c.value.asInstanceOf[Int]))) // scalafix:ok DisableSyntax.asInstanceOf
-          case ColumnType.LongType =>
-            Right(
-              Column.long(Array.fill(rowCount)(c.value.asInstanceOf[Long]))
-            ) // scalafix:ok DisableSyntax.asInstanceOf
-          case ColumnType.DoubleType =>
-            Right(
-              Column.double(Array.fill(rowCount)(c.value.asInstanceOf[Double]))
-            ) // scalafix:ok DisableSyntax.asInstanceOf
-          case ColumnType.StringType =>
-            Right(
-              Column.string(Array.fill(rowCount)(c.value.asInstanceOf[String]))
-            ) // scalafix:ok DisableSyntax.asInstanceOf
-          case ColumnType.BooleanType =>
-            Right(
-              Column.boolean(Array.fill(rowCount)(c.value.asInstanceOf[Boolean]))
-            ) // scalafix:ok DisableSyntax.asInstanceOf
-          case ColumnType.DateType =>
-            val epochDay =
-              c.value.asInstanceOf[Date].toEpochDay.toInt // scalafix:ok DisableSyntax.asInstanceOf
-            Right(Column.date(Array.fill(rowCount)(epochDay)))
-          case _ =>
-            Right(Column.any(Array.fill(rowCount)(c.value.asInstanceOf[Any]))) // scalafix:ok DisableSyntax.asInstanceOf
+        c.value match {
+          case v: Int =>
+            Right(Column.int(Array.fill(rowCount)(v)))
+          case v: Long =>
+            Right(Column.long(Array.fill(rowCount)(v)))
+          case v: Double =>
+            Right(Column.double(Array.fill(rowCount)(v)))
+          case v: String =>
+            Right(Column.string(Array.fill(rowCount)(v)))
+          case v: Boolean =>
+            Right(Column.boolean(Array.fill(rowCount)(v)))
+          case v =>
+            if (Option(v).isEmpty) {
+              val allNulls = BitSet((0 until rowCount)*)
+              Right(columnType match {
+                case ColumnType.IntType => Column.int(new Array[Int](rowCount), allNulls)
+                case ColumnType.LongType => Column.long(new Array[Long](rowCount), allNulls)
+                case ColumnType.DoubleType => Column.double(new Array[Double](rowCount), allNulls)
+                case ColumnType.StringType => Column.string(new Array[String](rowCount), allNulls)
+                case ColumnType.BooleanType => Column.boolean(new Array[Boolean](rowCount), allNulls)
+                case ColumnType.DateType => Column.date(new Array[Int](rowCount), allNulls)
+                case _ => Column.any(new Array[Any](rowCount), allNulls)
+              })
+            } else if (columnType == ColumnType.DateType) {
+              v match {
+                case ld: java.time.LocalDate =>
+                  Right(Column.date(Array.fill(rowCount)(ld.toEpochDay.toInt)))
+                case _ =>
+                  Left(ExecutionError.TypeMismatch("Date", v.getClass.getSimpleName, "evalColumn Const"))
+              }
+            } else {
+              Right(Column.any(Array.fill[Any](rowCount)(v)))
+            }
         }
 
       case add: Expr.Add[Row] =>
@@ -1439,11 +1449,12 @@ object ExprInterpreter {
         for {
           leftCol <- evalColumn(div.left, columns, ColumnType.IntType)
           rightCol <- evalColumn(div.right, columns, ColumnType.IntType)
-          result <- vectorizedDiv(
-            leftCol.asInstanceOf[Column.IntColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
-            rightCol.asInstanceOf[Column.IntColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
-            rowCount
-          )
+          result <- (leftCol, rightCol) match {
+            case (Column.IntColumn(ld, _), Column.IntColumn(rd, _)) =>
+              vectorizedDiv(ld, rd, rowCount)
+            case _ =>
+              Left(ExecutionError.TypeMismatch("IntColumn", leftCol.columnType.toString, "evalColumn"))
+          }
         } yield result
 
       case add: Expr.AddLong[Row] =>
@@ -1459,11 +1470,12 @@ object ExprInterpreter {
         for {
           leftCol <- evalColumn(div.left, columns, ColumnType.LongType)
           rightCol <- evalColumn(div.right, columns, ColumnType.LongType)
-          result <- vectorizedLongDiv(
-            leftCol.asInstanceOf[Column.LongColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
-            rightCol.asInstanceOf[Column.LongColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
-            rowCount
-          )
+          result <- (leftCol, rightCol) match {
+            case (Column.LongColumn(ld, _), Column.LongColumn(rd, _)) =>
+              vectorizedLongDiv(ld, rd, rowCount)
+            case _ =>
+              Left(ExecutionError.TypeMismatch("LongColumn", leftCol.columnType.toString, "evalColumn"))
+          }
         } yield result
 
       case add: Expr.AddDouble[Row] =>
@@ -1479,50 +1491,66 @@ object ExprInterpreter {
         for {
           leftCol <- evalColumn(div.left, columns, ColumnType.DoubleType)
           rightCol <- evalColumn(div.right, columns, ColumnType.DoubleType)
-          result <- vectorizedDoubleDiv(
-            leftCol.asInstanceOf[Column.DoubleColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
-            rightCol.asInstanceOf[Column.DoubleColumn].data, // scalafix:ok DisableSyntax.asInstanceOf
-            rowCount
-          )
+          result <- (leftCol, rightCol) match {
+            case (Column.DoubleColumn(ld, _), Column.DoubleColumn(rd, _)) =>
+              vectorizedDoubleDiv(ld, rd, rowCount)
+            case _ =>
+              Left(ExecutionError.TypeMismatch("DoubleColumn", leftCol.columnType.toString, "evalColumn"))
+          }
         } yield result
 
       case gt: Expr.Gt[Row, _] =>
-        vectorizedComparison(gt.left, gt.right, columns, rowCount)(
-          gt.ordering.asInstanceOf[Ordering[Any]].gt
-        ) // scalafix:ok DisableSyntax.asInstanceOf
+        typedComparison(gt.left, gt.right, columns, rowCount)(
+          (a: Int, b: Int) => a > b,
+          (a: Long, b: Long) => a > b,
+          (a: Double, b: Double) => a > b,
+          (a: String, b: String) => a.compareTo(b) > 0
+        )
 
       case gte: Expr.Gte[Row, _] =>
-        vectorizedComparison(gte.left, gte.right, columns, rowCount)(
-          gte.ordering.asInstanceOf[Ordering[Any]].gteq
-        ) // scalafix:ok DisableSyntax.asInstanceOf
+        typedComparison(gte.left, gte.right, columns, rowCount)(
+          (a: Int, b: Int) => a >= b,
+          (a: Long, b: Long) => a >= b,
+          (a: Double, b: Double) => a >= b,
+          (a: String, b: String) => a.compareTo(b) >= 0
+        )
 
       case lt: Expr.Lt[Row, _] =>
-        vectorizedComparison(lt.left, lt.right, columns, rowCount)(
-          lt.ordering.asInstanceOf[Ordering[Any]].lt
-        ) // scalafix:ok DisableSyntax.asInstanceOf
+        typedComparison(lt.left, lt.right, columns, rowCount)(
+          (a: Int, b: Int) => a < b,
+          (a: Long, b: Long) => a < b,
+          (a: Double, b: Double) => a < b,
+          (a: String, b: String) => a.compareTo(b) < 0
+        )
 
       case lte: Expr.Lte[Row, _] =>
-        vectorizedComparison(lte.left, lte.right, columns, rowCount)(
-          lte.ordering.asInstanceOf[Ordering[Any]].lteq
-        ) // scalafix:ok DisableSyntax.asInstanceOf
+        typedComparison(lte.left, lte.right, columns, rowCount)(
+          (a: Int, b: Int) => a <= b,
+          (a: Long, b: Long) => a <= b,
+          (a: Double, b: Double) => a <= b,
+          (a: String, b: String) => a.compareTo(b) <= 0
+        )
 
       case eq: Expr.Eq[Row, _] =>
-        vectorizedComparison(eq.left, eq.right, columns, rowCount)((a, b) => java.util.Objects.equals(a, b))
+        equalityComparison(eq.left, eq.right, columns, rowCount)(java.util.Objects.equals)
 
       case neq: Expr.Neq[Row, _] =>
-        vectorizedComparison(neq.left, neq.right, columns, rowCount)((a, b) => !java.util.Objects.equals(a, b))
+        equalityComparison(neq.left, neq.right, columns, rowCount)((a, b) => !java.util.Objects.equals(a, b))
 
       case and: Expr.And[Row] =>
         for {
           leftCol <- evalColumn(and.left, columns, ColumnType.BooleanType)
           rightCol <- evalColumn(and.right, columns, ColumnType.BooleanType)
         } yield {
-          val ld = leftCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val rd = rightCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val out = new Array[Boolean](rowCount)
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) { out(i) = ld(i) && rd(i); i += 1 }
-          Column.boolean(out)
+          (leftCol, rightCol) match {
+            case (Column.BooleanColumn(ld, ln), Column.BooleanColumn(rd, rn)) =>
+              val out = new Array[Boolean](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) { out(i) = ld(i) && rd(i); i += 1 }
+              Column.boolean(out, ln | rn)
+            case _ =>
+              Column.boolean(Array.empty[Boolean])
+          }
         }
 
       case or: Expr.Or[Row] =>
@@ -1530,21 +1558,26 @@ object ExprInterpreter {
           leftCol <- evalColumn(or.left, columns, ColumnType.BooleanType)
           rightCol <- evalColumn(or.right, columns, ColumnType.BooleanType)
         } yield {
-          val ld = leftCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val rd = rightCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val out = new Array[Boolean](rowCount)
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) { out(i) = ld(i) || rd(i); i += 1 }
-          Column.boolean(out)
+          (leftCol, rightCol) match {
+            case (Column.BooleanColumn(ld, ln), Column.BooleanColumn(rd, rn)) =>
+              val out = new Array[Boolean](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) { out(i) = ld(i) || rd(i); i += 1 }
+              Column.boolean(out, ln | rn)
+            case _ =>
+              Column.boolean(Array.empty[Boolean])
+          }
         }
 
       case not: Expr.Not[Row] =>
-        evalColumn(not.expr, columns, ColumnType.BooleanType).map { col =>
-          val data = col.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val out = new Array[Boolean](rowCount)
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) { out(i) = !data(i); i += 1 }
-          Column.boolean(out)
+        evalColumn(not.expr, columns, ColumnType.BooleanType).map {
+          case Column.BooleanColumn(data, nulls) =>
+            val out = new Array[Boolean](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = !data(i); i += 1 }
+            Column.boolean(out, nulls)
+          case _ =>
+            Column.boolean(Array.empty[Boolean])
         }
 
       case concat: Expr.Concat[Row] =>
@@ -1552,21 +1585,26 @@ object ExprInterpreter {
           leftCol <- evalColumn(concat.left, columns, ColumnType.StringType)
           rightCol <- evalColumn(concat.right, columns, ColumnType.StringType)
         } yield {
-          val ld = leftCol.asInstanceOf[Column.StringColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val rd = rightCol.asInstanceOf[Column.StringColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val out = new Array[String](rowCount)
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) { out(i) = ld(i) + rd(i); i += 1 }
-          Column.string(out)
+          (leftCol, rightCol) match {
+            case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
+              val out = new Array[String](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) { out(i) = ld(i) + rd(i); i += 1 }
+              Column.string(out, ln | rn)
+            case _ =>
+              Column.string(Array.empty[String])
+          }
         }
 
       case length: Expr.Length[Row] =>
-        evalColumn(length.expr, columns, ColumnType.StringType).map { col =>
-          val data = col.asInstanceOf[Column.StringColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val out = new Array[Int](rowCount)
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) { out(i) = data(i).length; i += 1 }
-          Column.int(out)
+        evalColumn(length.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = if (nulls.contains(i)) 0 else data(i).length; i += 1 }
+            Column.int(out, nulls)
+          case _ =>
+            Column.int(Array.empty[Int])
         }
 
       case when: Expr.When[Row, _] =>
@@ -1575,21 +1613,1439 @@ object ExprInterpreter {
           thenCol <- evalColumn(when.thenExpr, columns, columnType)
           elseCol <- evalColumn(when.elseExpr, columns, columnType)
         } yield {
-          val cond = condCol.asInstanceOf[Column.BooleanColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-          val out = new Array[Any](rowCount)
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            out(i) = if (cond(i)) thenCol.getValue(i) else elseCol.getValue(i)
-            i += 1
-          }
-          Column.fromValues(out.toVector, columnType) match {
-            case Right(c) => c
-            case Left(_) => Column.any(out)
+          condCol match {
+            case Column.BooleanColumn(cond, _) =>
+              (thenCol, elseCol) match {
+                case (Column.IntColumn(td, tn), Column.IntColumn(ed, en)) =>
+                  val out = new Array[Int](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) { out(i) = if (cond(i)) td(i) else ed(i); i += 1 }
+                  Column.int(out, tn | en)
+                case (Column.LongColumn(td, tn), Column.LongColumn(ed, en)) =>
+                  val out = new Array[Long](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) { out(i) = if (cond(i)) td(i) else ed(i); i += 1 }
+                  Column.long(out, tn | en)
+                case (Column.DoubleColumn(td, tn), Column.DoubleColumn(ed, en)) =>
+                  val out = new Array[Double](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) { out(i) = if (cond(i)) td(i) else ed(i); i += 1 }
+                  Column.double(out, tn | en)
+                case (Column.StringColumn(td, tn), Column.StringColumn(ed, en)) =>
+                  val out = new Array[String](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) { out(i) = if (cond(i)) td(i) else ed(i); i += 1 }
+                  Column.string(out, tn | en)
+                case (Column.BooleanColumn(td, tn), Column.BooleanColumn(ed, en)) =>
+                  val out = new Array[Boolean](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) { out(i) = if (cond(i)) td(i) else ed(i); i += 1 }
+                  Column.boolean(out, tn | en)
+                case (Column.DateColumn(td, tn), Column.DateColumn(ed, en)) =>
+                  val out = new Array[Int](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) { out(i) = if (cond(i)) td(i) else ed(i); i += 1 }
+                  Column.date(out, tn | en)
+                case _ =>
+                  val out = new Array[Any](rowCount)
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < rowCount) {
+                    out(i) = if (cond(i)) thenCol.getValue(i) else elseCol.getValue(i)
+                    i += 1
+                  }
+                  Column.fromValues(out.toVector, columnType) match {
+                    case Right(c) => c
+                    case Left(_) => Column.any(out)
+                  }
+              }
+            case _ =>
+              Column.any(Array.empty[Any])
           }
         }
 
-      case _ =>
-        evalColumnRowByRow(expr, columns, columnType, rowCount)
+      case like: Expr.Like[Row] =>
+        evalColumn(like.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val regex = likeToRegex(like.pattern)
+            val out = new Array[Boolean](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) false else regex.matches(data(i))
+              i += 1
+            }
+            Column.boolean(out, nulls)
+          case _ => Column.boolean(Array.empty[Boolean])
+        }
+
+      case lo: Expr.Lower[Row] =>
+        evalColumn(lo.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) null else data(i).toLowerCase // scalafix:ok DisableSyntax.null
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case up: Expr.Upper[Row] =>
+        evalColumn(up.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) null else data(i).toUpperCase // scalafix:ok DisableSyntax.null
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case tr: Expr.Trim[Row] =>
+        evalColumn(tr.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) null else data(i).trim // scalafix:ok DisableSyntax.null
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case lt: Expr.LTrim[Row] =>
+        evalColumn(lt.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) null else data(i).stripLeading.nn // scalafix:ok DisableSyntax.null
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case rt: Expr.RTrim[Row] =>
+        evalColumn(rt.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) null else data(i).stripTrailing.nn // scalafix:ok DisableSyntax.null
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case ss: Expr.Substring[Row] =>
+        evalColumn(ss.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (nulls.contains(i)) {
+                out(i) = null // scalafix:ok DisableSyntax.null
+              } else {
+                val s = data(i)
+                val start = Math.max(ss.pos - 1, 0)
+                val end = Math.min(start + ss.len, s.length)
+                out(i) = if (start >= s.length) "" else s.substring(start, end)
+              }
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case sr: Expr.StringReplace[Row] =>
+        evalColumn(sr.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null
+                else data(i).replace(sr.search, sr.replacement) // scalafix:ok DisableSyntax.null
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case rr: Expr.RegexpReplace[Row] =>
+        evalColumn(rr.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val compiled = java.util.regex.Pattern.compile(rr.pattern)
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else compiled.matcher(data(i)).replaceAll(rr.replacement).nn
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case re: Expr.RegexpExtract[Row] =>
+        evalColumn(re.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val compiled = java.util.regex.Pattern.compile(re.pattern)
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (nulls.contains(i)) {
+                out(i) = null // scalafix:ok DisableSyntax.null
+              } else {
+                val m = compiled.matcher(data(i))
+                out(i) = if (m.find()) m.group(re.groupIdx) else ""
+              }
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case sp: Expr.StringSplit[Row] =>
+        evalColumn(sp.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[Any](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else data(i).split(sp.delimiter, -1).toSeq
+              i += 1
+            }
+            Column.any(out, nulls)
+          case _ => Column.any(Array.empty[Any])
+        }
+
+      case sw: Expr.StartsWith[Row] =>
+        for {
+          exprCol <- evalColumn(sw.expr, columns, ColumnType.StringType)
+          prefixCol <- evalColumn(sw.prefix, columns, ColumnType.StringType)
+        } yield {
+          (exprCol, prefixCol) match {
+            case (Column.StringColumn(ed, en), Column.StringColumn(pd, pn)) =>
+              val combined = en | pn
+              val out = new Array[Boolean](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) = if (combined.contains(i)) false else ed(i).startsWith(pd(i))
+                i += 1
+              }
+              Column.boolean(out, combined)
+            case _ => Column.boolean(Array.empty[Boolean])
+          }
+        }
+
+      case ew: Expr.EndsWith[Row] =>
+        for {
+          exprCol <- evalColumn(ew.expr, columns, ColumnType.StringType)
+          suffixCol <- evalColumn(ew.suffix, columns, ColumnType.StringType)
+        } yield {
+          (exprCol, suffixCol) match {
+            case (Column.StringColumn(ed, en), Column.StringColumn(sd, sn)) =>
+              val combined = en | sn
+              val out = new Array[Boolean](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) = if (combined.contains(i)) false else ed(i).endsWith(sd(i))
+                i += 1
+              }
+              Column.boolean(out, combined)
+            case _ => Column.boolean(Array.empty[Boolean])
+          }
+        }
+
+      case sc: Expr.StringContains[Row] =>
+        for {
+          exprCol <- evalColumn(sc.expr, columns, ColumnType.StringType)
+          substrCol <- evalColumn(sc.substr, columns, ColumnType.StringType)
+        } yield {
+          (exprCol, substrCol) match {
+            case (Column.StringColumn(ed, en), Column.StringColumn(sd, sn)) =>
+              val combined = en | sn
+              val out = new Array[Boolean](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) = if (combined.contains(i)) false else ed(i).contains(sd(i))
+                i += 1
+              }
+              Column.boolean(out, combined)
+            case _ => Column.boolean(Array.empty[Boolean])
+          }
+        }
+
+      case cw: Expr.ConcatWs[Row] =>
+        val colResults = cw.exprs.map(e => evalColumn(e, columns, ColumnType.StringType))
+        val firstErr = colResults.collectFirst { case Left(err) => err }
+        firstErr match {
+          case Some(err) => Left(err)
+          case None =>
+            val cols = colResults.collect { case Right(c) => c }
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              val parts = cols.collect {
+                case Column.StringColumn(data, nulls) if !nulls.contains(i) => data(i)
+              }
+              out(i) = parts.mkString(cw.separator)
+              i += 1
+            }
+            Right(Column.string(out))
+        }
+
+      case co: Expr.Coalesce[Row, _] =>
+        val colResults = co.exprs.map(e => evalColumn(e, columns, columnType))
+        val firstErr = colResults.collectFirst { case Left(err) => err }
+        firstErr match {
+          case Some(err) => Left(err)
+          case None =>
+            val cols = colResults.collect { case Right(c) => c }
+            if (cols.isEmpty) {
+              Left(ExecutionError.UnsupportedOperation("Coalesce: no expressions provided"))
+            } else {
+              val out = new Array[Any](rowCount)
+              val outNulls = scala.collection.mutable.BitSet.empty
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                var found = false // scalafix:ok DisableSyntax.var
+                var j = 0 // scalafix:ok DisableSyntax.var
+                while (j < cols.length && !found) {
+                  if (!cols(j).isNull(RowIndex(i))) {
+                    out(i) = cols(j).getValue(i)
+                    found = true
+                  }
+                  j += 1
+                }
+                if (!found) {
+                  out(i) = null // scalafix:ok DisableSyntax.null
+                  outNulls += i
+                }
+                i += 1
+              }
+              Column.fromValues(out.toVector, columnType)
+            }
+        }
+
+      case in: Expr.IsNull[Row, _] =>
+        val innerType = inferExprColumnType(in.expr, columns)
+        evalColumn(in.expr, columns, innerType).map { col =>
+          val out = new Array[Boolean](rowCount)
+          val nulls = col match {
+            case Column.IntColumn(_, n) => n
+            case Column.LongColumn(_, n) => n
+            case Column.DoubleColumn(_, n) => n
+            case Column.StringColumn(_, n) => n
+            case Column.BooleanColumn(_, n) => n
+            case Column.DateColumn(_, n) => n
+            case Column.AnyColumn(_, n) => n
+          }
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) = nulls.contains(i)
+            i += 1
+          }
+          Column.boolean(out)
+        }
+
+      case inn: Expr.IsNotNull[Row, _] =>
+        val innerType = inferExprColumnType(inn.expr, columns)
+        evalColumn(inn.expr, columns, innerType).map { col =>
+          val out = new Array[Boolean](rowCount)
+          val nulls = col match {
+            case Column.IntColumn(_, n) => n
+            case Column.LongColumn(_, n) => n
+            case Column.DoubleColumn(_, n) => n
+            case Column.StringColumn(_, n) => n
+            case Column.BooleanColumn(_, n) => n
+            case Column.DateColumn(_, n) => n
+            case Column.AnyColumn(_, n) => n
+          }
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) = !nulls.contains(i)
+            i += 1
+          }
+          Column.boolean(out)
+        }
+
+      case inV: Expr.In[Row, _] =>
+        val innerType = inferExprColumnType(inV.expr, columns)
+        evalColumn(inV.expr, columns, innerType).map { col =>
+          val valSet: Set[Any] = inV.values.map(v => v: Any).toSet
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) = valSet.contains(col.getValue(i))
+            i += 1
+          }
+          Column.boolean(out)
+        }
+
+      case btw: Expr.Between[Row, _] =>
+        val innerType = inferExprColumnType(btw.expr, columns)
+        for {
+          exprCol <- evalColumn(btw.expr, columns, innerType)
+          lowerCol <- evalColumn(btw.lower, columns, innerType)
+          upperCol <- evalColumn(btw.upper, columns, innerType)
+          result <- {
+            val out = new Array[Boolean](rowCount)
+            (exprCol, lowerCol, upperCol) match {
+              case (Column.IntColumn(vd, vn), Column.IntColumn(ld, ln), Column.IntColumn(ud, un)) =>
+                val combined = vn | ln | un
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < rowCount) {
+                  out(i) = if (combined.contains(i)) false else vd(i) >= ld(i) && vd(i) <= ud(i)
+                  i += 1
+                }
+                Right(Column.boolean(out, combined))
+              case (Column.LongColumn(vd, vn), Column.LongColumn(ld, ln), Column.LongColumn(ud, un)) =>
+                val combined = vn | ln | un
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < rowCount) {
+                  out(i) = if (combined.contains(i)) false else vd(i) >= ld(i) && vd(i) <= ud(i)
+                  i += 1
+                }
+                Right(Column.boolean(out, combined))
+              case (Column.DoubleColumn(vd, vn), Column.DoubleColumn(ld, ln), Column.DoubleColumn(ud, un)) =>
+                val combined = vn | ln | un
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < rowCount) {
+                  out(i) = if (combined.contains(i)) false else vd(i) >= ld(i) && vd(i) <= ud(i)
+                  i += 1
+                }
+                Right(Column.boolean(out, combined))
+              case _ =>
+                Left(ExecutionError.UnsupportedOperation("Between not supported for untyped columns"))
+            }
+          }
+        } yield result
+
+      case m: Expr.Mod[Row] =>
+        for {
+          leftCol <- evalColumn(m.left, columns, ColumnType.IntType)
+          rightCol <- evalColumn(m.right, columns, ColumnType.IntType)
+          result <- (leftCol, rightCol) match {
+            case (Column.IntColumn(ld, _), Column.IntColumn(rd, _)) =>
+              vectorizedIntMod(ld, rd, rowCount)
+            case _ =>
+              Left(ExecutionError.TypeMismatch("IntColumn", leftCol.columnType.toString, "evalColumn"))
+          }
+        } yield result
+
+      case ml: Expr.ModLong[Row] =>
+        for {
+          leftCol <- evalColumn(ml.left, columns, ColumnType.LongType)
+          rightCol <- evalColumn(ml.right, columns, ColumnType.LongType)
+          result <- (leftCol, rightCol) match {
+            case (Column.LongColumn(ld, _), Column.LongColumn(rd, _)) =>
+              vectorizedLongMod(ld, rd, rowCount)
+            case _ =>
+              Left(ExecutionError.TypeMismatch("LongColumn", leftCol.columnType.toString, "evalColumn"))
+          }
+        } yield result
+
+      case ab: Expr.Abs[Row] =>
+        evalColumn(ab.expr, columns, ColumnType.IntType).map {
+          case Column.IntColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = Math.abs(data(i)); i += 1 }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case abl: Expr.AbsLong[Row] =>
+        evalColumn(abl.expr, columns, ColumnType.LongType).map {
+          case Column.LongColumn(data, nulls) =>
+            val out = new Array[Long](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = Math.abs(data(i)); i += 1 }
+            Column.long(out, nulls)
+          case _ => Column.long(Array.empty[Long])
+        }
+
+      case abd: Expr.AbsDouble[Row] =>
+        evalColumn(abd.expr, columns, ColumnType.DoubleType).map {
+          case Column.DoubleColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = Math.abs(data(i)); i += 1 }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case neg: Expr.Negate[Row] =>
+        evalColumn(neg.expr, columns, ColumnType.IntType).map {
+          case Column.IntColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = -data(i); i += 1 }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case negl: Expr.NegateLong[Row] =>
+        evalColumn(negl.expr, columns, ColumnType.LongType).map {
+          case Column.LongColumn(data, nulls) =>
+            val out = new Array[Long](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = -data(i); i += 1 }
+            Column.long(out, nulls)
+          case _ => Column.long(Array.empty[Long])
+        }
+
+      case negd: Expr.NegateDouble[Row] =>
+        evalColumn(negd.expr, columns, ColumnType.DoubleType).map {
+          case Column.DoubleColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = -data(i); i += 1 }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case rnd: Expr.Round[Row] =>
+        evalColumn(rnd.expr, columns, ColumnType.DoubleType).map {
+          case Column.DoubleColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = BigDecimal(data(i)).setScale(rnd.scale, BigDecimal.RoundingMode.HALF_UP).toDouble
+              i += 1
+            }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case fl: Expr.Floor[Row] =>
+        evalColumn(fl.expr, columns, ColumnType.DoubleType).map {
+          case Column.DoubleColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = Math.floor(data(i)); i += 1 }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case cl: Expr.Ceil[Row] =>
+        evalColumn(cl.expr, columns, ColumnType.DoubleType).map {
+          case Column.DoubleColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = Math.ceil(data(i)); i += 1 }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case ctl: Expr.CastToLong[Row] =>
+        evalColumn(ctl.expr, columns, ColumnType.IntType).map {
+          case Column.IntColumn(data, nulls) =>
+            val out = new Array[Long](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = data(i).toLong; i += 1 }
+            Column.long(out, nulls)
+          case _ => Column.long(Array.empty[Long])
+        }
+
+      case ctd: Expr.CastToDouble[Row] =>
+        evalColumn(ctd.expr, columns, ColumnType.IntType).map {
+          case Column.IntColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = data(i).toDouble; i += 1 }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case cltd: Expr.CastLongToDouble[Row] =>
+        evalColumn(cltd.expr, columns, ColumnType.LongType).map {
+          case Column.LongColumn(data, nulls) =>
+            val out = new Array[Double](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = data(i).toDouble; i += 1 }
+            Column.double(out, nulls)
+          case _ => Column.double(Array.empty[Double])
+        }
+
+      case cts: Expr.CastToString[Row, _] =>
+        val innerType = inferExprColumnType(cts.expr, columns)
+        evalColumn(cts.expr, columns, innerType).map { col =>
+          val out = new Array[String](rowCount)
+          val nulls = col match {
+            case Column.IntColumn(_, n) => n
+            case Column.LongColumn(_, n) => n
+            case Column.DoubleColumn(_, n) => n
+            case Column.StringColumn(_, n) => n
+            case Column.BooleanColumn(_, n) => n
+            case Column.DateColumn(_, n) => n
+            case Column.AnyColumn(_, n) => n
+          }
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) = if (nulls.contains(i)) null else String.valueOf(col.getValue(i)) // scalafix:ok DisableSyntax.null
+            i += 1
+          }
+          Column.string(out, nulls)
+        }
+
+      case isDefined: Expr.IsDefined[Row, _] =>
+        val innerType = inferExprColumnType(isDefined.expr, columns)
+        evalColumn(isDefined.expr, columns, innerType).map { col =>
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case Some(_) => out(i) = true
+              case _ => out(i) = false
+            }
+            i += 1
+          }
+          Column.boolean(out)
+        }
+
+      case getOrElse: Expr.GetOrElse[Row, _] =>
+        val innerType = inferExprColumnType(getOrElse.expr, columns)
+        evalColumn(getOrElse.expr, columns, innerType).flatMap { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case Some(value) => out(i) = value
+              case _ => out(i) = getOrElse.default
+            }
+            i += 1
+          }
+          Column.fromValues(out.toVector, columnType)
+        }
+
+      case opt2iter: Expr.Option2Iterable[Row, _] =>
+        val innerType = inferExprColumnType(opt2iter.expr, columns)
+        evalColumn(opt2iter.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case Some(value) => out(i) = List(value)
+              case opt: Option[?] if opt.isEmpty => out(i) = List.empty
+              case other => out(i) = List(other)
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case sq: Expr.Sqrt[Row] =>
+        vectorizedDoubleUnaryOp(sq.expr, columns, rowCount)(Math.sqrt)
+
+      case pw: Expr.Pow[Row] =>
+        vectorizedDoubleBinOp(pw.base, pw.exponent, columns, rowCount)(Math.pow)
+
+      case lg: Expr.Log[Row] =>
+        vectorizedDoubleUnaryOp(lg.expr, columns, rowCount)(Math.log)
+
+      case lg10: Expr.Log10[Row] =>
+        vectorizedDoubleUnaryOp(lg10.expr, columns, rowCount)(Math.log10)
+
+      case lg2: Expr.Log2[Row] =>
+        vectorizedDoubleUnaryOp(lg2.expr, columns, rowCount)(v => Math.log(v) / Math.log(2.0))
+
+      case ex: Expr.Exp[Row] =>
+        vectorizedDoubleUnaryOp(ex.expr, columns, rowCount)(Math.exp)
+
+      case sn: Expr.Sin[Row] =>
+        vectorizedDoubleUnaryOp(sn.expr, columns, rowCount)(Math.sin)
+
+      case cs: Expr.Cos[Row] =>
+        vectorizedDoubleUnaryOp(cs.expr, columns, rowCount)(Math.cos)
+
+      case tn: Expr.Tan[Row] =>
+        vectorizedDoubleUnaryOp(tn.expr, columns, rowCount)(Math.tan)
+
+      case asn: Expr.Asin[Row] =>
+        vectorizedDoubleUnaryOp(asn.expr, columns, rowCount)(Math.asin)
+
+      case acs: Expr.Acos[Row] =>
+        vectorizedDoubleUnaryOp(acs.expr, columns, rowCount)(Math.acos)
+
+      case atn: Expr.Atan[Row] =>
+        vectorizedDoubleUnaryOp(atn.expr, columns, rowCount)(Math.atan)
+
+      case atn2: Expr.Atan2[Row] =>
+        vectorizedDoubleBinOp(atn2.y, atn2.x, columns, rowCount)(Math.atan2)
+
+      case sg: Expr.Signum[Row] =>
+        vectorizedDoubleUnaryOp(sg.expr, columns, rowCount)(Math.signum)
+
+      case rnd: Expr.Rand[Row] =>
+        val random = new java.util.Random(rnd.seed)
+        val out = new Array[Double](rowCount)
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) { out(i) = random.nextDouble(); i += 1 }
+        Right(Column.double(out))
+
+      case dad: Expr.DateAddDays[Row] =>
+        for {
+          dateCol <- evalColumn(dad.date, columns, ColumnType.DateType)
+          daysCol <- evalColumn(dad.days, columns, ColumnType.IntType)
+        } yield {
+          (dateCol, daysCol) match {
+            case (Column.DateColumn(dd, dn), Column.IntColumn(nd, nn)) =>
+              val combined = dn | nn
+              val out = new Array[Int](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) =
+                  if (combined.contains(i)) 0
+                  else {
+                    val d = java.time.LocalDate.ofEpochDay(dd(i).toLong)
+                    d.plusDays(nd(i).toLong).toEpochDay.toInt
+                  }
+                i += 1
+              }
+              Column.date(out, combined)
+            case _ => Column.date(Array.empty[Int])
+          }
+        }
+
+      case dsd: Expr.DateSubDays[Row] =>
+        for {
+          dateCol <- evalColumn(dsd.date, columns, ColumnType.DateType)
+          daysCol <- evalColumn(dsd.days, columns, ColumnType.IntType)
+        } yield {
+          (dateCol, daysCol) match {
+            case (Column.DateColumn(dd, dn), Column.IntColumn(nd, nn)) =>
+              val combined = dn | nn
+              val out = new Array[Int](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) =
+                  if (combined.contains(i)) 0
+                  else {
+                    val d = java.time.LocalDate.ofEpochDay(dd(i).toLong)
+                    d.minusDays(nd(i).toLong).toEpochDay.toInt
+                  }
+                i += 1
+              }
+              Column.date(out, combined)
+            case _ => Column.date(Array.empty[Int])
+          }
+        }
+
+      case dam: Expr.DateAddMonths[Row] =>
+        for {
+          dateCol <- evalColumn(dam.date, columns, ColumnType.DateType)
+          monthsCol <- evalColumn(dam.months, columns, ColumnType.IntType)
+        } yield {
+          (dateCol, monthsCol) match {
+            case (Column.DateColumn(dd, dn), Column.IntColumn(md, mn)) =>
+              val combined = dn | mn
+              val out = new Array[Int](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) =
+                  if (combined.contains(i)) 0
+                  else {
+                    val d = java.time.LocalDate.ofEpochDay(dd(i).toLong)
+                    d.plusMonths(md(i).toLong).toEpochDay.toInt
+                  }
+                i += 1
+              }
+              Column.date(out, combined)
+            case _ => Column.date(Array.empty[Int])
+          }
+        }
+
+      case dd: Expr.DateDiff[Row] =>
+        for {
+          leftCol <- evalColumn(dd.left, columns, ColumnType.DateType)
+          rightCol <- evalColumn(dd.right, columns, ColumnType.DateType)
+        } yield {
+          (leftCol, rightCol) match {
+            case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn)) =>
+              val combined = ln | rn
+              val out = new Array[Int](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) =
+                  if (combined.contains(i)) 0
+                  else {
+                    val l = java.time.LocalDate.ofEpochDay(ld(i).toLong)
+                    val r = java.time.LocalDate.ofEpochDay(rd(i).toLong)
+                    java.time.temporal.ChronoUnit.DAYS.between(r, l).toInt
+                  }
+                i += 1
+              }
+              Column.int(out, combined)
+            case _ => Column.int(Array.empty[Int])
+          }
+        }
+
+      case ey: Expr.ExtractYear[Row] =>
+        evalColumn(ey.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) 0 else java.time.LocalDate.ofEpochDay(data(i).toLong).getYear
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case em: Expr.ExtractMonth[Row] =>
+        evalColumn(em.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) 0 else java.time.LocalDate.ofEpochDay(data(i).toLong).getMonthValue
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case ed: Expr.ExtractDay[Row] =>
+        evalColumn(ed.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) 0 else java.time.LocalDate.ofEpochDay(data(i).toLong).getDayOfMonth
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case dow: Expr.DayOfWeek[Row] =>
+        evalColumn(dow.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) 0
+                else java.time.LocalDate.ofEpochDay(data(i).toLong).getDayOfWeek.getValue % 7 + 1
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case doy: Expr.DayOfYear[Row] =>
+        evalColumn(doy.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (nulls.contains(i)) 0 else java.time.LocalDate.ofEpochDay(data(i).toLong).getDayOfYear
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case woy: Expr.WeekOfYear[Row] =>
+        evalColumn(woy.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) 0
+                else
+                  java.time.LocalDate
+                    .ofEpochDay(data(i).toLong)
+                    .get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case q: Expr.Quarter[Row] =>
+        evalColumn(q.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) 0
+                else {
+                  val m = java.time.LocalDate.ofEpochDay(data(i).toLong).getMonthValue
+                  (m - 1) / 3 + 1
+                }
+              i += 1
+            }
+            Column.int(out, nulls)
+          case _ => Column.int(Array.empty[Int])
+        }
+
+      case ld: Expr.LastDay[Row] =>
+        evalColumn(ld.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) 0
+                else {
+                  val d = java.time.LocalDate.ofEpochDay(data(i).toLong)
+                  d.withDayOfMonth(d.lengthOfMonth()).toEpochDay.toInt
+                }
+              i += 1
+            }
+            Column.date(out, nulls)
+          case _ => Column.date(Array.empty[Int])
+        }
+
+      case nd: Expr.NextDay[Row] =>
+        evalColumn(nd.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase.nn)
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) 0
+                else {
+                  val d = java.time.LocalDate.ofEpochDay(data(i).toLong)
+                  d.`with`(java.time.temporal.TemporalAdjusters.next(target)).toEpochDay.toInt
+                }
+              i += 1
+            }
+            Column.date(out, nulls)
+          case _ => Column.date(Array.empty[Int])
+        }
+
+      case mb: Expr.MonthsBetween[Row] =>
+        for {
+          endCol <- evalColumn(mb.end, columns, ColumnType.DateType)
+          startCol <- evalColumn(mb.start, columns, ColumnType.DateType)
+        } yield {
+          (endCol, startCol) match {
+            case (Column.DateColumn(ed, en), Column.DateColumn(sd, sn)) =>
+              val combined = en | sn
+              val out = new Array[Double](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) =
+                  if (combined.contains(i)) 0.0
+                  else {
+                    val e = java.time.LocalDate.ofEpochDay(ed(i).toLong)
+                    val s = java.time.LocalDate.ofEpochDay(sd(i).toLong)
+                    val period = java.time.Period.between(s, e)
+                    period.toTotalMonths.toDouble + period.getDays.toDouble / 31.0
+                  }
+                i += 1
+              }
+              Column.double(out, combined)
+            case _ => Column.double(Array.empty[Double])
+          }
+        }
+
+      case dt: Expr.DateTrunc[Row] =>
+        evalColumn(dt.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val out = new Array[Int](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) 0
+                else {
+                  val d = java.time.LocalDate.ofEpochDay(data(i).toLong)
+                  val truncated = dt.unit.toUpperCase.nn match {
+                    case "YEAR" => d.withDayOfYear(1)
+                    case "MONTH" => d.withDayOfMonth(1)
+                    case "WEEK" =>
+                      d.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
+                    case "QUARTER" =>
+                      val qMonth = (d.getMonthValue - 1) / 3 * 3 + 1
+                      java.time.LocalDate.of(d.getYear, qMonth, 1)
+                    case _ => d
+                  }
+                  truncated.toEpochDay.toInt
+                }
+              i += 1
+            }
+            Column.date(out, nulls)
+          case _ => Column.date(Array.empty[Int])
+        }
+
+      case df: Expr.DateFormat[Row] =>
+        evalColumn(df.date, columns, ColumnType.DateType).map {
+          case Column.DateColumn(data, nulls) =>
+            val formatter = java.time.format.DateTimeFormatter.ofPattern(df.format)
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else java.time.LocalDate.ofEpochDay(data(i).toLong).format(formatter)
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case md: Expr.MakeDate[Row] =>
+        for {
+          yearCol <- evalColumn(md.year, columns, ColumnType.IntType)
+          monthCol <- evalColumn(md.month, columns, ColumnType.IntType)
+          dayCol <- evalColumn(md.day, columns, ColumnType.IntType)
+        } yield {
+          (yearCol, monthCol, dayCol) match {
+            case (Column.IntColumn(yd, yn), Column.IntColumn(mdata, mn), Column.IntColumn(dd, dn)) =>
+              val combined = yn | mn | dn
+              val out = new Array[Int](rowCount)
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                out(i) =
+                  if (combined.contains(i)) 0
+                  else java.time.LocalDate.of(yd(i), mdata(i), dd(i)).toEpochDay.toInt
+                i += 1
+              }
+              Column.date(out, combined)
+            case _ => Column.date(Array.empty[Int])
+          }
+        }
+
+      case as: Expr.ArraySize[Row, _] =>
+        val innerType = inferExprColumnType(as.expr, columns)
+        evalColumn(as.expr, columns, innerType).map { col =>
+          val out = new Array[Int](rowCount)
+          val nulls = col match {
+            case Column.AnyColumn(_, n) => n
+            case _ => BitSet.empty
+          }
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) =
+              if (nulls.contains(i)) 0
+              else
+                col.getValue(i) match {
+                  case s: Seq[?] => s.size
+                  case _ => 0
+                }
+            i += 1
+          }
+          Column.int(out, nulls)
+        }
+
+      case ac: Expr.ArrayContains[Row, _] =>
+        val arrType = inferExprColumnType(ac.expr, columns)
+        val valType = inferExprColumnType(ac.value, columns)
+        for {
+          arrCol <- evalColumn(ac.expr, columns, arrType)
+          valCol <- evalColumn(ac.value, columns, valType)
+        } yield {
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            val arr = arrCol.getValue(i)
+            val v = valCol.getValue(i)
+            out(i) = arr match {
+              case s: Seq[?] => s.contains(v)
+              case _ => false
+            }
+            i += 1
+          }
+          Column.boolean(out)
+        }
+
+      case _: Expr.Explode[Row, _] =>
+        Left(ExecutionError.UnsupportedOperation("Explode requires Dataset-level handling"))
+
+      case _: Expr.ArraySort[Row, _] =>
+        Left(ExecutionError.UnsupportedOperation("ArraySort on untyped columns not supported"))
+
+      case ad: Expr.ArrayDistinct[Row, _] =>
+        val innerType = inferExprColumnType(ad.expr, columns)
+        evalColumn(ad.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          val nulls = col match {
+            case Column.AnyColumn(_, n) => n
+            case _ => BitSet.empty
+          }
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            out(i) =
+              if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+              else
+                col.getValue(i) match {
+                  case s: Seq[?] => s.distinct
+                  case other => other
+                }
+            i += 1
+          }
+          Column.any(out, nulls)
+        }
+
+      case au: Expr.ArrayUnion[Row, _] =>
+        val innerType = inferExprColumnType(au.left, columns)
+        for {
+          leftCol <- evalColumn(au.left, columns, innerType)
+          rightCol <- evalColumn(au.right, columns, innerType)
+        } yield {
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (leftCol.getValue(i), rightCol.getValue(i)) match {
+              case (l: Seq[?], r: Seq[?]) => out(i) = (l ++ r).distinct
+              case _ => out(i) = Seq.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case ai: Expr.ArrayIntersect[Row, _] =>
+        val innerType = inferExprColumnType(ai.left, columns)
+        for {
+          leftCol <- evalColumn(ai.left, columns, innerType)
+          rightCol <- evalColumn(ai.right, columns, innerType)
+        } yield {
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (leftCol.getValue(i), rightCol.getValue(i)) match {
+              case (l: Seq[?], r: Seq[?]) => out(i) = l.intersect(r)
+              case _ => out(i) = Seq.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case ae: Expr.ArrayExcept[Row, _] =>
+        val innerType = inferExprColumnType(ae.left, columns)
+        for {
+          leftCol <- evalColumn(ae.left, columns, innerType)
+          rightCol <- evalColumn(ae.right, columns, innerType)
+        } yield {
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (leftCol.getValue(i), rightCol.getValue(i)) match {
+              case (l: Seq[?], r: Seq[?]) => out(i) = l.diff(r)
+              case _ => out(i) = Seq.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case fl: Expr.Flatten[Row, _] =>
+        val innerType = inferExprColumnType(fl.expr, columns)
+        evalColumn(fl.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case s: Seq[Seq[?] @unchecked] => out(i) = s.flatten
+              case other => out(i) = other
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case ea: Expr.ElementAt[Row, _] =>
+        val arrType = inferExprColumnType(ea.expr, columns)
+        for {
+          arrCol <- evalColumn(ea.expr, columns, arrType)
+          idxCol <- evalColumn(ea.index, columns, ColumnType.IntType)
+        } yield {
+          val out = new Array[Any](rowCount)
+          val outNulls = scala.collection.mutable.BitSet.empty
+          idxCol match {
+            case Column.IntColumn(idxData, _) =>
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < rowCount) {
+                arrCol.getValue(i) match {
+                  case s: Seq[?] =>
+                    val idx = idxData(i)
+                    val resolved = if (idx > 0) idx - 1 else s.size + idx
+                    if (resolved >= 0 && resolved < s.size) {
+                      out(i) = s(resolved)
+                    } else {
+                      out(i) = null // scalafix:ok DisableSyntax.null
+                      outNulls += i
+                    }
+                  case _ =>
+                    out(i) = null // scalafix:ok DisableSyntax.null
+                    outNulls += i
+                }
+                i += 1
+              }
+            case _ => ()
+          }
+          Column.any(out, BitSet.empty ++ outNulls)
+        }
+
+      case as: Expr.ArraySlice[Row, _] =>
+        val innerType = inferExprColumnType(as.expr, columns)
+        evalColumn(as.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case s: Seq[?] =>
+                val start = Math.max(as.start - 1, 0)
+                out(i) = s.slice(start, start + as.length)
+              case other => out(i) = other
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case mk: Expr.MapKeys[Row, _, _] =>
+        val innerType = inferExprColumnType(mk.expr, columns)
+        evalColumn(mk.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case m: Map[?, ?] => out(i) = m.keys.toSeq
+              case _ => out(i) = Seq.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case mv: Expr.MapValues[Row, _, _] =>
+        val innerType = inferExprColumnType(mv.expr, columns)
+        evalColumn(mv.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case m: Map[?, ?] => out(i) = m.values.toSeq
+              case _ => out(i) = Seq.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case mck: Expr.MapContainsKey[Row, _, _] =>
+        val mapType = inferExprColumnType(mck.expr, columns)
+        val keyType = inferExprColumnType(mck.key, columns)
+        for {
+          mapCol <- evalColumn(mck.expr, columns, mapType)
+          keyCol <- evalColumn(mck.key, columns, keyType)
+        } yield {
+          val out = new Array[Boolean](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            mapCol.getValue(i) match {
+              case m: Map[?, ?] =>
+                out(i) = m.keys.exists(java.util.Objects.equals(_, keyCol.getValue(i)))
+              case _ => out(i) = false
+            }
+            i += 1
+          }
+          Column.boolean(out)
+        }
+
+      case me: Expr.MapEntries[Row, _, _] =>
+        val innerType = inferExprColumnType(me.expr, columns)
+        evalColumn(me.expr, columns, innerType).map { col =>
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            col.getValue(i) match {
+              case m: Map[?, ?] => out(i) = m.toSeq
+              case _ => out(i) = Seq.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case mfa: Expr.MapFromArrays[Row, _, _] =>
+        val keysType = inferExprColumnType(mfa.keys, columns)
+        val valsType = inferExprColumnType(mfa.values, columns)
+        for {
+          keysCol <- evalColumn(mfa.keys, columns, keysType)
+          valsCol <- evalColumn(mfa.values, columns, valsType)
+        } yield {
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (keysCol.getValue(i), valsCol.getValue(i)) match {
+              case (ks: Seq[?], vs: Seq[?]) => out(i) = ks.zip(vs).toMap
+              case _ => out(i) = Map.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case mc: Expr.MapConcat[Row, _, _] =>
+        val innerType = inferExprColumnType(mc.left, columns)
+        for {
+          leftCol <- evalColumn(mc.left, columns, innerType)
+          rightCol <- evalColumn(mc.right, columns, innerType)
+        } yield {
+          val out = new Array[Any](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (leftCol.getValue(i), rightCol.getValue(i)) match {
+              case (l: Map[?, ?], r: Map[?, ?]) =>
+                out(i) = (l.toSeq ++ r.toSeq).toMap
+              case _ => out(i) = Map.empty
+            }
+            i += 1
+          }
+          Column.any(out)
+        }
+
+      case md: Expr.Md5[Row] =>
+        vectorizedStringHash(md.expr, columns, rowCount)("MD5")
+
+      case sh: Expr.Sha1[Row] =>
+        vectorizedStringHash(sh.expr, columns, rowCount)("SHA-1")
+
+      case sh2: Expr.Sha2[Row] =>
+        vectorizedStringHash(sh2.expr, columns, rowCount)(sha2Algorithm(sh2.bitLength))
+
+      case ue: Expr.UrlEncode[Row] =>
+        evalColumn(ue.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else java.net.URLEncoder.encode(data(i), "UTF-8").nn
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case ud: Expr.UrlDecode[Row] =>
+        evalColumn(ud.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else java.net.URLDecoder.decode(data(i), "UTF-8").nn
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case b64e: Expr.Base64Encode[Row] =>
+        evalColumn(b64e.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val encoder = java.util.Base64.getEncoder.nn
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else encoder.encodeToString(data(i).getBytes("UTF-8")).nn
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case b64d: Expr.Base64Decode[Row] =>
+        evalColumn(b64d.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val decoder = java.util.Base64.getDecoder.nn
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else new String(decoder.decode(data(i)), "UTF-8")
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case hx: Expr.Hex[Row] =>
+        evalColumn(hx.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) =
+                if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
+                else hexEncode(data(i).getBytes("UTF-8"))
+              i += 1
+            }
+            Column.string(out, nulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case gjo: Expr.GetJsonObject[Row] =>
+        evalColumn(gjo.expr, columns, ColumnType.StringType).map {
+          case Column.StringColumn(data, nulls) =>
+            val out = new Array[String](rowCount)
+            val outNulls = scala.collection.mutable.BitSet.empty
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (nulls.contains(i)) {
+                out(i) = null // scalafix:ok DisableSyntax.null
+                outNulls += i
+              } else {
+                extractJsonPath(data(i), gjo.path) match {
+                  case Right(v) =>
+                    if (Option(v).isEmpty) {
+                      out(i) = null // scalafix:ok DisableSyntax.null
+                      outNulls += i
+                    } else {
+                      out(i) = v
+                    }
+                  case Left(_) =>
+                    out(i) = null // scalafix:ok DisableSyntax.null
+                    outNulls += i
+                }
+              }
+              i += 1
+            }
+            Column.string(out, BitSet.empty ++ outNulls)
+          case _ => Column.string(Array.empty[String])
+        }
+
+      case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] |
+          _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
+          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] | _: Expr.First[Row, ?] | _: Expr.Collect[Row, ?] |
+          _: Expr.PercentileApprox[Row] | _: Expr.MaxBy[Row, ?, ?] | _: Expr.MinBy[Row, ?, ?] | _: Expr.MaxN[Row, ?] |
+          _: Expr.MinN[Row, ?] | _: Expr.MaxByN[Row, ?, ?] | _: Expr.MinByN[Row, ?, ?] | _: Expr.Variance[Row] |
+          _: Expr.VariancePop[Row] | _: Expr.ApproxCountDistinct[Row, ?] | _: Expr.CollectSet[Row, ?] |
+          _: Expr.ExprLast[Row, ?] | _: Expr.AnyValue[Row, ?] | _: Expr.BoolAnd[Row] | _: Expr.BoolOr[Row] |
+          _: Expr.Corr[Row] | _: Expr.CovarSamp[Row] | _: Expr.CovarPop[Row] | _: Expr.Median[Row] |
+          _: Expr.Mode[Row, ?] =>
+        Left(ExecutionError.UnsupportedOperation("Aggregations not supported in columnar evalColumn"))
+
+      case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
+          _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
+          _: Expr.NthValue[Row, ?] | _: Expr.FirstValue[Row, ?] | _: Expr.LastValue[Row, ?] =>
+        Left(ExecutionError.UnsupportedOperation("Window functions not supported in columnar evalColumn"))
     }
   }
 
@@ -1603,12 +3059,15 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, ColumnType.IntType)
       rightCol <- evalColumn(right, columns, ColumnType.IntType)
     } yield {
-      val ld = leftCol.asInstanceOf[Column.IntColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-      val rd = rightCol.asInstanceOf[Column.IntColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-      val out = new Array[Int](rowCount)
-      var i = 0 // scalafix:ok DisableSyntax.var
-      while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
-      Column.int(out)
+      (leftCol, rightCol) match {
+        case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn)) =>
+          val out = new Array[Int](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
+          Column.int(out, ln | rn)
+        case _ =>
+          Column.int(Array.empty[Int])
+      }
     }
   }
 
@@ -1633,12 +3092,15 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, ColumnType.LongType)
       rightCol <- evalColumn(right, columns, ColumnType.LongType)
     } yield {
-      val ld = leftCol.asInstanceOf[Column.LongColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-      val rd = rightCol.asInstanceOf[Column.LongColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-      val out = new Array[Long](rowCount)
-      var i = 0 // scalafix:ok DisableSyntax.var
-      while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
-      Column.long(out)
+      (leftCol, rightCol) match {
+        case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn)) =>
+          val out = new Array[Long](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
+          Column.long(out, ln | rn)
+        case _ =>
+          Column.long(Array.empty[Long])
+      }
     }
   }
 
@@ -1667,12 +3129,15 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, ColumnType.DoubleType)
       rightCol <- evalColumn(right, columns, ColumnType.DoubleType)
     } yield {
-      val ld = leftCol.asInstanceOf[Column.DoubleColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-      val rd = rightCol.asInstanceOf[Column.DoubleColumn].data // scalafix:ok DisableSyntax.asInstanceOf
-      val out = new Array[Double](rowCount)
-      var i = 0 // scalafix:ok DisableSyntax.var
-      while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
-      Column.double(out)
+      (leftCol, rightCol) match {
+        case (Column.DoubleColumn(ld, ln), Column.DoubleColumn(rd, rn)) =>
+          val out = new Array[Double](rowCount)
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) { out(i) = op(ld(i), rd(i)); i += 1 }
+          Column.double(out, ln | rn)
+        case _ =>
+          Column.double(Array.empty[Double])
+      }
     }
   }
 
@@ -1691,7 +3156,55 @@ object ExprInterpreter {
     Right(Column.double(out))
   }
 
-  private def vectorizedComparison[Row, A](
+  private def typedComparison[Row, A](
+    left: Expr[Row, A],
+    right: Expr[Row, A],
+    columns: Vector[Column],
+    rowCount: Int
+  )(
+    intCmp: (Int, Int) => Boolean,
+    longCmp: (Long, Long) => Boolean,
+    doubleCmp: (Double, Double) => Boolean,
+    stringCmp: (String, String) => Boolean
+  ): Either[ExecutionError, Column] = {
+    val opType = inferExprColumnType(left, columns)
+    for {
+      leftCol <- evalColumn(left, columns, opType)
+      rightCol <- evalColumn(right, columns, opType)
+      result <- {
+        val out = new Array[Boolean](rowCount)
+        (leftCol, rightCol) match {
+          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn)) =>
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = intCmp(ld(i), rd(i)); i += 1 }
+            Right(Column.boolean(out, ln | rn))
+          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn)) =>
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = longCmp(ld(i), rd(i)); i += 1 }
+            Right(Column.boolean(out, ln | rn))
+          case (Column.DoubleColumn(ld, ln), Column.DoubleColumn(rd, rn)) =>
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = doubleCmp(ld(i), rd(i)); i += 1 }
+            Right(Column.boolean(out, ln | rn))
+          case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              out(i) = if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i), rd(i))
+              i += 1
+            }
+            Right(Column.boolean(out, ln | rn))
+          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn)) =>
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) { out(i) = intCmp(ld(i), rd(i)); i += 1 }
+            Right(Column.boolean(out, ln | rn))
+          case _ =>
+            Left(ExecutionError.UnsupportedOperation("Comparison not supported for untyped columns"))
+        }
+      }
+    } yield result
+  }
+
+  private def equalityComparison[Row, A](
     left: Expr[Row, A],
     right: Expr[Row, A],
     columns: Vector[Column],
@@ -1712,20 +3225,71 @@ object ExprInterpreter {
     }
   }
 
-  private def evalColumnRowByRow[Row, A](
-    expr: Expr[Row, A],
-    columns: Vector[Column],
-    columnType: ColumnType,
+  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column] = {
+    val out = new Array[Int](rowCount)
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
+      if (right(i) == 0) return Left(ExecutionError.DivisionByZero(i)) // scalafix:ok DisableSyntax.return
+      out(i) = left(i) % right(i)
+      i += 1
+    }
+    Right(Column.int(out))
+  }
+
+  private def vectorizedLongMod(
+    left: Array[Long],
+    right: Array[Long],
     rowCount: Int
   ): Either[ExecutionError, Column] = {
-    val valuesOrError = (0 until rowCount).foldLeft[Either[ExecutionError, Vector[Any]]](
-      Right(Vector.empty)
-    ) { (acc, rowIdx) =>
-      acc.flatMap { values =>
-        eval(expr, columns, RowIndex(rowIdx)).map(values :+ _)
-      }
+    val out = new Array[Long](rowCount)
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
+      if (right(i) == 0L) return Left(ExecutionError.DivisionByZero(i)) // scalafix:ok DisableSyntax.return
+      out(i) = left(i) % right(i)
+      i += 1
     }
-    valuesOrError.flatMap(values => Column.fromValues(values, columnType))
+    Right(Column.long(out))
+  }
+
+  private def vectorizedDoubleUnaryOp[Row](
+    expr: Expr[Row, Double],
+    columns: Vector[Column],
+    rowCount: Int
+  )(op: Double => Double): Either[ExecutionError, Column] = {
+    evalColumn(expr, columns, ColumnType.DoubleType).map {
+      case Column.DoubleColumn(data, nulls) =>
+        val out = new Array[Double](rowCount)
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) { out(i) = op(data(i)); i += 1 }
+        Column.double(out, nulls)
+      case _ =>
+        Column.double(Array.empty[Double])
+    }
+  }
+
+  private def vectorizedStringHash[Row](
+    expr: Expr[Row, String],
+    columns: Vector[Column],
+    rowCount: Int
+  )(algorithm: String): Either[ExecutionError, Column] = {
+    evalColumn(expr, columns, ColumnType.StringType).map {
+      case Column.StringColumn(data, nulls) =>
+        val digest = java.security.MessageDigest.getInstance(algorithm).nn
+        val out = new Array[String](rowCount)
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (nulls.contains(i)) {
+            out(i) = null // scalafix:ok DisableSyntax.null
+          } else {
+            digest.reset()
+            out(i) = hexEncode(digest.digest(data(i).getBytes("UTF-8")).nn)
+          }
+          i += 1
+        }
+        Column.string(out, nulls)
+      case _ =>
+        Column.string(Array.empty[String])
+    }
   }
 
   /** Evaluate aggregation expression over entire dataset.

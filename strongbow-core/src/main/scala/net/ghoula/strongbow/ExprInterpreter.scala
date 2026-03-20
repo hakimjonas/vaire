@@ -3294,8 +3294,15 @@ object ExprInterpreter {
 
   /** Evaluate aggregation expression over entire dataset.
     *
-    * Aggregations operate on all rows to produce a single value. GADT pattern matching ensures
-    * type-safe aggregation logic without casts.
+    * Aggregations operate on all rows to produce a single value. GADT pattern matching refines the
+    * return type A for each case — e.g. matching Expr.Sum[Row] refines A to Int, so Right(total)
+    * where total: Int typechecks as Either[ExecutionError, A] without any cast.
+    *
+    * Fixed-type aggregations (Sum, Avg, StdDev, etc.) operate on typed columns directly via
+    * evalColumn for columnar performance. Generic aggregations (Max, Collect, etc.) use per-row
+    * eval to preserve GADT type evidence through the existential type parameter.
+    *
+    * Zero asInstanceOf — all type safety comes from GADT refinement.
     */
   def evalAggregation[Row, A](
     expr: Expr[Row, A],
@@ -3303,187 +3310,464 @@ object ExprInterpreter {
   ): Either[ExecutionError, A] = {
     if (columns.isEmpty || columns.head.length == 0) {
       (expr: @unchecked) match {
-        case _: Expr.Count[Row] =>
-          Right(0L)
-        case _: Expr.Sum[Row] =>
-          Right(0)
-        case _: Expr.SumDouble[Row] =>
-          Right(0.0)
-        case _: Expr.SumLong[Row] =>
-          Right(0L)
-        case _: Expr.Avg[Row] =>
-          Right(0.0)
-        case _: Expr.Max[Row, ?] =>
-          Right(None)
-        case _: Expr.Min[Row, ?] =>
-          Right(None)
-        case _: Expr.CountDistinct[Row, ?] =>
-          Right(0L)
-        case _: Expr.CountIf[Row] =>
-          Right(0L)
-        case _: Expr.StdDev[Row] =>
-          Right(0.0)
-        case _: Expr.StdDevPop[Row] =>
-          Right(0.0)
-        case _: Expr.First[Row, ?] =>
-          Right(None)
-        case _: Expr.Collect[Row, ?] =>
-          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-        case _: Expr.PercentileApprox[Row] =>
-          Right(0.0)
-        case _: Expr.MaxBy[Row, ?, ?] =>
-          Right(None)
-        case _: Expr.MinBy[Row, ?, ?] =>
-          Right(None)
-        case _: Expr.MaxN[Row, ?] =>
-          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-        case _: Expr.MinN[Row, ?] =>
-          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-        case _: Expr.MaxByN[Row, ?, ?] =>
-          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-        case _: Expr.MinByN[Row, ?, ?] =>
-          Right(Seq.empty.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+        case _: Expr.Count[Row] => Right(0L)
+        case _: Expr.Sum[Row] => Right(0)
+        case _: Expr.SumDouble[Row] => Right(0.0)
+        case _: Expr.SumLong[Row] => Right(0L)
+        case _: Expr.Avg[Row] => Right(0.0)
+        case _: Expr.Max[Row, ?] => Right(None)
+        case _: Expr.Min[Row, ?] => Right(None)
+        case _: Expr.CountDistinct[Row, ?] => Right(0L)
+        case _: Expr.CountIf[Row] => Right(0L)
+        case _: Expr.StdDev[Row] => Right(0.0)
+        case _: Expr.StdDevPop[Row] => Right(0.0)
+        case _: Expr.First[Row, ?] => Right(None)
+        case _: Expr.Collect[Row, a] => Right(Seq.empty[a])
+        case _: Expr.PercentileApprox[Row] => Right(0.0)
+        case _: Expr.MaxBy[Row, ?, ?] => Right(None)
+        case _: Expr.MinBy[Row, ?, ?] => Right(None)
+        case _: Expr.MaxN[Row, a] => Right(Seq.empty[a])
+        case _: Expr.MinN[Row, a] => Right(Seq.empty[a])
+        case _: Expr.MaxByN[Row, a, ?] => Right(Seq.empty[a])
+        case _: Expr.MinByN[Row, a, ?] => Right(Seq.empty[a])
+        case _: Expr.Variance[Row] => Right(0.0)
+        case _: Expr.VariancePop[Row] => Right(0.0)
+        case _: Expr.ApproxCountDistinct[Row, ?] => Right(0L)
+        case _: Expr.CollectSet[Row, a] => Right(Seq.empty[a])
+        case _: Expr.ExprLast[Row, ?] => Right(None)
+        case _: Expr.AnyValue[Row, ?] => Right(None)
+        case _: Expr.BoolAnd[Row] => Right(true)
+        case _: Expr.BoolOr[Row] => Right(false)
+        case _: Expr.Corr[Row] => Right(0.0)
+        case _: Expr.CovarSamp[Row] => Right(0.0)
+        case _: Expr.CovarPop[Row] => Right(0.0)
+        case _: Expr.Median[Row] => Right(0.0)
+        case _: Expr.Mode[Row, ?] => Right(None)
       }
     } else {
+      val rowCount = columns.head.length
       (expr: @unchecked) match {
         case Expr.Count() =>
-          Right(columns.head.length.toLong)
+          Right(rowCount.toLong)
+
+
 
         case sum: Expr.Sum[Row] =>
-          val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Int]](Right(0)) { (acc, rowIdx) =>
-            acc.flatMap { currentSum =>
-              eval(sum.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+          evalColumn(sum.expr, columns, ColumnType.IntType).map { col =>
+            col match {
+              case Column.IntColumn(data, nulls) =>
+                var total = 0 // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length) {
+                  if (!nulls.contains(i)) total += data(i)
+                  i += 1
+                }
+                total
+              case _ => 0
             }
           }
 
         case sumD: Expr.SumDouble[Row] =>
-          val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Double]](Right(0.0)) { (acc, rowIdx) =>
-            acc.flatMap { currentSum =>
-              eval(sumD.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+          evalColumn(sumD.expr, columns, ColumnType.DoubleType).map { col =>
+            col match {
+              case Column.DoubleColumn(data, nulls) =>
+                var total = 0.0 // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length) {
+                  if (!nulls.contains(i)) total += data(i)
+                  i += 1
+                }
+                total
+              case _ => 0.0
             }
           }
 
         case sumL: Expr.SumLong[Row] =>
-          val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Long]](Right(0L)) { (acc, rowIdx) =>
-            acc.flatMap { currentSum =>
-              eval(sumL.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+          evalColumn(sumL.expr, columns, ColumnType.LongType).map { col =>
+            col match {
+              case Column.LongColumn(data, nulls) =>
+                var total = 0L // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length) {
+                  if (!nulls.contains(i)) total += data(i)
+                  i += 1
+                }
+                total
+              case _ => 0L
             }
           }
 
         case avg: Expr.Avg[Row] =>
-          val rowCount = columns.head.length
-          val sumResult = (0 until rowCount).foldLeft[Either[ExecutionError, Double]](Right(0.0)) { (acc, rowIdx) =>
-            acc.flatMap { currentSum =>
-              eval(avg.expr, columns, RowIndex(rowIdx)).map(currentSum + _)
+          evalColumn(avg.expr, columns, ColumnType.DoubleType).map { col =>
+            col match {
+              case Column.DoubleColumn(data, nulls) =>
+                var total = 0.0 // scalafix:ok DisableSyntax.var
+                var count = 0 // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length) {
+                  if (!nulls.contains(i)) { total += data(i); count += 1 }
+                  i += 1
+                }
+                if (count == 0) 0.0 else total / count
+              case _ => 0.0
             }
           }
-          sumResult.map(_ / rowCount)
+
+        case countIf: Expr.CountIf[Row] =>
+          evalColumn(countIf.predicate, columns, ColumnType.BooleanType).map { col =>
+            col match {
+              case Column.BooleanColumn(data, nulls) =>
+                var count = 0L // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length) {
+                  if (!nulls.contains(i) && data(i)) count += 1L
+                  i += 1
+                }
+                count
+              case _ => 0L
+            }
+          }
+
+        case sd: Expr.StdDev[Row] =>
+          aggregateDoubleExpr(sd.expr, columns) { (data, nulls) =>
+            val (sum, count) = sumAndCount(data, nulls)
+            if (count <= 1) 0.0
+            else {
+              val mean = sum / count
+              var variance = 0.0 // scalafix:ok DisableSyntax.var
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < data.length) {
+                if (!nulls.contains(i)) { val d = data(i) - mean; variance += d * d }
+                i += 1
+              }
+              math.sqrt(variance / (count - 1))
+            }
+          }
+
+        case sdp: Expr.StdDevPop[Row] =>
+          aggregateDoubleExpr(sdp.expr, columns) { (data, nulls) =>
+            val (sum, count) = sumAndCount(data, nulls)
+            if (count == 0) 0.0
+            else {
+              val mean = sum / count
+              var variance = 0.0 // scalafix:ok DisableSyntax.var
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < data.length) {
+                if (!nulls.contains(i)) { val d = data(i) - mean; variance += d * d }
+                i += 1
+              }
+              math.sqrt(variance / count)
+            }
+          }
+
+        case pct: Expr.PercentileApprox[Row] =>
+          aggregateDoubleExpr(pct.expr, columns) { (data, nulls) =>
+            val nonNull = collectNonNullDoubles(data, nulls)
+            if (nonNull.isEmpty) 0.0
+            else {
+              java.util.Arrays.sort(nonNull)
+              val idx = math.min((nonNull.length * pct.percentile).toInt, nonNull.length - 1)
+              nonNull(idx)
+            }
+          }
+
+        case ba: Expr.BoolAnd[Row] =>
+          evalColumn(ba.expr, columns, ColumnType.BooleanType).map { col =>
+            col match {
+              case Column.BooleanColumn(data, nulls) =>
+                var result = true // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length && result) {
+                  if (!nulls.contains(i) && !data(i)) result = false
+                  i += 1
+                }
+                result
+              case _ => true
+            }
+          }
+
+        case bo: Expr.BoolOr[Row] =>
+          evalColumn(bo.expr, columns, ColumnType.BooleanType).map { col =>
+            col match {
+              case Column.BooleanColumn(data, nulls) =>
+                var result = false // scalafix:ok DisableSyntax.var
+                var i = 0 // scalafix:ok DisableSyntax.var
+                while (i < data.length && !result) {
+                  if (!nulls.contains(i) && data(i)) result = true
+                  i += 1
+                }
+                result
+              case _ => false
+            }
+          }
+
+        case v: Expr.Variance[Row] =>
+          aggregateDoubleExpr(v.expr, columns) { (data, nulls) =>
+            val (sum, count) = sumAndCount(data, nulls)
+            if (count <= 1) 0.0
+            else {
+              val mean = sum / count
+              var variance = 0.0 // scalafix:ok DisableSyntax.var
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < data.length) {
+                if (!nulls.contains(i)) { val d = data(i) - mean; variance += d * d }
+                i += 1
+              }
+              variance / (count - 1)
+            }
+          }
+
+        case vp: Expr.VariancePop[Row] =>
+          aggregateDoubleExpr(vp.expr, columns) { (data, nulls) =>
+            val (sum, count) = sumAndCount(data, nulls)
+            if (count == 0) 0.0
+            else {
+              val mean = sum / count
+              var variance = 0.0 // scalafix:ok DisableSyntax.var
+              var i = 0 // scalafix:ok DisableSyntax.var
+              while (i < data.length) {
+                if (!nulls.contains(i)) { val d = data(i) - mean; variance += d * d }
+                i += 1
+              }
+              variance / count
+            }
+          }
+
+        case corr: Expr.Corr[Row] =>
+          for {
+            leftCol <- evalColumn(corr.left, columns, ColumnType.DoubleType)
+            rightCol <- evalColumn(corr.right, columns, ColumnType.DoubleType)
+          } yield {
+            (leftCol, rightCol) match {
+              case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
+                val combinedNulls = xNulls | yNulls
+                val (xSum, n) = sumAndCount(xData, combinedNulls)
+                val (ySum, _) = sumAndCount(yData, combinedNulls)
+                if (n <= 1) 0.0
+                else {
+                  val xMean = xSum / n
+                  val yMean = ySum / n
+                  var cov = 0.0 // scalafix:ok DisableSyntax.var
+                  var xVar = 0.0 // scalafix:ok DisableSyntax.var
+                  var yVar = 0.0 // scalafix:ok DisableSyntax.var
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < xData.length) {
+                    if (!combinedNulls.contains(i)) {
+                      val dx = xData(i) - xMean
+                      val dy = yData(i) - yMean
+                      cov += dx * dy
+                      xVar += dx * dx
+                      yVar += dy * dy
+                    }
+                    i += 1
+                  }
+                  val denom = math.sqrt(xVar * yVar)
+                  if (denom == 0.0) 0.0 else cov / denom
+                }
+              case _ => 0.0
+            }
+          }
+
+        case cs: Expr.CovarSamp[Row] =>
+          for {
+            leftCol <- evalColumn(cs.left, columns, ColumnType.DoubleType)
+            rightCol <- evalColumn(cs.right, columns, ColumnType.DoubleType)
+          } yield {
+            (leftCol, rightCol) match {
+              case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
+                val combinedNulls = xNulls | yNulls
+                val (xSum, n) = sumAndCount(xData, combinedNulls)
+                val (ySum, _) = sumAndCount(yData, combinedNulls)
+                if (n <= 1) 0.0
+                else {
+                  val xMean = xSum / n
+                  val yMean = ySum / n
+                  var cov = 0.0 // scalafix:ok DisableSyntax.var
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < xData.length) {
+                    if (!combinedNulls.contains(i)) cov += (xData(i) - xMean) * (yData(i) - yMean)
+                    i += 1
+                  }
+                  cov / (n - 1)
+                }
+              case _ => 0.0
+            }
+          }
+
+        case cp: Expr.CovarPop[Row] =>
+          for {
+            leftCol <- evalColumn(cp.left, columns, ColumnType.DoubleType)
+            rightCol <- evalColumn(cp.right, columns, ColumnType.DoubleType)
+          } yield {
+            (leftCol, rightCol) match {
+              case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
+                val combinedNulls = xNulls | yNulls
+                val (xSum, n) = sumAndCount(xData, combinedNulls)
+                val (ySum, _) = sumAndCount(yData, combinedNulls)
+                if (n == 0) 0.0
+                else {
+                  val xMean = xSum / n
+                  val yMean = ySum / n
+                  var cov = 0.0 // scalafix:ok DisableSyntax.var
+                  var i = 0 // scalafix:ok DisableSyntax.var
+                  while (i < xData.length) {
+                    if (!combinedNulls.contains(i)) cov += (xData(i) - xMean) * (yData(i) - yMean)
+                    i += 1
+                  }
+                  cov / n
+                }
+              case _ => 0.0
+            }
+          }
+
+        case med: Expr.Median[Row] =>
+          aggregateDoubleExpr(med.expr, columns) { (data, nulls) =>
+            val nonNull = collectNonNullDoubles(data, nulls)
+            if (nonNull.isEmpty) 0.0
+            else {
+              java.util.Arrays.sort(nonNull)
+              val mid = nonNull.length / 2
+              if (nonNull.length % 2 == 0) (nonNull(mid - 1) + nonNull(mid)) / 2.0
+              else nonNull(mid)
+            }
+          }
+
+
+
+        case countDist: Expr.CountDistinct[Row, a] =>
+          val values = scala.collection.mutable.HashSet.empty[a]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(countDist.expr, columns, RowIndex(i)) match {
+              case Right(v) => values += v
+              case _ => ()
+            }
+            i += 1
+          }
+          Right(values.size.toLong)
+
+        case acd: Expr.ApproxCountDistinct[Row, a] =>
+          val values = scala.collection.mutable.HashSet.empty[a]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(acd.expr, columns, RowIndex(i)) match {
+              case Right(v) => values += v
+              case _ => ()
+            }
+            i += 1
+          }
+          Right(values.size.toLong)
 
         case max: Expr.Max[Row, a] =>
-          val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Option[a]]](Right(None)) { (acc, rowIdx) =>
-            acc.flatMap { currentMax =>
-              eval(max.expr, columns, RowIndex(rowIdx)).map { value =>
-                currentMax match {
+          var best: Option[a] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(max.expr, columns, RowIndex(i)) match {
+              case Right(value) =>
+                best = best match {
                   case None => Some(value)
                   case Some(m) => Some(if (max.ordering.gt(value, m)) value else m)
                 }
-              }
+              case _ => ()
             }
+            i += 1
           }
+          Right(best)
 
         case min: Expr.Min[Row, a] =>
-          val rowCount = columns.head.length
-          (0 until rowCount).foldLeft[Either[ExecutionError, Option[a]]](Right(None)) { (acc, rowIdx) =>
-            acc.flatMap { currentMin =>
-              eval(min.expr, columns, RowIndex(rowIdx)).map { value =>
-                currentMin match {
+          var best: Option[a] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(min.expr, columns, RowIndex(i)) match {
+              case Right(value) =>
+                best = best match {
                   case None => Some(value)
                   case Some(m) => Some(if (min.ordering.lt(value, m)) value else m)
                 }
-              }
+              case _ => ()
             }
+            i += 1
           }
+          Right(best)
 
-        case countDist: Expr.CountDistinct[Row, _] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(countDist.expr, columns, RowIndex(rowIdx)).toOption
+        case first: Expr.First[Row, a] =>
+          var result: Option[a] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount && result.isEmpty) {
+            eval(first.expr, columns, RowIndex(i)) match {
+              case Right(v) => result = Some(v)
+              case _ => ()
+            }
+            i += 1
           }
-          Right(values.distinct.size.toLong.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(result)
 
-        case countIf: Expr.CountIf[Row] =>
-          val rowCount = columns.head.length
-          val count = (0 until rowCount).count { rowIdx =>
-            eval(countIf.predicate, columns, RowIndex(rowIdx)) == Right(true)
+        case last: Expr.ExprLast[Row, a] =>
+          var result: Option[a] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(last.expr, columns, RowIndex(i)) match {
+              case Right(v) => result = Some(v)
+              case _ => ()
+            }
+            i += 1
           }
-          Right(count.toLong.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(result)
 
-        case stddev: Expr.StdDev[Row] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(stddev.expr, columns, RowIndex(rowIdx)).toOption
+        case anyVal: Expr.AnyValue[Row, a] =>
+          var result: Option[a] = None // scalafix:ok DisableSyntax.var
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount && result.isEmpty) {
+            eval(anyVal.expr, columns, RowIndex(i)) match {
+              case Right(v) => result = Some(v)
+              case _ => ()
+            }
+            i += 1
           }
-          if (values.isEmpty || values.length == 1) {
-            Right(0.0.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-          } else {
-            val mean = values.sum / values.length
-            val variance = values.map(v => math.pow(v - mean, 2)).sum / (values.length - 1)
-            Right(math.sqrt(variance).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-          }
+          Right(result)
 
-        case stddevPop: Expr.StdDevPop[Row] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(stddevPop.expr, columns, RowIndex(rowIdx)).toOption
+        case mode: Expr.Mode[Row, a] =>
+          val counts = scala.collection.mutable.LinkedHashMap.empty[a, Int]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(mode.expr, columns, RowIndex(i)) match {
+              case Right(v) => counts(v) = counts.getOrElse(v, 0) + 1
+              case _ => ()
+            }
+            i += 1
           }
-          if (values.isEmpty) {
-            Right(0.0.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-          } else {
-            val mean = values.sum / values.length
-            val variance = values.map(v => math.pow(v - mean, 2)).sum / values.length
-            Right(math.sqrt(variance).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-          }
+          Right(if (counts.isEmpty) None else Some(counts.maxBy(_._2)._1))
 
-        case first: Expr.First[Row, _] =>
-          val rowCount = columns.head.length
-          val firstValue = (0 until rowCount).iterator.flatMap { rowIdx =>
-            eval(first.expr, columns, RowIndex(rowIdx)).toOption
-          }.nextOption()
-          Right(firstValue.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+        case collect: Expr.Collect[Row, a] =>
+          val builder = Vector.newBuilder[a]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(collect.expr, columns, RowIndex(i)) match {
+              case Right(v) => builder += v
+              case _ => ()
+            }
+            i += 1
+          }
+          Right(builder.result().toSeq)
 
-        case collect: Expr.Collect[Row, _] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(collect.expr, columns, RowIndex(rowIdx)).toOption
+        case cs: Expr.CollectSet[Row, a] =>
+          val set = scala.collection.mutable.LinkedHashSet.empty[a]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(cs.expr, columns, RowIndex(i)) match {
+              case Right(v) => set += v
+              case _ => ()
+            }
+            i += 1
           }
-          Right(values.toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-
-        case pct: Expr.PercentileApprox[Row] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(pct.expr, columns, RowIndex(rowIdx)).toOption
-          }
-          if (values.isEmpty) {
-            Right(0.0.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-          } else {
-            val sorted = values.sorted
-            val idx = math.min((sorted.length * pct.percentile).toInt, sorted.length - 1)
-            Right(sorted(idx).asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
-          }
+          Right(set.toSeq)
 
         case mb: Expr.MaxBy[Row, a, k] =>
-          val rowCount = columns.head.length
           var bestValue: Option[a] = None // scalafix:ok DisableSyntax.var
           var bestKey: Option[k] = None // scalafix:ok DisableSyntax.var
           var i = 0 // scalafix:ok DisableSyntax.var
           while (i < rowCount) {
-            val v = eval(mb.valueExpr, columns, RowIndex(i))
-            val kv = eval(mb.orderExpr, columns, RowIndex(i))
-            (v, kv) match {
+            (eval(mb.valueExpr, columns, RowIndex(i)), eval(mb.orderExpr, columns, RowIndex(i))) match {
               case (Right(value), Right(key)) =>
                 bestKey match {
                   case None =>
@@ -3498,17 +3782,14 @@ object ExprInterpreter {
             }
             i += 1
           }
-          Right(bestValue.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(bestValue)
 
         case mb: Expr.MinBy[Row, a, k] =>
-          val rowCount = columns.head.length
           var bestValue: Option[a] = None // scalafix:ok DisableSyntax.var
           var bestKey: Option[k] = None // scalafix:ok DisableSyntax.var
           var i = 0 // scalafix:ok DisableSyntax.var
           while (i < rowCount) {
-            val v = eval(mb.valueExpr, columns, RowIndex(i))
-            val kv = eval(mb.orderExpr, columns, RowIndex(i))
-            (v, kv) match {
+            (eval(mb.valueExpr, columns, RowIndex(i)), eval(mb.orderExpr, columns, RowIndex(i))) match {
               case (Right(value), Right(key)) =>
                 bestKey match {
                   case None =>
@@ -3523,51 +3804,97 @@ object ExprInterpreter {
             }
             i += 1
           }
-          Right(bestValue.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(bestValue)
 
-        case mn: Expr.MaxN[Row, _] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(mn.expr, columns, RowIndex(rowIdx)).toOption
+        case mn: Expr.MaxN[Row, a] =>
+          val values = Vector.newBuilder[a]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(mn.expr, columns, RowIndex(i)) match {
+              case Right(v) => values += v
+              case _ => ()
+            }
+            i += 1
           }
-          val sorted = values.sorted(using mn.ordering.reverse)
-          Right(sorted.take(mn.n).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(values.result().sorted(using mn.ordering.reverse).take(mn.n).toSeq)
 
-        case mn: Expr.MinN[Row, _] =>
-          val rowCount = columns.head.length
-          val values = (0 until rowCount).flatMap { rowIdx =>
-            eval(mn.expr, columns, RowIndex(rowIdx)).toOption
+        case mn: Expr.MinN[Row, a] =>
+          val values = Vector.newBuilder[a]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            eval(mn.expr, columns, RowIndex(i)) match {
+              case Right(v) => values += v
+              case _ => ()
+            }
+            i += 1
           }
-          val sorted = values.sorted(using mn.ordering)
-          Right(sorted.take(mn.n).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(values.result().sorted(using mn.ordering).take(mn.n).toSeq)
 
         case mbn: Expr.MaxByN[Row, a, k] =>
-          val rowCount = columns.head.length
-          val pairs = (0 until rowCount).flatMap { rowIdx =>
-            val v = eval(mbn.valueExpr, columns, RowIndex(rowIdx))
-            val kv = eval(mbn.orderExpr, columns, RowIndex(rowIdx))
-            (v, kv) match {
-              case (Right(value), Right(key)) => Some((value, key))
-              case _ => None
+          val pairs = Vector.newBuilder[(a, k)]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (eval(mbn.valueExpr, columns, RowIndex(i)), eval(mbn.orderExpr, columns, RowIndex(i))) match {
+              case (Right(value), Right(key)) => pairs += ((value, key))
+              case _ => ()
             }
+            i += 1
           }
-          val sorted = pairs.sortBy(_._2)(using mbn.ordering.reverse)
-          Right(sorted.take(mbn.n).map(_._1).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(pairs.result().sortBy(_._2)(using mbn.ordering.reverse).take(mbn.n).map(_._1).toSeq)
 
         case mbn: Expr.MinByN[Row, a, k] =>
-          val rowCount = columns.head.length
-          val pairs = (0 until rowCount).flatMap { rowIdx =>
-            val v = eval(mbn.valueExpr, columns, RowIndex(rowIdx))
-            val kv = eval(mbn.orderExpr, columns, RowIndex(rowIdx))
-            (v, kv) match {
-              case (Right(value), Right(key)) => Some((value, key))
-              case _ => None
+          val pairs = Vector.newBuilder[(a, k)]
+          var i = 0 // scalafix:ok DisableSyntax.var
+          while (i < rowCount) {
+            (eval(mbn.valueExpr, columns, RowIndex(i)), eval(mbn.orderExpr, columns, RowIndex(i))) match {
+              case (Right(value), Right(key)) => pairs += ((value, key))
+              case _ => ()
             }
+            i += 1
           }
-          val sorted = pairs.sortBy(_._2)(using mbn.ordering)
-          Right(sorted.take(mbn.n).map(_._1).toSeq.asInstanceOf[A]) // scalafix:ok DisableSyntax.asInstanceOf
+          Right(pairs.result().sortBy(_._2)(using mbn.ordering).take(mbn.n).map(_._1).toSeq)
       }
     }
+  }
+
+  /** Helper: evaluate a Double-typed sub-expression to a DoubleColumn and aggregate it.
+    *
+    * Takes the inner sub-expression (not the aggregation wrapper), evaluates to DoubleColumn, then
+    * applies the aggregation function on the raw Array[Double] and BitSet nulls.
+    */
+  private def aggregateDoubleExpr[Row](
+    subExpr: Expr[Row, Double],
+    columns: Vector[Column]
+  )(f: (Array[Double], BitSet) => Double): Either[ExecutionError, Double] = {
+    evalColumn(subExpr, columns, ColumnType.DoubleType).map { col =>
+      col match {
+        case Column.DoubleColumn(data, nulls) => f(data, nulls)
+        case _ => 0.0
+      }
+    }
+  }
+
+  /** Sum non-null values and count them in a single pass. */
+  private def sumAndCount(data: Array[Double], nulls: BitSet): (Double, Int) = {
+    var sum = 0.0 // scalafix:ok DisableSyntax.var
+    var count = 0 // scalafix:ok DisableSyntax.var
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < data.length) {
+      if (!nulls.contains(i)) { sum += data(i); count += 1 }
+      i += 1
+    }
+    (sum, count)
+  }
+
+  /** Collect non-null doubles into a new array for sorting. */
+  private def collectNonNullDoubles(data: Array[Double], nulls: BitSet): Array[Double] = {
+    val builder = Array.newBuilder[Double]
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < data.length) {
+      if (!nulls.contains(i)) builder += data(i)
+      i += 1
+    }
+    builder.result()
   }
 
   private def hexEncode(bytes: Array[Byte]): String =

@@ -12,6 +12,7 @@ import net.ghoula.strongbow.types.RowIndex
 object DatasetInterpreter extends Interpreter {
 
   /** Execute a Dataset plan to produce a MaterializedDataset. */
+  @annotation.nowarn("msg=unused pattern variable")
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
     (dataset: @unchecked) match {
       case root: Dataset.Root[T] =>
@@ -73,75 +74,75 @@ object DatasetInterpreter extends Interpreter {
           result <- exceptDatasets(left, right)
         } yield result
 
-      case jn: Dataset.InnerJoin[?, ?] =>
+      case jn: Dataset.InnerJoin[a, b] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- innerJoinDatasets(left, right, jn.condition)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.LeftJoin[?, ?] =>
+      case jn: Dataset.LeftJoin[a, b] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- leftJoinDatasets(left, right, jn.condition)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.RightJoin[?, ?] =>
+      case jn: Dataset.RightJoin[a, b] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- rightJoinDatasets(left, right, jn.condition)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.FullJoin[?, ?] =>
+      case jn: Dataset.FullJoin[a, b] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- fullJoinDatasets(left, right, jn.condition)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.LeftAntiJoin[?, ?] =>
+      case jn: Dataset.LeftAntiJoin[a, b] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- leftAntiJoinDatasets(left, right, jn.condition)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.InnerJoinOn[?, ?, ?] =>
+      case jn: Dataset.InnerJoinOn[a, b, k] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- innerJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.LeftJoinOn[?, ?, ?] =>
+      case jn: Dataset.LeftJoinOn[a, b, k] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- leftJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.RightJoinOn[?, ?, ?] =>
+      case jn: Dataset.RightJoinOn[a, b, k] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- rightJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.FullJoinOn[?, ?, ?] =>
+      case jn: Dataset.FullJoinOn[a, b, k] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- fullJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
-      case jn: Dataset.LeftAntiJoinOn[?, ?, ?] =>
+      case jn: Dataset.LeftAntiJoinOn[a, b, k] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- leftAntiJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
       case srt: Dataset.Sort[T] =>
         execute(srt.parent).flatMap(parent => sort(parent, srt.ordering))
@@ -159,15 +160,14 @@ object DatasetInterpreter extends Interpreter {
           sample(parent, samp.fraction, samp.seed, samp.withReplacement)
         }
 
-      case zip: Dataset.ZipWithIndex[_] =>
+      case zip: Dataset.ZipWithIndex[a] =>
         execute(zip.parent).flatMap { parent =>
-          zipWithIndex(parent).map(_.asInstanceOf[MaterializedDataset[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+          zipWithIndex(parent)
         }
 
-      case zip: Dataset.ZipWithUniqueId[_] =>
+      case zip: Dataset.ZipWithUniqueId[a] =>
         execute(zip.parent).flatMap { parent =>
-          // In-memory: unique IDs = sequential indices (same as zipWithIndex)
-          zipWithIndex(parent).map(_.asInstanceOf[MaterializedDataset[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+          zipWithIndex(parent)
         }
 
       case persist: Dataset.Persist[T] =>
@@ -193,12 +193,12 @@ object DatasetInterpreter extends Interpreter {
           sortByExprs(parent, srtExprs.sortKeys)
         }
 
-      case jn: Dataset.LeftSemiJoinOn[?, ?, ?] =>
+      case jn: Dataset.LeftSemiJoinOn[a, b, k] =>
         for {
           left <- execute(jn.left)
           right <- execute(jn.right)
           result <- leftSemiJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result.asInstanceOf[MaterializedDataset[T]] // scalafix:ok DisableSyntax.asInstanceOf
+        } yield result
 
       case ww: Dataset.WithWindow[_, T] =>
         execute(ww.parent).flatMap { parent =>
@@ -208,29 +208,19 @@ object DatasetInterpreter extends Interpreter {
       case rbk: Dataset.ReduceByKey[k, v] =>
         execute(rbk.parent).flatMap { parent =>
           val rows = parent.toVectorUnsafe
-          val reduced =
-            reduceByKeyHelper(rows.asInstanceOf[Vector[(k, v)]], rbk.reduce) // scalafix:ok DisableSyntax.asInstanceOf
+          val reduced = reduceByKeyHelper(rows, rbk.reduce)
           given Schema[k] = rbk.schemaK
           given Schema[v] = rbk.schemaV
-          MaterializedDataset.fromVector(reduced)(using
-            Schema.tuple2Schema[k, v].asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-          )
+          MaterializedDataset.fromVector(reduced)(using Schema.tuple2Schema[k, v])
         }
 
       case abk: Dataset.AggregateByKey[k, v, r] =>
         execute(abk.parent).flatMap { parent =>
           val rows = parent.toVectorUnsafe
-          val result = aggregateByKeyHelper(
-            rows.asInstanceOf[Vector[(k, v)]], // scalafix:ok DisableSyntax.asInstanceOf
-            abk.extractors,
-            abk.reducers,
-            abk.assembler
-          )
+          val result = aggregateByKeyHelper(rows, abk.extractors, abk.reducers, abk.assembler)
           given Schema[k] = abk.schemaK
           given Schema[r] = abk.schemaR
-          MaterializedDataset.fromVector(result)(using
-            Schema.tuple2Schema[k, r].asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-          )
+          MaterializedDataset.fromVector(result)(using Schema.tuple2Schema[k, r])
         }
 
       case mwk: Dataset.MapWithKeyExpr[t, k] =>
@@ -244,9 +234,7 @@ object DatasetInterpreter extends Interpreter {
               .toVector
             given Schema[k] = mwk.schemaK
             given Schema[t] = mwk.schemaT
-            MaterializedDataset.fromVector(pairs)(using
-              Schema.tuple2Schema[k, t].asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-            )
+            MaterializedDataset.fromVector(pairs)(using Schema.tuple2Schema[k, t])
           }
         }
 

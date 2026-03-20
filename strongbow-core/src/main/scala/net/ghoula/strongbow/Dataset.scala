@@ -11,7 +11,7 @@ import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
   * @tparam T
   *   The row type of this dataset
   */
-enum Dataset[+T] {
+enum Dataset[T] {
   case Root[T](columns: Vector[Column], schema: Schema[T]) extends Dataset[T]
   case Filter[T](parent: Dataset[T], predicate: Expr[T, Boolean]) extends Dataset[T]
   case Map[A, B](parent: Dataset[A], func: A => B, schema: Schema[B]) extends Dataset[B]

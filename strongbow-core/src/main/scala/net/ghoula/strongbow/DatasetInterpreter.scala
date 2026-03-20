@@ -18,7 +18,7 @@ object DatasetInterpreter extends Interpreter {
         Right(MaterializedDataset(root.columns, root.schema))
 
       case filt: Dataset.Filter[T] =>
-        execute(filt.parent).map(parent => filter(parent, filt.predicate))
+        execute(filt.parent).flatMap(parent => filter(parent, filt.predicate))
 
       case m: Dataset.Map[?, T] =>
         execute(m.parent).flatMap { parent =>
@@ -260,14 +260,27 @@ object DatasetInterpreter extends Interpreter {
   private def filter[T](
     dataset: MaterializedDataset[T],
     predicate: Expr[T, Boolean]
-  ): MaterializedDataset[T] = {
-    val rowIndices = (0 until dataset.rowCount).filter { rowIdx =>
-      ExprInterpreter.evalBoolean(predicate, dataset.columns, RowIndex(rowIdx))
-    }.toArray
-
-    val newColumns = dataset.columns.map(_.slice(rowIndices))
-
-    MaterializedDataset(newColumns, dataset.schema)
+  ): Either[ExecutionError, MaterializedDataset[T]] = {
+    ExprInterpreter.evalColumn(predicate, dataset.columns, ColumnType.BooleanType).map {
+      case Column.BooleanColumn(data, _) =>
+        val rowIndices = new Array[Int](data.length)
+        var count = 0 // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < data.length) {
+          if (data(i)) {
+            rowIndices(count) = i
+            count += 1
+          }
+          i += 1
+        }
+        val indices = java.util.Arrays.copyOf(rowIndices, count)
+        val newColumns = dataset.columns.map(_.slice(indices))
+        MaterializedDataset(newColumns, dataset.schema)
+      case other =>
+        throw new IllegalStateException( // scalafix:ok DisableSyntax.throw
+          s"Expected BooleanColumn from boolean predicate, got ${other.columnType}"
+        )
+    }
   }
 
   private def distinct[T](dataset: MaterializedDataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {

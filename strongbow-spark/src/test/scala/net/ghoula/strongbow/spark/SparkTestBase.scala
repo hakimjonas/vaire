@@ -11,7 +11,7 @@ import org.scalatest.{BeforeAndAfterAll, Suite}
 trait SparkTestBase extends BeforeAndAfterAll { self: Suite =>
 
   private val master: String =
-    sys.props.getOrElse("spark.test.master", "local[2]")
+    sys.props.getOrElse("spark.test.master", "local[2]").nn
 
   private val isCluster: Boolean = master.startsWith("spark://")
 

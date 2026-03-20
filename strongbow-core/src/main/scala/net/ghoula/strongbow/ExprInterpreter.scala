@@ -148,10 +148,10 @@ object ExprInterpreter {
                   case ColumnType.IntType => Column.int(new Array[Int](rowCount), allNulls)
                   case ColumnType.LongType => Column.long(new Array[Long](rowCount), allNulls)
                   case ColumnType.DoubleType => Column.double(new Array[Double](rowCount), allNulls)
-                  case ColumnType.StringType => Column.string(new Array[String](rowCount), allNulls)
+                  case ColumnType.StringType => Column.string(new Array[String | Null](rowCount), allNulls)
                   case ColumnType.BooleanType => Column.boolean(new Array[Boolean](rowCount), allNulls)
                   case ColumnType.DateType => Column.date(new Array[Int](rowCount), allNulls)
-                  case _ => Column.any(new Array[Any](rowCount), allNulls)
+                  case _ => Column.any(new Array[Any | Null](rowCount), allNulls)
                 })
               } else if (columnType == ColumnType.DateType) {
                 v match {
@@ -307,16 +307,16 @@ object ExprInterpreter {
           } yield {
             (leftCol, rightCol) match {
               case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
-                Column.string(Array.tabulate(rowCount)(i => ld(i) + rd(i)), ln | rn)
+                Column.string(Array.tabulate(rowCount)(i => ld(i).nn + rd(i)), ln | rn)
               case _ =>
-                Column.string(Array.empty[String])
+                Column.string(Array.empty[String | Null])
             }
           }
 
         case length: Expr.Length[Row] =>
           evalColumn(length.expr, columns, ColumnType.StringType).map {
             case Column.StringColumn(data, nulls) =>
-              Column.int(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0 else data(i).length), nulls)
+              Column.int(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0 else data(i).nn.length), nulls)
             case _ =>
               Column.int(Array.empty[Int])
           }
@@ -351,7 +351,7 @@ object ExprInterpreter {
                     }
                 }
               case _ =>
-                Column.any(Array.empty[Any])
+                Column.any(Array.empty[Any | Null])
             }
           }
 
@@ -360,7 +360,7 @@ object ExprInterpreter {
             case Column.StringColumn(data, nulls) =>
               val regex = likeToRegex(like.pattern)
               Column.boolean(
-                Array.tabulate(rowCount)(i => if (nulls.contains(i)) false else regex.matches(data(i))),
+                Array.tabulate(rowCount)(i => if (nulls.contains(i)) false else regex.matches(data(i).nn)),
                 nulls
               )
             case _ => Column.boolean(Array.empty[Boolean])
@@ -371,11 +371,11 @@ object ExprInterpreter {
             case Column.StringColumn(data, nulls) =>
               Column.string(
                 Array.tabulate(rowCount)(i =>
-                  if (nulls.contains(i)) null else data(i).toLowerCase // scalafix:ok DisableSyntax.null
+                  if (nulls.contains(i)) null else data(i).nn.toLowerCase // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case up: Expr.Upper[Row] =>
@@ -383,11 +383,11 @@ object ExprInterpreter {
             case Column.StringColumn(data, nulls) =>
               Column.string(
                 Array.tabulate(rowCount)(i =>
-                  if (nulls.contains(i)) null else data(i).toUpperCase // scalafix:ok DisableSyntax.null
+                  if (nulls.contains(i)) null else data(i).nn.toUpperCase // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case tr: Expr.Trim[Row] =>
@@ -395,11 +395,11 @@ object ExprInterpreter {
             case Column.StringColumn(data, nulls) =>
               Column.string(
                 Array.tabulate(rowCount)(i =>
-                  if (nulls.contains(i)) null else data(i).trim // scalafix:ok DisableSyntax.null
+                  if (nulls.contains(i)) null else data(i).nn.trim // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case lt: Expr.LTrim[Row] =>
@@ -407,11 +407,11 @@ object ExprInterpreter {
             case Column.StringColumn(data, nulls) =>
               Column.string(
                 Array.tabulate(rowCount)(i =>
-                  if (nulls.contains(i)) null else data(i).stripLeading.nn // scalafix:ok DisableSyntax.null
+                  if (nulls.contains(i)) null else data(i).nn.stripLeading.nn // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case rt: Expr.RTrim[Row] =>
@@ -419,11 +419,11 @@ object ExprInterpreter {
             case Column.StringColumn(data, nulls) =>
               Column.string(
                 Array.tabulate(rowCount)(i =>
-                  if (nulls.contains(i)) null else data(i).stripTrailing.nn // scalafix:ok DisableSyntax.null
+                  if (nulls.contains(i)) null else data(i).nn.stripTrailing.nn // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case ss: Expr.Substring[Row] =>
@@ -433,7 +433,7 @@ object ExprInterpreter {
                 Array.tabulate(rowCount) { i =>
                   if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
                   else {
-                    val s = data(i)
+                    val s = data(i).nn
                     val start = Math.max(ss.pos - 1, 0)
                     val end = Math.min(start + ss.len, s.length)
                     if (start >= s.length) "" else s.substring(start, end)
@@ -441,7 +441,7 @@ object ExprInterpreter {
                 },
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case sr: Expr.StringReplace[Row] =>
@@ -450,11 +450,11 @@ object ExprInterpreter {
               Column.string(
                 Array.tabulate(rowCount)(i =>
                   if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
-                  else data(i).replace(sr.search, sr.replacement)
+                  else data(i).nn.replace(sr.search, sr.replacement)
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case rr: Expr.RegexpReplace[Row] =>
@@ -468,7 +468,7 @@ object ExprInterpreter {
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case re: Expr.RegexpExtract[Row] =>
@@ -485,20 +485,20 @@ object ExprInterpreter {
                 },
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case sp: Expr.StringSplit[Row] =>
           evalColumn(sp.expr, columns, ColumnType.StringType).map {
             case Column.StringColumn(data, nulls) =>
               Column.any(
-                Array.tabulate[Any](rowCount)(i =>
+                Array.tabulate[Any | Null](rowCount)(i =>
                   if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
-                  else data(i).split(sp.delimiter, -1).toSeq
+                  else data(i).nn.split(sp.delimiter, -1).toSeq
                 ),
                 nulls
               )
-            case _ => Column.any(Array.empty[Any])
+            case _ => Column.any(Array.empty[Any | Null])
           }
 
         case sw: Expr.StartsWith[Row] =>
@@ -510,7 +510,7 @@ object ExprInterpreter {
               case (Column.StringColumn(ed, en), Column.StringColumn(pd, pn)) =>
                 val combined = en | pn
                 Column.boolean(
-                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else ed(i).startsWith(pd(i))),
+                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else ed(i).nn.startsWith(pd(i))),
                   combined
                 )
               case _ => Column.boolean(Array.empty[Boolean])
@@ -526,7 +526,7 @@ object ExprInterpreter {
               case (Column.StringColumn(ed, en), Column.StringColumn(sd, sn)) =>
                 val combined = en | sn
                 Column.boolean(
-                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else ed(i).endsWith(sd(i))),
+                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else ed(i).nn.endsWith(sd(i))),
                   combined
                 )
               case _ => Column.boolean(Array.empty[Boolean])
@@ -542,7 +542,7 @@ object ExprInterpreter {
               case (Column.StringColumn(ed, en), Column.StringColumn(sd, sn)) =>
                 val combined = en | sn
                 Column.boolean(
-                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else ed(i).contains(sd(i))),
+                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else ed(i).nn.contains(sd(i))),
                   combined
                 )
               case _ => Column.boolean(Array.empty[Boolean])
@@ -795,7 +795,7 @@ object ExprInterpreter {
             }
             Column.string(
               Array.tabulate(rowCount)(i =>
-                if (nulls.contains(i)) null else String.valueOf(col.getValue(i)) // scalafix:ok DisableSyntax.null
+                if (nulls.contains(i)) null else String.valueOf(col.getValue(i)).nn // scalafix:ok DisableSyntax.null
               ),
               nulls
             )
@@ -1071,7 +1071,7 @@ object ExprInterpreter {
         case nd: Expr.NextDay[Row] =>
           evalColumn(nd.date, columns, ColumnType.DateType).map {
             case Column.DateColumn(data, nulls) =>
-              val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase.nn)
+              val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase)
               Column.date(
                 Array.tabulate(rowCount) { i =>
                   if (nulls.contains(i)) 0
@@ -1148,7 +1148,7 @@ object ExprInterpreter {
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case md: Expr.MakeDate[Row] =>
@@ -1392,11 +1392,11 @@ object ExprInterpreter {
               Column.string(
                 Array.tabulate(rowCount)(i =>
                   if (nulls.contains(i)) null
-                  else java.net.URLEncoder.encode(data(i), "UTF-8").nn // scalafix:ok DisableSyntax.null
+                  else java.net.URLEncoder.encode(data(i).nn, "UTF-8").nn // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case ud: Expr.UrlDecode[Row] =>
@@ -1405,11 +1405,11 @@ object ExprInterpreter {
               Column.string(
                 Array.tabulate(rowCount)(i =>
                   if (nulls.contains(i)) null
-                  else java.net.URLDecoder.decode(data(i), "UTF-8").nn // scalafix:ok DisableSyntax.null
+                  else java.net.URLDecoder.decode(data(i).nn, "UTF-8").nn // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case b64e: Expr.Base64Encode[Row] =>
@@ -1419,11 +1419,11 @@ object ExprInterpreter {
               Column.string(
                 Array.tabulate(rowCount)(i =>
                   if (nulls.contains(i)) null
-                  else encoder.encodeToString(data(i).getBytes("UTF-8")).nn // scalafix:ok DisableSyntax.null
+                  else encoder.encodeToString(data(i).nn.getBytes("UTF-8")).nn // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case b64d: Expr.Base64Decode[Row] =>
@@ -1433,11 +1433,11 @@ object ExprInterpreter {
               Column.string(
                 Array.tabulate(rowCount)(i =>
                   if (nulls.contains(i)) null
-                  else new String(decoder.decode(data(i)), "UTF-8") // scalafix:ok DisableSyntax.null
+                  else new String(decoder.decode(data(i).nn), "UTF-8") // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case hx: Expr.Hex[Row] =>
@@ -1446,11 +1446,11 @@ object ExprInterpreter {
               Column.string(
                 Array.tabulate(rowCount)(i =>
                   if (nulls.contains(i)) null
-                  else hexEncode(data(i).getBytes("UTF-8")) // scalafix:ok DisableSyntax.null
+                  else hexEncode(data(i).nn.getBytes("UTF-8")) // scalafix:ok DisableSyntax.null
                 ),
                 nulls
               )
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case gjo: Expr.GetJsonObject[Row] =>
@@ -1460,13 +1460,13 @@ object ExprInterpreter {
               val out = Array.tabulate(rowCount) { i =>
                 if (nulls.contains(i)) { outNulls += i; null } // scalafix:ok DisableSyntax.null
                 else
-                  extractJsonPath(data(i), gjo.path) match {
+                  extractJsonPath(data(i).nn, gjo.path) match {
                     case Right(v) if Option(v).nonEmpty => v
                     case _ => outNulls += i; null // scalafix:ok DisableSyntax.null
                   }
               }
               Column.string(out, BitSet.empty ++ outNulls)
-            case _ => Column.string(Array.empty[String])
+            case _ => Column.string(Array.empty[String | Null])
           }
 
         case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] |
@@ -1593,7 +1593,7 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, opType)
       rightCol <- evalColumn(right, columns, opType)
       result <- {
-        (leftCol, rightCol) match {
+        val matched: Either[ExecutionError, Column[?]] = (leftCol, rightCol) match {
           case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn)) =>
             Right(Column.boolean(Array.tabulate(rowCount)(i => intCmp(ld(i), rd(i))), ln | rn))
           case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn)) =>
@@ -1603,7 +1603,9 @@ object ExprInterpreter {
           case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
             Right(
               Column.boolean(
-                Array.tabulate(rowCount)(i => if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i), rd(i))),
+                Array.tabulate(rowCount)(i =>
+                  if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)
+                ),
                 ln | rn
               )
             )
@@ -1612,6 +1614,7 @@ object ExprInterpreter {
           case _ =>
             Left(ExecutionError.UnsupportedOperation("Comparison not supported for untyped columns"))
         }
+        matched
       }
     } yield result
   }
@@ -1679,12 +1682,12 @@ object ExprInterpreter {
         Column.string(
           Array.tabulate(rowCount) { i =>
             if (nulls.contains(i)) null // scalafix:ok DisableSyntax.null
-            else { digest.reset(); hexEncode(digest.digest(data(i).getBytes("UTF-8")).nn) }
+            else { digest.reset(); hexEncode(digest.digest(data(i).nn.getBytes("UTF-8")).nn) }
           },
           nulls
         )
       case _ =>
-        Column.string(Array.empty[String])
+        Column.string(Array.empty[String | Null])
     }
   }
 
@@ -2114,7 +2117,11 @@ object ExprInterpreter {
       case Column.DoubleColumn(data, nulls) =>
         foldExtremum(data, nulls, (a: Double, b: Double) => if (isMax) a > b else a < b)
       case Column.StringColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: String, b: String) => { val c = a.compareTo(b); if (isMax) c > 0 else c < 0 })
+        foldExtremum(
+          data,
+          nulls,
+          (a: String | Null, b: String | Null) => { val c = a.nn.compareTo(b); if (isMax) c > 0 else c < 0 }
+        )
       case Column.DateColumn(data, nulls) =>
         (0 until rowCount).foldLeft(Option.empty[Date]) { (best, i) =>
           if (nulls.contains(i)) best
@@ -2159,7 +2166,7 @@ object ExprInterpreter {
       case Column.DoubleColumn(data, _) =>
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
       case Column.StringColumn(data, _) =>
-        val cmp = data(i).compareTo(data(j))
+        val cmp = data(i).nn.compareTo(data(j))
         if (wantGreater) cmp > 0 else cmp < 0
       case Column.DateColumn(data, _) =>
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
@@ -2184,7 +2191,7 @@ object ExprInterpreter {
         val sorted = if (isMax) vals.sorted(using Ordering[Double].reverse) else vals.sorted
         sorted.take(n).toSeq
       case Column.StringColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val vals = collectNonNullTyped(data, nulls, rowCount).map(_.nn)
         val sorted = if (isMax) vals.sorted(using Ordering[String].reverse) else vals.sorted
         sorted.take(n).toSeq
       case Column.DateColumn(data, nulls) =>
@@ -2231,7 +2238,7 @@ object ExprInterpreter {
     case _ => "SHA-256"
   }
 
-  private def extractJsonPath(jsonStr: String, path: String): Either[ExecutionError, String] = {
+  private def extractJsonPath(jsonStr: String, path: String): Either[ExecutionError, String | Null] = {
     parseJson(jsonStr) match {
       case parser.core.Result.Success(jsonValue, _) =>
         walkJsonPath(jsonValue, parseJsonDotPath(path)) match {

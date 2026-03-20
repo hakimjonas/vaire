@@ -99,7 +99,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   //   BenchWindowResult: dept_value(0), amount_value(1), quantity_value(2), id_value(3), rowNum_value(4)
 
   private def benchRecordDataset(n: Int, groups: Int): Dataset[BenchRecord] = {
-    val depts = Array.tabulate(n)(i => s"dept${i % groups}")
+    val depts = Array.tabulate[String | Null](n)(i => s"dept${i % groups}")
     val amounts = Array.tabulate(n)(i => (i % 1000) + 0.5)
     val quantities = Array.tabulate(n)(i => i % 100)
     val ids = Array.tabulate(n)(identity)

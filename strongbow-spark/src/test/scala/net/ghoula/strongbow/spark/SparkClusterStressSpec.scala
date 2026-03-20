@@ -248,7 +248,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
 
   "String filter" should "handle 2M string rows via Expr predicate" in {
     val strSize = N / 3
-    val data = Array.tabulate(strSize)(i => f"record-$i%08d")
+    val data = Array.tabulate[String | Null](strSize)(i => f"record-$i%08d")
     val ds = Dataset
       .fromColumns(Vector(Column.string(data)), Schema.stringSchema)
       .toOption

@@ -14,10 +14,10 @@ enum Column[+A] {
   case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
   case LongColumn(data: Array[Long], nulls: BitSet) extends Column[Long]
   case DoubleColumn(data: Array[Double], nulls: BitSet) extends Column[Double]
-  case StringColumn(data: Array[String], nulls: BitSet) extends Column[String]
+  case StringColumn(data: Array[String | Null], nulls: BitSet) extends Column[String]
   case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
   case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
-  case AnyColumn(data: Array[Any], nulls: BitSet) extends Column[Any]
+  case AnyColumn(data: Array[Any | Null], nulls: BitSet) extends Column[Any]
 
   inline def length: Int = this match {
     case IntColumn(data, _) => data.length
@@ -55,7 +55,7 @@ enum Column[+A] {
     * For typed access, pattern match the Column variant directly to get the typed Array. Returns
     * null for SQL NULL rows (BitSet is authoritative).
     */
-  inline def getValue(index: Int): Any = this match {
+  inline def getValue(index: Int): Any | Null = this match {
     case IntColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
     case LongColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
     case DoubleColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
@@ -92,7 +92,7 @@ enum Column[+A] {
       case DateColumn(data, nulls) =>
         DateColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
       case AnyColumn(data, nulls) =>
-        val arr = new Array[Any](len)
+        val arr = new Array[Any | Null](len)
         System.arraycopy(data, 0, arr, 0, len)
         AnyColumn(arr, nulls.filter(_ < len))
     }
@@ -148,7 +148,7 @@ enum Column[+A] {
           System.arraycopy(r, 0, arr, leftLen, rightLen)
           Right(DoubleColumn(arr, combinedNulls))
         case (StringColumn(l, _), StringColumn(r, _)) =>
-          val arr = new Array[String](leftLen + rightLen)
+          val arr = new Array[String | Null](leftLen + rightLen)
           System.arraycopy(l, 0, arr, 0, leftLen)
           System.arraycopy(r, 0, arr, leftLen, rightLen)
           Right(StringColumn(arr, combinedNulls))
@@ -163,7 +163,7 @@ enum Column[+A] {
           System.arraycopy(r, 0, arr, leftLen, rightLen)
           Right(DateColumn(arr, combinedNulls))
         case (AnyColumn(l, _), AnyColumn(r, _)) =>
-          val arr = new Array[Any](leftLen + rightLen)
+          val arr = new Array[Any | Null](leftLen + rightLen)
           System.arraycopy(l, 0, arr, 0, leftLen)
           System.arraycopy(r, 0, arr, leftLen, rightLen)
           Right(AnyColumn(arr, combinedNulls))
@@ -240,7 +240,7 @@ object Column {
     DoubleColumn(data, nulls)
   }
 
-  inline def string(data: Array[String], nulls: BitSet = BitSet.empty): Column[String] = {
+  inline def string(data: Array[String | Null], nulls: BitSet = BitSet.empty): Column[String] = {
     StringColumn(data, nulls)
   }
 
@@ -253,7 +253,7 @@ object Column {
     DateColumn(data, nulls)
   }
 
-  inline def any(data: Array[Any], nulls: BitSet = BitSet.empty): Column[Any] = {
+  inline def any(data: Array[Any | Null], nulls: BitSet = BitSet.empty): Column[Any] = {
     AnyColumn(data, nulls)
   }
 
@@ -262,13 +262,13 @@ object Column {
     case ColumnType.IntType => IntColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.LongType => LongColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.DoubleType => DoubleColumn(Array.empty[Double], BitSet.empty)
-    case ColumnType.StringType => StringColumn(Array.empty[String], BitSet.empty)
+    case ColumnType.StringType => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.BooleanType => BooleanColumn(Array.empty[Boolean], BitSet.empty)
     case ColumnType.DateType => DateColumn(Array.empty[Int], BitSet.empty)
-    case ColumnType.AnyType => AnyColumn(Array.empty[Any], BitSet.empty)
-    case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any], BitSet.empty)
-    case ColumnType.ArrayType(_) => AnyColumn(Array.empty[Any], BitSet.empty)
-    case ColumnType.MapType(_, _) => AnyColumn(Array.empty[Any], BitSet.empty)
+    case ColumnType.AnyType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
+    case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
+    case ColumnType.ArrayType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
+    case ColumnType.MapType(_, _) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
   }
 
   /** Create a column from a vector of values.
@@ -342,8 +342,8 @@ object Column {
         result.map(builder => DoubleColumn(builder.result().toArray, nullIndices))
 
       case ColumnType.StringType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[String]]](
-          Right(new scala.collection.immutable.VectorBuilder[String]())
+        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[String | Null]]](
+          Right(new scala.collection.immutable.VectorBuilder[String | Null]())
         ) {
           case (Left(err), _) => Left(err)
           case (Right(builder), v) =>

@@ -314,7 +314,7 @@ object DatasetInterpreter extends Interpreter {
       case Column.DoubleColumn(data, _) =>
         (0 until rowCount).sortWith((a, b) => java.lang.Double.compare(data(a), data(b)) < 0).toArray
       case Column.StringColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => data(a).compareTo(data(b)) < 0).toArray
+        (0 until rowCount).sortWith((a, b) => data(a).nn.compareTo(data(b)) < 0).toArray
       case Column.DateColumn(data, _) =>
         (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
       case Column.BooleanColumn(data, _) =>
@@ -816,7 +816,7 @@ object DatasetInterpreter extends Interpreter {
         if (na && nb) 0
         else if (na) -1
         else if (nb) 1
-        else data(a).compareTo(data(b))
+        else data(a).nn.compareTo(data(b))
       case Column.DateColumn(data, nulls) =>
         val na = nulls.contains(a); val nb = nulls.contains(b)
         if (na && nb) 0
@@ -913,7 +913,7 @@ object DatasetInterpreter extends Interpreter {
           }
 
           val windowResultCols = windowExprs.map { spec =>
-            val resultArray = new Array[Any](rowCount)
+            val resultArray = new Array[Any | Null](rowCount)
             val exprError = sortedPartitions.foldLeft(Option.empty[ExecutionError]) { case (err, (_, sortedIndices)) =>
               if (err.isDefined) err
               else {

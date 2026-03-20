@@ -101,8 +101,8 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "handle empty groups (no rows match)" in {
-    val regionCol = Column.string(Array.empty[String])
-    val productCol = Column.string(Array.empty[String])
+    val regionCol = Column.string(Array.empty[String | Null])
+    val productCol = Column.string(Array.empty[String | Null])
     val amountCol = Column.double(Array.empty[Double])
     val qtyCol = Column.int(Array.empty[Int])
     val emptyDs = Dataset.fromColumns(Vector(regionCol, productCol, amountCol, qtyCol), saleSchema).toOption.get

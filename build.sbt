@@ -20,7 +20,8 @@ lazy val sharedScalacOptions = Seq(
   "-Wunused:all",
   "-Wrecurse-with-default",
   "-no-indent",
-  "-language:strictEquality"
+  "-language:strictEquality",
+  "-Yexplicit-nulls"
 )
 
 lazy val testScalacOptions = Seq(

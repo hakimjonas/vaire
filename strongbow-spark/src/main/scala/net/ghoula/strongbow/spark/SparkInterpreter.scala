@@ -298,7 +298,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case SBColumn.DoubleColumn(data, _) =>
         (0 until rowCount).sortWith((a, b) => java.lang.Double.compare(data(a), data(b)) < 0).toArray
       case SBColumn.StringColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => data(a).compareTo(data(b)) < 0).toArray
+        (0 until rowCount).sortWith((a, b) => data(a).nn.compareTo(data(b)) < 0).toArray
       case SBColumn.DateColumn(data, _) =>
         (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
       case SBColumn.BooleanColumn(data, _) =>

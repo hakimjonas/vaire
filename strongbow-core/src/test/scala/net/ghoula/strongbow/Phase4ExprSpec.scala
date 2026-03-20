@@ -20,7 +20,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
   }
 
-  private val strData: Array[String] = Array("hello", "world", "foo bar")
+  private val strData: Array[String | Null] = Array("hello", "world", "foo bar")
   private val strCol = Column.string(strData)
   private val columns = Vector(strCol)
   private val cell = Expr.Cell[Any, String]("s", ColumnIndex(0))
@@ -63,7 +63,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "UrlEncode" should "encode a string for URLs" in {
-    val data: Array[String] = Array("hello world", "foo=bar&baz=qux")
+    val data: Array[String | Null] = Array("hello world", "foo=bar&baz=qux")
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
@@ -72,7 +72,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "UrlDecode" should "decode a URL-encoded string" in {
-    val data: Array[String] = Array("hello+world", "foo%3Dbar%26baz%3Dqux")
+    val data: Array[String | Null] = Array("hello+world", "foo%3Dbar%26baz%3Dqux")
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
@@ -87,7 +87,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "Base64Decode" should "decode a base64 string" in {
-    val data: Array[String] = Array("aGVsbG8=", "d29ybGQ=")
+    val data: Array[String | Null] = Array("aGVsbG8=", "d29ybGQ=")
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
@@ -99,7 +99,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val expr = cell.base64Encode
     val encoded = eval(expr, columns, 0)
     encoded shouldBe Right("aGVsbG8=")
-    val data2: Array[String] = Array("aGVsbG8=")
+    val data2: Array[String | Null] = Array("aGVsbG8=")
     val col2 = Column.string(data2)
     val cols2 = Vector(col2)
     val c2 = Expr.Cell[Any, String]("s", ColumnIndex(0))
@@ -118,7 +118,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "GetJsonObject" should "extract a top-level field" in {
-    val jsonData: Array[String] = Array("""{"name":"Alice","age":30}""", """{"name":"Bob"}""")
+    val jsonData: Array[String | Null] = Array("""{"name":"Alice","age":30}""", """{"name":"Bob"}""")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
@@ -127,7 +127,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "extract nested fields" in {
-    val jsonData: Array[String] = Array("""{"a":{"b":{"c":"deep"}}}""")
+    val jsonData: Array[String | Null] = Array("""{"a":{"b":{"c":"deep"}}}""")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
@@ -135,7 +135,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return numeric values as strings" in {
-    val jsonData: Array[String] = Array("""{"count":42,"price":9.99}""")
+    val jsonData: Array[String | Null] = Array("""{"count":42,"price":9.99}""")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
@@ -144,7 +144,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return null for missing path" in {
-    val jsonData: Array[String] = Array("""{"name":"Alice"}""")
+    val jsonData: Array[String | Null] = Array("""{"name":"Alice"}""")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
@@ -153,7 +153,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "return null for invalid JSON" in {
-    val jsonData: Array[String] = Array("not json")
+    val jsonData: Array[String | Null] = Array("not json")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))

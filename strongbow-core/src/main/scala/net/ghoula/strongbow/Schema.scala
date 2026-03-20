@@ -187,12 +187,11 @@ object Schema {
       if (values.length != expectedCount) {
         Left(DecodeError.WrongArity(expectedCount, values.length))
       } else {
-        val isDefined = values.head.asInstanceOf[Boolean] // scalafix:ok DisableSyntax.asInstanceOf
-        if (isDefined) {
-          val innerValues = values.tail
-          inner.decode(innerValues).map(Some(_))
-        } else {
-          Right(None)
+        values.head match {
+          case b: Boolean =>
+            if (b) inner.decode(values.tail).map(Some(_))
+            else Right(None)
+          case other => Left(DecodeError.TypeMismatch("Boolean", other.getClass.getSimpleName))
         }
       }
     }

@@ -2134,21 +2134,7 @@ object ExprInterpreter {
         }
       case Column.BooleanColumn(data, nulls) =>
         foldExtremum(data, nulls, (a: Boolean, b: Boolean) => if (isMax) a && !b else !a && b)
-      case Column.AnyColumn(data, nulls) =>
-        (0 until rowCount).foldLeft(Option.empty[Any]) { (best, i) =>
-          if (nulls.contains(i)) best
-          else
-            best match {
-              case None => Some(data(i))
-              case Some(b) =>
-                (data(i), b) match {
-                  case (a: Comparable[?], bc: Comparable[?]) =>
-                    val cmp = a.asInstanceOf[Comparable[Any]].compareTo(bc) // scalafix:ok DisableSyntax.asInstanceOf
-                    Some(if (isMax && cmp > 0) data(i) else if (!isMax && cmp < 0) data(i) else b)
-                  case _ => Some(b)
-                }
-            }
-        }
+      case Column.AnyColumn(_, _) => None
     }
   }
 
@@ -2183,13 +2169,7 @@ object ExprInterpreter {
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
       case Column.BooleanColumn(data, _) =>
         if (wantGreater) data(i) && !data(j) else !data(i) && data(j)
-      case Column.AnyColumn(data, _) =>
-        (data(i), data(j)) match {
-          case (a: Comparable[?], b: Comparable[?]) =>
-            val cmp = a.asInstanceOf[Comparable[Any]].compareTo(b) // scalafix:ok DisableSyntax.asInstanceOf
-            if (wantGreater) cmp > 0 else cmp < 0
-          case _ => false
-        }
+      case Column.AnyColumn(_, _) => false
     }
   }
 

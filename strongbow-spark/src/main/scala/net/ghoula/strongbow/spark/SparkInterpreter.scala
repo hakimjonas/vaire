@@ -18,184 +18,203 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
   private case class SparkPlan[T](df: DataFrame, schema: Schema[T])
 
   override def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
-    try {
-      val plan = buildPlan(dataset)
+    buildPlan(dataset).flatMap { plan =>
       val rows = plan.df.collect()
       RowConverter.toMaterialized(rows, plan.schema)
-    } catch {
-      case e: Exception =>
-        Left(ExecutionError.InvalidValue(s"Spark execution failed: ${e.getMessage}"))
     }
   }
 
-  private def buildPlan[T](dataset: Dataset[T]): SparkPlan[T] = {
-    (dataset: @unchecked) match {
+  private def buildPlan[T](dataset: Dataset[T]): Either[ExecutionError, SparkPlan[T]] = {
+    dataset match {
 
       case root: Dataset.Root[T] =>
         val df = DataFrameBuilder.fromColumns(spark, root.columns, root.schema)
-        SparkPlan(df, root.schema)
+        Right(SparkPlan(df, root.schema))
 
       case filt: Dataset.Filter[T] =>
-        val parent = buildPlan(filt.parent)
-        ExprToColumn.convert(filt.predicate) match {
-          case Right((sparkCol, _)) =>
-            SparkPlan(parent.df.filter(sparkCol), parent.schema)
-          case Left(_) =>
-            applyFilterViaMap(parent, filt.predicate)
+        buildPlan(filt.parent).flatMap { parent =>
+          ExprToColumn.convert(filt.predicate) match {
+            case Right((sparkCol, _)) =>
+              Right(SparkPlan(parent.df.filter(sparkCol), parent.schema))
+            case Left(_) =>
+              Right(applyFilterViaMap(parent, filt.predicate))
+          }
         }
 
       case m: Dataset.Map[a, T] =>
-        val parent = buildPlan(m.parent)
-        applyMapFunction[a, T](parent, m.func, m.schema)
+        buildPlan(m.parent).map { parent =>
+          applyMapFunction[a, T](parent, m.func, m.schema)
+        }
 
       case fm: Dataset.FlatMap[a, T] =>
-        val parent = buildPlan(fm.parent)
-        applyFlatMapFunction[a, T](parent, fm.func, fm.schema)
+        buildPlan(fm.parent).map { parent =>
+          applyFlatMapFunction[a, T](parent, fm.func, fm.schema)
+        }
 
       case sel: Dataset.Select[a, T] =>
-        val parent = buildPlan(sel.parent)
-        applyMapFunction[a, T](parent, sel.projection, sel.schema)
+        buildPlan(sel.parent).map { parent =>
+          applyMapFunction[a, T](parent, sel.projection, sel.schema)
+        }
 
       case selectExprs: Dataset.SelectExprs[_, T] =>
-        val parent = buildPlan(selectExprs.parent)
-        val columns = selectExprs.exprs.map { case (name, expr, _) =>
-          ExprToColumn.convert(expr) match {
-            case Right((sparkCol, _)) => sparkCol.as(name)
-            case Left(err) =>
-              throw new RuntimeException(s"Expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+        buildPlan(selectExprs.parent).flatMap { parent =>
+          convertExprs(selectExprs.exprs).map { columns =>
+            SparkPlan(parent.df.select(columns*), selectExprs.schema)
           }
         }
-        SparkPlan(parent.df.select(columns*), selectExprs.schema)
 
       case dist: Dataset.Distinct[T] =>
-        val parent = buildPlan(dist.parent)
-        SparkPlan(parent.df.distinct(), parent.schema)
+        buildPlan(dist.parent).map { parent =>
+          SparkPlan(parent.df.distinct(), parent.schema)
+        }
 
       case lim: Dataset.Limit[T] =>
-        val parent = buildPlan(lim.parent)
-        SparkPlan(parent.df.limit(lim.n), parent.schema)
+        buildPlan(lim.parent).map { parent =>
+          SparkPlan(parent.df.limit(lim.n), parent.schema)
+        }
 
       case un: Dataset.Union[T] =>
-        val left = buildPlan(un.left)
-        val right = buildPlan(un.right)
-        SparkPlan(left.df.union(right.df), left.schema)
+        for {
+          left <- buildPlan(un.left)
+          right <- buildPlan(un.right)
+        } yield SparkPlan(left.df.union(right.df), left.schema)
 
       case inter: Dataset.Intersect[T] =>
-        val left = buildPlan(inter.left)
-        val right = buildPlan(inter.right)
-        SparkPlan(left.df.intersect(right.df), left.schema)
+        for {
+          left <- buildPlan(inter.left)
+          right <- buildPlan(inter.right)
+        } yield SparkPlan(left.df.intersect(right.df), left.schema)
 
       case exc: Dataset.Except[T] =>
-        val left = buildPlan(exc.left)
-        val right = buildPlan(exc.right)
-        SparkPlan(left.df.except(right.df), left.schema)
+        for {
+          left <- buildPlan(exc.left)
+          right <- buildPlan(exc.right)
+        } yield SparkPlan(left.df.except(right.df), left.schema)
 
       case srt: Dataset.Sort[T] =>
-        val parent = buildPlan(srt.parent)
-        applySortViaCollect(parent, srt.ordering)
+        buildPlan(srt.parent).map { parent =>
+          applySortViaCollect(parent, srt.ordering)
+        }
 
       case srtBy: Dataset.SortBy[T, _] =>
-        val parent = buildPlan(srtBy.parent)
-        applySortByViaCollect(parent, srtBy.key, srtBy.ordering)
+        buildPlan(srtBy.parent).map { parent =>
+          applySortByViaCollect(parent, srtBy.key, srtBy.ordering)
+        }
 
       case srtExpr: Dataset.SortByExpr[T, _] =>
-        val parent = buildPlan(srtExpr.parent)
-        ExprToColumn.convert(srtExpr.keyExpr) match {
-          case Right((sparkCol, _)) =>
-            SparkPlan(parent.df.sort(sparkCol), parent.schema)
-          case Left(_) =>
-            applySortByExprViaCollect(parent, srtExpr.keyExpr, srtExpr.keyType, srtExpr.ordering)
+        buildPlan(srtExpr.parent).map { parent =>
+          ExprToColumn.convert(srtExpr.keyExpr) match {
+            case Right((sparkCol, _)) =>
+              SparkPlan(parent.df.sort(sparkCol), parent.schema)
+            case Left(_) =>
+              applySortByExprViaCollect(parent, srtExpr.keyExpr, srtExpr.keyType)
+          }
         }
 
       case samp: Dataset.Sample[T] =>
-        val parent = buildPlan(samp.parent)
-        SparkPlan(
-          parent.df.sample(samp.withReplacement, samp.fraction, samp.seed),
-          parent.schema
-        )
+        buildPlan(samp.parent).map { parent =>
+          SparkPlan(
+            parent.df.sample(samp.withReplacement, samp.fraction, samp.seed),
+            parent.schema
+          )
+        }
 
       case zip: Dataset.ZipWithIndex[a] =>
-        val parent = buildPlan(zip.parent)
-        applyZipWithIndex[a, T](parent)
+        buildPlan(zip.parent).map { parent =>
+          applyZipWithIndex[a](parent)
+        }
 
       case zip: Dataset.ZipWithUniqueId[a] =>
-        val parent = buildPlan(zip.parent)
-        applyZipWithUniqueId[a, T](parent)
+        buildPlan(zip.parent).map { parent =>
+          applyZipWithUniqueId[a](parent)
+        }
 
       case persist: Dataset.Persist[T] =>
-        val parent = buildPlan(persist.parent)
-        SparkPlan(parent.df.persist(), parent.schema)
+        buildPlan(persist.parent).map { parent =>
+          SparkPlan(parent.df.persist(), parent.schema)
+        }
 
       case cp: Dataset.Checkpoint[T] =>
-        val parent = buildPlan(cp.parent)
-        SparkPlan(parent.df.checkpoint(), parent.schema)
+        buildPlan(cp.parent).map { parent =>
+          SparkPlan(parent.df.checkpoint(), parent.schema)
+        }
 
       case reb: Dataset.Rebalance[T] =>
-        val parent = buildPlan(reb.parent)
-        val df = reb.numPartitions match {
-          case Some(n) => parent.df.repartition(n)
-          case None => parent.df.repartition()
+        buildPlan(reb.parent).map { parent =>
+          val df = reb.numPartitions match {
+            case Some(n) => parent.df.repartition(n)
+            case None => parent.df.repartition()
+          }
+          SparkPlan(df, parent.schema)
         }
-        SparkPlan(df, parent.schema)
 
       case jn: Dataset.InnerJoin[a, b] =>
-        val left = buildPlan(jn.left)
-        val right = buildPlan(jn.right)
-        applyInnerJoin[a, b, T](left, right, jn.condition)
+        for {
+          left <- buildPlan(jn.left)
+          right <- buildPlan(jn.right)
+        } yield applyInnerJoin[a, b](left, right, jn.condition)
 
       case jn: Dataset.LeftJoin[a, b] =>
-        val left = buildPlan(jn.left)
-        val right = buildPlan(jn.right)
-        applyLeftJoin[a, b, T](left, right, jn.condition)
+        for {
+          left <- buildPlan(jn.left)
+          right <- buildPlan(jn.right)
+        } yield applyLeftJoin[a, b](left, right, jn.condition)
 
       case jn: Dataset.RightJoin[a, b] =>
-        val left = buildPlan(jn.left)
-        val right = buildPlan(jn.right)
-        applyRightJoin[a, b, T](left, right, jn.condition)
+        for {
+          left <- buildPlan(jn.left)
+          right <- buildPlan(jn.right)
+        } yield applyRightJoin[a, b](left, right, jn.condition)
 
       case jn: Dataset.FullJoin[a, b] =>
-        val left = buildPlan(jn.left)
-        val right = buildPlan(jn.right)
-        applyFullJoin[a, b, T](left, right, jn.condition)
+        for {
+          left <- buildPlan(jn.left)
+          right <- buildPlan(jn.right)
+        } yield applyFullJoin[a, b](left, right, jn.condition)
 
       case jn: Dataset.LeftAntiJoin[a, b] =>
-        val left = buildPlan(jn.left)
-        val right = buildPlan(jn.right)
-        applyLeftAntiJoin[a, b, T](left, right, jn.condition)
+        for {
+          left <- buildPlan(jn.left)
+          right <- buildPlan(jn.right)
+        } yield applyLeftAntiJoin[a, b](left, right, jn.condition)
 
       case jn: Dataset.InnerJoinOn[a, b, _] =>
-        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "inner")
+        applyInnerJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey)
 
       case jn: Dataset.LeftJoinOn[a, b, _] =>
-        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left")
+        applyLeftJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey)
 
       case jn: Dataset.RightJoinOn[a, b, _] =>
-        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "right")
+        applyRightJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey)
 
       case jn: Dataset.FullJoinOn[a, b, _] =>
-        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "full")
+        applyFullJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey)
 
       case jn: Dataset.LeftAntiJoinOn[a, b, _] =>
-        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_anti")
+        applyLeftOnlyJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_anti")
 
       case gba: Dataset.GroupByAgg[_, T] =>
-        val parent = buildPlan(gba.parent)
-        applyGroupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)
+        buildPlan(gba.parent).flatMap { parent =>
+          applyGroupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)
+        }
 
       case srtExprs: Dataset.SortByExprs[T] =>
-        val parent = buildPlan(srtExprs.parent)
-        applySortByExprs(parent, srtExprs.sortKeys)
+        buildPlan(srtExprs.parent).flatMap { parent =>
+          applySortByExprs(parent, srtExprs.sortKeys)
+        }
 
       case jn: Dataset.LeftSemiJoinOn[a, b, _] =>
-        applyJoinOnExpr[a, b, T](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_semi")
+        applyLeftOnlyJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_semi")
 
       case ww: Dataset.WithWindow[_, T] =>
-        val parent = buildPlan(ww.parent)
-        applyWithWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
+        buildPlan(ww.parent).flatMap { parent =>
+          applyWithWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
+        }
 
       case agg: Dataset.Aggregate[_, T] =>
-        val parent = buildPlan(agg.parent)
-        applyGlobalAggregate(parent, agg.aggSpecs, agg.resultSchema)
+        buildPlan(agg.parent).flatMap { parent =>
+          applyGlobalAggregate(parent, agg.aggSpecs, agg.resultSchema)
+        }
     }
   }
 
@@ -248,11 +267,10 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     SparkPlan(createDataFrame(sorted, parent.schema), parent.schema)
   }
 
-  private def applySortByExprViaCollect[T, K](
+  private def applySortByExprViaCollect[T](
     parent: SparkPlan[T],
-    keyExpr: Expr[T, K],
-    keyType: net.ghoula.strongbow.ColumnType,
-    ord: Ordering[K]
+    keyExpr: Expr[T, ?],
+    keyType: net.ghoula.strongbow.ColumnType
   ): SparkPlan[T] = {
     val values = collectValues(parent)
     import net.ghoula.strongbow.MaterializedDataset
@@ -260,12 +278,10 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case Right(materialized) =>
         net.ghoula.strongbow.ExprInterpreter.evalColumn(keyExpr, materialized.columns, keyType) match {
           case Right(keyCol) =>
-            val rowCount = materialized.rowCount
             val decoded = materialized.toVectorUnsafe
-            val keys =
-              (0 until rowCount).map(i => keyCol.getValue(i).asInstanceOf[K]) // scalafix:ok DisableSyntax.asInstanceOf
-            val sorted = decoded.indices.sortWith((a, b) => ord.lt(keys(a), keys(b))).map(decoded)
-            SparkPlan(createDataFrame(sorted.toVector, parent.schema), parent.schema)
+            val indices = sortIndicesByColumn(keyCol, materialized.rowCount)
+            val sorted = indices.iterator.map(decoded).toVector
+            SparkPlan(createDataFrame(sorted, parent.schema), parent.schema)
           case Left(_) =>
             parent
         }
@@ -273,11 +289,32 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
   }
 
-  private def applyInnerJoin[A, B, T](
+  private def sortIndicesByColumn(col: SBColumn[?], rowCount: Int): Array[Int] = {
+    col match {
+      case SBColumn.IntColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
+      case SBColumn.LongColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
+      case SBColumn.DoubleColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => java.lang.Double.compare(data(a), data(b)) < 0).toArray
+      case SBColumn.StringColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a).compareTo(data(b)) < 0).toArray
+      case SBColumn.DateColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
+      case SBColumn.BooleanColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => !data(a) && data(b)).toArray
+      case SBColumn.AnyColumn(data, _) =>
+        (0 until rowCount)
+          .sortWith((a, b) => String.valueOf(data(a)).compareTo(String.valueOf(data(b))) < 0)
+          .toArray
+    }
+  }
+
+  private def applyInnerJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[T] = {
+  ): SparkPlan[(A, B)] = {
     val leftValues = collectValues(left)
     val rightValues = collectValues(right)
 
@@ -289,14 +326,14 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
 
     val tupleSchema = Schema.tuple2Schema[A, B](using left.schema, right.schema)
     val df = createDataFrame(resultRows, tupleSchema)
-    SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, tupleSchema)
   }
 
-  private def applyLeftJoin[A, B, T](
+  private def applyLeftJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[T] = {
+  ): SparkPlan[(A, Option[B])] = {
     val leftValues = collectValues(left)
     val rightValues = collectValues(right)
 
@@ -309,14 +346,14 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val rightOptionSchema = Schema.optionSchema[B](using right.schema)
     val resultSchema = Schema.tuple2Schema[A, Option[B]](using left.schema, rightOptionSchema)
     val df = createDataFrame(resultRows, resultSchema)
-    SparkPlan(df, resultSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, resultSchema)
   }
 
-  private def applyRightJoin[A, B, T](
+  private def applyRightJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[T] = {
+  ): SparkPlan[(Option[A], B)] = {
     val leftValues = collectValues(left)
     val rightValues = collectValues(right)
 
@@ -329,14 +366,14 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val leftOptionSchema = Schema.optionSchema[A](using left.schema)
     val resultSchema = Schema.tuple2Schema[Option[A], B](using leftOptionSchema, right.schema)
     val df = createDataFrame(resultRows, resultSchema)
-    SparkPlan(df, resultSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, resultSchema)
   }
 
-  private def applyFullJoin[A, B, T](
+  private def applyFullJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[T] = {
+  ): SparkPlan[(Option[A], Option[B])] = {
     val leftValues = collectValues(left)
     val rightValues = collectValues(right)
 
@@ -361,14 +398,14 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     val rightOptionSchema = Schema.optionSchema[B](using right.schema)
     val resultSchema = Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
     val df = createDataFrame(resultRows, resultSchema)
-    SparkPlan(df, resultSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, resultSchema)
   }
 
-  private def applyLeftAntiJoin[A, B, T](
+  private def applyLeftAntiJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[T] = {
+  ): SparkPlan[A] = {
     val leftValues = collectValues(left)
     val rightValues = collectValues(right)
 
@@ -377,41 +414,106 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
 
     val df = createDataFrame(resultRows, left.schema)
-    SparkPlan(df, left.schema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, left.schema)
   }
 
-  private def applyJoinOnExpr[A, B, T](
+  private def joinOnExprBase[A, B](
     leftDs: Dataset[A],
     rightDs: Dataset[B],
     leftKey: Expr[A, ?],
     rightKey: Expr[B, ?],
     joinType: String
-  ): SparkPlan[T] = {
-    val left = buildPlan(leftDs)
-    val right = buildPlan(rightDs)
+  ): Either[ExecutionError, (SparkPlan[A], SparkPlan[B], DataFrame)] = {
+    for {
+      left <- buildPlan(leftDs)
+      right <- buildPlan(rightDs)
+    } yield {
+      val leftColName = getColName(leftKey)
+      val rightColName = getColName(rightKey)
 
-    val leftColName = getColName(leftKey)
-    val rightColName = getColName(rightKey)
+      val leftAlias = left.df.alias("_l")
+      val rightAlias = right.df.alias("_r")
 
-    val leftAlias = left.df.alias("_l")
-    val rightAlias = right.df.alias("_r")
+      import org.apache.spark.sql.functions.col
+      val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
+      val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
 
-    import org.apache.spark.sql.functions.col
-    val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
-    val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
+      val leftColNames = left.df.columns.map(c => col(s"_l.$c"))
+      val rightColNames = right.df.columns.map(c => col(s"_r.$c"))
 
-    val leftColNames = left.df.columns.map(c => col(s"_l.$c"))
-    val rightColNames = right.df.columns.map(c => col(s"_r.$c"))
+      val selectedDf = joinType match {
+        case "left_anti" | "left_semi" =>
+          joinedDf.select(leftColNames*)
+        case _ =>
+          joinedDf.select((leftColNames ++ rightColNames)*)
+      }
 
-    val selectedDf = joinType match {
-      case "left_anti" | "left_semi" =>
-        joinedDf.select(leftColNames*)
-      case _ =>
-        joinedDf.select((leftColNames ++ rightColNames)*)
+      (left, right, selectedDf)
     }
+  }
 
-    val resultSchema = buildJoinSchema[A, B, T](left.schema, right.schema, joinType)
-    SparkPlan(selectedDf, resultSchema)
+  private def applyInnerJoinOnExpr[A, B](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B],
+    leftKey: Expr[A, ?],
+    rightKey: Expr[B, ?]
+  ): Either[ExecutionError, SparkPlan[(A, B)]] = {
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, "inner").map { case (left, right, selectedDf) =>
+      val resultSchema = Schema.tuple2Schema[A, B](using left.schema, right.schema)
+      SparkPlan(selectedDf, resultSchema)
+    }
+  }
+
+  private def applyLeftJoinOnExpr[A, B](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B],
+    leftKey: Expr[A, ?],
+    rightKey: Expr[B, ?]
+  ): Either[ExecutionError, SparkPlan[(A, Option[B])]] = {
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, "left").map { case (left, right, selectedDf) =>
+      val rightOpt = Schema.optionSchema[B](using right.schema)
+      val resultSchema = Schema.tuple2Schema[A, Option[B]](using left.schema, rightOpt)
+      SparkPlan(selectedDf, resultSchema)
+    }
+  }
+
+  private def applyRightJoinOnExpr[A, B](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B],
+    leftKey: Expr[A, ?],
+    rightKey: Expr[B, ?]
+  ): Either[ExecutionError, SparkPlan[(Option[A], B)]] = {
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, "right").map { case (left, right, selectedDf) =>
+      val leftOpt = Schema.optionSchema[A](using left.schema)
+      val resultSchema = Schema.tuple2Schema[Option[A], B](using leftOpt, right.schema)
+      SparkPlan(selectedDf, resultSchema)
+    }
+  }
+
+  private def applyFullJoinOnExpr[A, B](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B],
+    leftKey: Expr[A, ?],
+    rightKey: Expr[B, ?]
+  ): Either[ExecutionError, SparkPlan[(Option[A], Option[B])]] = {
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, "full").map { case (left, right, selectedDf) =>
+      val leftOpt = Schema.optionSchema[A](using left.schema)
+      val rightOpt = Schema.optionSchema[B](using right.schema)
+      val resultSchema = Schema.tuple2Schema[Option[A], Option[B]](using leftOpt, rightOpt)
+      SparkPlan(selectedDf, resultSchema)
+    }
+  }
+
+  private def applyLeftOnlyJoinOnExpr[A, B](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B],
+    leftKey: Expr[A, ?],
+    rightKey: Expr[B, ?],
+    joinType: String
+  ): Either[ExecutionError, SparkPlan[A]] = {
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, joinType).map { case (left, _, selectedDf) =>
+      SparkPlan(selectedDf, left.schema)
+    }
   }
 
   private def getColName[Row, A](expr: Expr[Row, A]): String = expr match {
@@ -420,43 +522,20 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     case _ => "_expr"
   }
 
-  private def buildJoinSchema[A, B, T](leftSchema: Schema[A], rightSchema: Schema[B], joinType: String): Schema[T] = {
-    val schema = joinType match {
-      case "inner" =>
-        Schema.tuple2Schema[A, B](using leftSchema, rightSchema)
-      case "left" =>
-        val rightOpt = Schema.optionSchema[B](using rightSchema)
-        Schema.tuple2Schema[A, Option[B]](using leftSchema, rightOpt)
-      case "right" =>
-        val leftOpt = Schema.optionSchema[A](using leftSchema)
-        Schema.tuple2Schema[Option[A], B](using leftOpt, rightSchema)
-      case "full" =>
-        val leftOpt = Schema.optionSchema[A](using leftSchema)
-        val rightOpt = Schema.optionSchema[B](using rightSchema)
-        Schema.tuple2Schema[Option[A], Option[B]](using leftOpt, rightOpt)
-      case "left_anti" | "left_semi" =>
-        leftSchema
-      case other =>
-        throw new RuntimeException(s"Unknown join type: $other") // scalafix:ok DisableSyntax.throw
-    }
-    schema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-  }
-
-  private def applyZipWithIndex[A, T](parent: SparkPlan[A]): SparkPlan[T] = {
+  private def applyZipWithIndex[A](parent: SparkPlan[A]): SparkPlan[(A, Long)] = {
     val values = collectValues(parent)
     val indexed = values.zipWithIndex.map { case (v, i) => (v, i.toLong) }
 
     val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
     val df = createDataFrame(indexed, tupleSchema)
-    SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, tupleSchema)
   }
 
-  private def applyZipWithUniqueId[A, T](parent: SparkPlan[A]): SparkPlan[T] = {
+  private def applyZipWithUniqueId[A](parent: SparkPlan[A]): SparkPlan[(A, Long)] = {
     import org.apache.spark.sql.functions.monotonically_increasing_id
     val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
     val colNames = parent.df.columns
     val uidDf = parent.df.withColumn("_uid", monotonically_increasing_id())
-    // Restructure: original columns become a struct, _uid becomes the second element
     val values = uidDf
       .collect()
       .iterator
@@ -470,7 +549,31 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       }
       .toVector
     val df = createDataFrame(values, tupleSchema)
-    SparkPlan(df, tupleSchema.asInstanceOf[Schema[T]]) // scalafix:ok DisableSyntax.asInstanceOf
+    SparkPlan(df, tupleSchema)
+  }
+
+  private def convertExprs(
+    exprs: Vector[(String, Expr[?, Any], net.ghoula.strongbow.ColumnType)]
+  ): Either[ExecutionError, Vector[org.apache.spark.sql.Column]] = {
+    exprs.foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) {
+      case (acc, (name, expr, _)) =>
+        acc.flatMap { cols =>
+          ExprToColumn.convert(expr) match {
+            case Right((sparkCol, _)) => Right(cols :+ sparkCol.as(name))
+            case Left(err) => Left(ExecutionError.UnsupportedExpression(s"Expr conversion failed: $err"))
+          }
+        }
+    }
+  }
+
+  private def convertExprToSparkCol[Row](
+    expr: Expr[Row, ?],
+    context: String
+  ): Either[ExecutionError, org.apache.spark.sql.Column] = {
+    ExprToColumn.convert(expr) match {
+      case Right((sparkCol, _)) => Right(sparkCol)
+      case Left(err) => Left(ExecutionError.UnsupportedExpression(s"$context: $err"))
+    }
   }
 
   private def applyGroupByAgg[In, T](
@@ -478,71 +581,71 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     keySpecs: Vector[KeySpec[In]],
     aggSpecs: Vector[AggSpec[In]],
     schema: Schema[T]
-  ): SparkPlan[T] = {
-    val keyCols = keySpecs.map { spec =>
-      ExprToColumn.convert(spec.expr) match {
-        case Right((sparkCol, _)) => sparkCol.as(spec.name)
-        case Left(err) =>
-          throw new RuntimeException(s"Key expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+  ): Either[ExecutionError, SparkPlan[T]] = {
+    for {
+      keyCols <- keySpecs.foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) {
+        case (acc, spec) =>
+          acc.flatMap { cols =>
+            convertExprToSparkCol(spec.expr, "Key expr conversion failed").map(sc => cols :+ sc.as(spec.name))
+          }
       }
-    }
-
-    val aggCols = aggSpecs.map { spec =>
-      ExprToColumn.convert(spec.expr) match {
-        case Right((sparkCol, _)) => sparkCol.as(spec.name)
-        case Left(err) =>
-          throw new RuntimeException(s"Agg expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+      aggCols <- aggSpecs.foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) {
+        case (acc, spec) =>
+          acc.flatMap { cols =>
+            convertExprToSparkCol(spec.expr, "Agg expr conversion failed").map(sc => cols :+ sc.as(spec.name))
+          }
       }
-    }
+    } yield {
+      val grouped = parent.df.groupBy(keyCols*)
+      val aggDf = grouped.agg(aggCols.head, aggCols.tail*)
 
-    val grouped = parent.df.groupBy(keyCols*)
-    val aggDf = grouped.agg(aggCols.head, aggCols.tail*)
-
-    // Rename output columns to match the output schema's column names
-    val outputColNames = schema.columnNames
-    val currentColNames = aggDf.columns.toVector
-    val renamedDf = currentColNames.zip(outputColNames).foldLeft(aggDf) { case (df, (current, target)) =>
-      if (current != target) df.withColumnRenamed(current, target) else df
+      val outputColNames = schema.columnNames
+      val currentColNames = aggDf.columns.toVector
+      val renamedDf = currentColNames.zip(outputColNames).foldLeft(aggDf) { case (df, (current, target)) =>
+        if (current != target) df.withColumnRenamed(current, target) else df
+      }
+      SparkPlan(renamedDf, schema)
     }
-    SparkPlan(renamedDf, schema)
   }
 
   private def applyGlobalAggregate[In, T](
     parent: SparkPlan[In],
     aggSpecs: Vector[AggSpec[In]],
     schema: Schema[T]
-  ): SparkPlan[T] = {
-    val aggCols = aggSpecs.map { spec =>
-      ExprToColumn.convert(spec.expr) match {
-        case Right((sparkCol, _)) => sparkCol.as(spec.name)
-        case Left(err) =>
-          throw new RuntimeException(s"Agg expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+  ): Either[ExecutionError, SparkPlan[T]] = {
+    aggSpecs
+      .foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) { case (acc, spec) =>
+        acc.flatMap { cols =>
+          convertExprToSparkCol(spec.expr, "Agg expr conversion failed").map(sc => cols :+ sc.as(spec.name))
+        }
       }
-    }
+      .map { aggCols =>
+        val aggDf = parent.df.agg(aggCols.head, aggCols.tail*)
 
-    val aggDf = parent.df.agg(aggCols.head, aggCols.tail*)
-
-    val outputColNames = schema.columnNames
-    val currentColNames = aggDf.columns.toVector
-    val renamedDf = currentColNames.zip(outputColNames).foldLeft(aggDf) { case (df, (current, target)) =>
-      if (current != target) df.withColumnRenamed(current, target) else df
-    }
-    SparkPlan(renamedDf, schema)
+        val outputColNames = schema.columnNames
+        val currentColNames = aggDf.columns.toVector
+        val renamedDf = currentColNames.zip(outputColNames).foldLeft(aggDf) { case (df, (current, target)) =>
+          if (current != target) df.withColumnRenamed(current, target) else df
+        }
+        SparkPlan(renamedDf, schema)
+      }
   }
 
   private def applySortByExprs[T](
     parent: SparkPlan[T],
     sortKeys: Vector[SortSpec[T]]
-  ): SparkPlan[T] = {
-    val sparkSortCols = sortKeys.map { spec =>
-      ExprToColumn.convert(spec.expr) match {
-        case Right((sparkCol, _)) =>
-          if (spec.ascending) sparkCol.asc else sparkCol.desc
-        case Left(_) =>
-          throw new RuntimeException("Sort expr conversion failed") // scalafix:ok DisableSyntax.throw
+  ): Either[ExecutionError, SparkPlan[T]] = {
+    sortKeys
+      .foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) { case (acc, spec) =>
+        acc.flatMap { cols =>
+          convertExprToSparkCol(spec.expr, "Sort expr conversion failed").map { sc =>
+            cols :+ (if (spec.ascending) sc.asc else sc.desc)
+          }
+        }
       }
-    }
-    SparkPlan(parent.df.sort(sparkSortCols*), parent.schema)
+      .map { sparkSortCols =>
+        SparkPlan(parent.df.sort(sparkSortCols*), parent.schema)
+      }
   }
 
   private def applyWithWindow[In, T](
@@ -550,69 +653,67 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     windowExprs: Vector[WindowExprSpec[In]],
     windowSpec: net.ghoula.strongbow.WindowSpec[In],
     schema: Schema[T]
-  ): SparkPlan[T] = {
-    import org.apache.spark.sql.functions.*
+  ): Either[ExecutionError, SparkPlan[T]] = {
     import org.apache.spark.sql.expressions.Window
 
-    // Build Spark WindowSpec
-    val partCols = windowSpec.partitionBy.map { spec =>
-      ExprToColumn.convert(spec.expr) match {
-        case Right((sparkCol, _)) => sparkCol
-        case Left(err) =>
-          throw new RuntimeException(
-            s"Window partition expr conversion failed: $err"
-          ) // scalafix:ok DisableSyntax.throw
-      }
-    }
+    for {
+      partCols <- windowSpec.partitionBy
+        .foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) {
+          case (acc, spec) =>
+            acc.flatMap { cols =>
+              convertExprToSparkCol(spec.expr, "Window partition expr conversion failed").map(cols :+ _)
+            }
+        }
+      orderSparkCols <- windowSpec.orderBy
+        .foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) {
+          case (acc, spec) =>
+            acc.flatMap { cols =>
+              convertExprToSparkCol(spec.expr, "Window order expr conversion failed").map { sc =>
+                cols :+ (if (spec.ascending) sc.asc else sc.desc)
+              }
+            }
+        }
+      resultDf <- {
+        val w = {
+          val partitioned = if (partCols.nonEmpty) Window.partitionBy(partCols*) else Window.partitionBy()
+          if (orderSparkCols.nonEmpty) partitioned.orderBy(orderSparkCols*) else partitioned
+        }
 
-    val orderSparkCols = windowSpec.orderBy.map { spec =>
-      ExprToColumn.convert(spec.expr) match {
-        case Right((sparkCol, _)) =>
-          if (spec.ascending) sparkCol.asc else sparkCol.desc
-        case Left(err) =>
-          throw new RuntimeException(s"Window order expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
-      }
-    }
-
-    val w = {
-      val partitioned = if (partCols.nonEmpty) Window.partitionBy(partCols*) else Window.partitionBy()
-      if (orderSparkCols.nonEmpty) partitioned.orderBy(orderSparkCols*) else partitioned
-    }
-
-    // Add window columns
-    var df = parent.df // scalafix:ok DisableSyntax.var
-    windowExprs.foreach { spec =>
-      val windowCol: org.apache.spark.sql.Column = spec.expr match {
-        case _: Expr.RowNumber[_] => row_number().over(w)
-        case _: Expr.Rank[_] => rank().over(w)
-        case _: Expr.DenseRank[_] => dense_rank().over(w)
-        case lagExpr: Expr.Lag[_, _] =>
-          val innerCol = ExprToColumn.convert(lagExpr.expr) match {
-            case Right((sc, _)) => sc
-            case Left(err) =>
-              throw new RuntimeException(s"Lag expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
+        windowExprs.foldLeft[Either[ExecutionError, DataFrame]](Right(parent.df)) { case (accDf, spec) =>
+          accDf.flatMap { df =>
+            resolveWindowExpr(spec.expr, w).map(windowCol => df.withColumn(spec.name, windowCol))
           }
+        }
+      }
+    } yield SparkPlan(resultDf, schema)
+  }
+
+  private def resolveWindowExpr[In](
+    windowExpr: Expr[In, ?],
+    w: org.apache.spark.sql.expressions.WindowSpec
+  ): Either[ExecutionError, org.apache.spark.sql.Column] = {
+    import org.apache.spark.sql.functions.*
+    windowExpr match {
+      case _: Expr.RowNumber[_] => Right(row_number().over(w))
+      case _: Expr.Rank[_] => Right(rank().over(w))
+      case _: Expr.DenseRank[_] => Right(dense_rank().over(w))
+      case lagExpr: Expr.Lag[_, _] =>
+        convertExprToSparkCol(lagExpr.expr, "Lag expr conversion failed").map { innerCol =>
           lagExpr.default match {
             case Some(d) => lag(innerCol, lagExpr.offset, d).over(w)
             case scala.None => lag(innerCol, lagExpr.offset).over(w)
           }
-        case leadExpr: Expr.Lead[_, _] =>
-          val innerCol = ExprToColumn.convert(leadExpr.expr) match {
-            case Right((sc, _)) => sc
-            case Left(err) =>
-              throw new RuntimeException(s"Lead expr conversion failed: $err") // scalafix:ok DisableSyntax.throw
-          }
+        }
+      case leadExpr: Expr.Lead[_, _] =>
+        convertExprToSparkCol(leadExpr.expr, "Lead expr conversion failed").map { innerCol =>
           leadExpr.default match {
             case Some(d) => lead(innerCol, leadExpr.offset, d).over(w)
             case scala.None => lead(innerCol, leadExpr.offset).over(w)
           }
-        case other =>
-          throw new RuntimeException(s"Unsupported window expr: $other") // scalafix:ok DisableSyntax.throw
-      }
-      df = df.withColumn(spec.name, windowCol)
+        }
+      case other =>
+        Left(ExecutionError.UnsupportedExpression(s"Unsupported window expr: $other"))
     }
-
-    SparkPlan(df, schema)
   }
 
   private[spark] def createDataFrame[T](values: Vector[T], schema: Schema[T]): DataFrame = {

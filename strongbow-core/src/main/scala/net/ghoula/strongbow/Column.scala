@@ -63,7 +63,6 @@ enum Column[+A] {
     case AnyColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
   }
 
-
   /** Typed prefix slicing — takes the first n elements without boxing.
     *
     * Uses `Array.copyOfRange` on typed arrays for zero-boxing, cache-friendly copies. This replaces

@@ -87,11 +87,11 @@ enum Dataset[T] {
   case ZipWithIndex[T](parent: Dataset[T]) extends Dataset[(T, Long)]
   case ZipWithUniqueId[T](parent: Dataset[T]) extends Dataset[(T, Long)]
 
-  // Materialization hints
+
   case Persist[T](parent: Dataset[T]) extends Dataset[T]
   case Checkpoint[T](parent: Dataset[T]) extends Dataset[T]
 
-  // Spark-only repartitioning (in-memory no-op)
+
   case Rebalance[T](parent: Dataset[T], numPartitions: Option[Int]) extends Dataset[T]
 
   case GroupByAgg[In, Out](
@@ -122,7 +122,7 @@ enum Dataset[T] {
     schema: Schema[Out]
   ) extends Dataset[Out]
 
-  // Global aggregation (no grouping keys)
+
   case Aggregate[T, R](
     parent: Dataset[T],
     aggSpecs: Vector[AggSpec[T]],

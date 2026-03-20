@@ -21,7 +21,7 @@ object ExprToColumn {
     */
   def convert[Row, A](expr: Expr[Row, A]): Either[ExecutionError, (SparkColumn, ColumnType)] = {
     (expr: @unchecked) match {
-      // Leaf nodes
+
       case cell: Expr.Cell[Row, _] =>
         Right((col(cell.name), ColumnType.AnyType))
 
@@ -31,7 +31,7 @@ object ExprToColumn {
       case named: Expr.Named[Row, _] =>
         convert(named.expr).map { case (sparkCol, ct) => (sparkCol.as(named.name), ct) }
 
-      // Numeric operations
+
       case add: Expr.Add[Row] =>
         for {
           (l, _) <- convert(add.left)
@@ -56,7 +56,7 @@ object ExprToColumn {
           (r, _) <- convert(d.right)
         } yield ((l / r).cast("int"), ColumnType.IntType)
 
-      // Long arithmetic
+
       case add: Expr.AddLong[Row] =>
         for {
           (l, _) <- convert(add.left)
@@ -81,7 +81,7 @@ object ExprToColumn {
           (r, _) <- convert(d.right)
         } yield ((l / r).cast("long"), ColumnType.LongType)
 
-      // Double arithmetic
+
       case add: Expr.AddDouble[Row] =>
         for {
           (l, _) <- convert(add.left)
@@ -106,7 +106,7 @@ object ExprToColumn {
           (r, _) <- convert(d.right)
         } yield (l / r, ColumnType.DoubleType)
 
-      // Comparisons
+
       case gt: Expr.Gt[Row, _] =>
         for {
           (l, _) <- convert(gt.left)
@@ -143,7 +143,7 @@ object ExprToColumn {
           (r, _) <- convert(neq.right)
         } yield (l =!= r, ColumnType.BooleanType)
 
-      // Boolean operations
+
       case and: Expr.And[Row] =>
         for {
           (l, _) <- convert(and.left)
@@ -159,7 +159,7 @@ object ExprToColumn {
       case not: Expr.Not[Row] =>
         convert(not.expr).map { case (sparkCol, _) => (!sparkCol, ColumnType.BooleanType) }
 
-      // Conditional
+
       case w: Expr.When[Row, _] =>
         for {
           (cond, _) <- convert(w.condition)
@@ -167,7 +167,7 @@ object ExprToColumn {
           (elseCol, _) <- convert(w.elseExpr)
         } yield (sparkWhen(cond, thenCol).otherwise(elseCol), thenType)
 
-      // String operations
+
       case cat: Expr.Concat[Row] =>
         for {
           (l, _) <- convert(cat.left)
@@ -177,7 +177,7 @@ object ExprToColumn {
       case len: Expr.Length[Row] =>
         convert(len.expr).map { case (sparkCol, _) => (length(sparkCol), ColumnType.IntType) }
 
-      // Option operations
+
       case isDef: Expr.IsDefined[Row, _] =>
         convert(isDef.expr).map { case (sparkCol, _) => (sparkCol.isNotNull, ColumnType.BooleanType) }
 
@@ -186,7 +186,7 @@ object ExprToColumn {
           (e, ct) <- convert(goe.expr)
         } yield (sparkWhen(e.isNull, toLit(goe.default)).otherwise(e), ct)
 
-      // String pattern matching
+
       case lk: Expr.Like[Row] =>
         convert(lk.expr).map { case (sparkCol, _) => (sparkCol.like(lk.pattern), ColumnType.BooleanType) }
 
@@ -339,7 +339,7 @@ object ExprToColumn {
       case cts: Expr.CastToString[Row, _] =>
         convert(cts.expr).map { case (sparkCol, _) => (sparkCol.cast("string"), ColumnType.StringType) }
 
-      // Aggregations
+
       case s: Expr.Sum[Row] =>
         convert(s.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.IntType) }
 
@@ -386,7 +386,7 @@ object ExprToColumn {
           (sparkWhen(sparkCol.isNotNull, array(sparkCol)).otherwise(array()), ColumnType.AnyType)
         }
 
-      // Advanced aggregations
+
       case pct: Expr.PercentileApprox[Row] =>
         convert(pct.expr).map { case (sparkCol, _) =>
           (percentile_approx(sparkCol, lit(pct.percentile), lit(pct.accuracy)), ColumnType.DoubleType)
@@ -436,7 +436,7 @@ object ExprToColumn {
           (transform(sliced, (x: SparkColumn) => x.getField("v")), ColumnType.AnyType)
         }
 
-      // Date expressions
+
       case dad: Expr.DateAddDays[Row] =>
         for {
           (d, _) <- convert(dad.date)
@@ -470,7 +470,6 @@ object ExprToColumn {
       case ed: Expr.ExtractDay[Row] =>
         convert(ed.date).map { case (d, _) => (dayofmonth(d), ColumnType.IntType) }
 
-      // Window functions — these produce Spark Column but need .over(windowSpec) at call site
       case _: Expr.RowNumber[Row] =>
         Right((row_number(), ColumnType.IntType))
 

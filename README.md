@@ -93,10 +93,14 @@ sbt spark/compile  # verify Spark module
 
 ## Part of the Arda Ecosystem
 
-Strongbow integrates with:
-- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators (JSON parsing for GetJsonObject)
-- [Sarati](https://codeberg.org/hakim/sarati) — binary codec and JSON AST
-- [Eru](https://codeberg.org/hakim/eru) — async runtime (future integration planned)
+Strongbow is built on the Arda family of Scala 3 libraries:
+
+- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators with left recursion, zero-allocation backtracking, and built-in JSON/CSV/XML parsers
+- [Sarati](https://codeberg.org/hakim/sarati) — binary codec with compile-time derivation and structural AST layers (JSON, TOML, YAML, XML)
+- [Eru](https://codeberg.org/hakim/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers, resource safety, and concurrency primitives (Ref, Semaphore, Queue, Promise)
+- [Valar](https://codeberg.org/hakim/valar) — type-safe validation with compile-time derivation and error accumulation
+
+All Arda libraries share the same principles: Scala 3 native, compile-time metaprogramming, zero `asInstanceOf` in core logic, `-Yexplicit-nulls`, `-language:strictEquality`.
 
 ---
 

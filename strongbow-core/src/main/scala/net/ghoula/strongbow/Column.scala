@@ -63,61 +63,6 @@ enum Column[+A] {
     case AnyColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
   }
 
-  /** Typed accessors for zero-cast evaluation.
-    *
-    * These provide typed access to column data, allowing one-cast-at-boundary pattern. Call the
-    * appropriate accessor based on column type to get a properly typed value.
-    *
-    * SQL NULL HANDLING: For SQL NULL values (tracked in nulls BitSet), these return default values:
-    *   - Int/Long/Double: 0
-    *   - Boolean: false
-    *   - String: null
-    *
-    * This is SAFE because:
-    *   1. The nulls BitSet is the authoritative source of which values are NULL
-    *   2. These are internal accessors - external code should use Option-based accessors
-    *   3. The null for String is just an array placeholder, tracked by BitSet
-    *   4. ExprInterpreter and other interpreters understand this contract
-    *
-    * NOTE: The throw statements indicate programming bugs (calling getInt on a StringColumn) not
-    * user errors. Callers guard these calls with columnType checks.
-    */
-  inline def getInt(index: Int): Int = this match {
-    case IntColumn(data, nulls) =>
-      if (nulls.contains(index)) 0 else data(index)
-    case _ => 0
-  }
-
-  inline def getLong(index: Int): Long = this match {
-    case LongColumn(data, nulls) =>
-      if (nulls.contains(index)) 0L else data(index)
-    case _ => 0L
-  }
-
-  inline def getDouble(index: Int): Double = this match {
-    case DoubleColumn(data, nulls) =>
-      if (nulls.contains(index)) 0.0 else data(index)
-    case _ => 0.0
-  }
-
-  inline def getString(index: Int): String = this match {
-    case StringColumn(data, nulls) =>
-      if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case _ => null // scalafix:ok DisableSyntax.null
-  }
-
-  inline def getBoolean(index: Int): Boolean = this match {
-    case BooleanColumn(data, nulls) =>
-      if (nulls.contains(index)) false else data(index)
-    case _ => false
-  }
-
-  /** Get date value as epoch day Int. */
-  inline def getDateEpochDay(index: Int): Int = this match {
-    case DateColumn(data, nulls) =>
-      if (nulls.contains(index)) 0 else data(index)
-    case _ => 0
-  }
 
   /** Typed prefix slicing — takes the first n elements without boxing.
     *

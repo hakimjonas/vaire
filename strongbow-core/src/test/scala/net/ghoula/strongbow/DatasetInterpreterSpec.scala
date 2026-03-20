@@ -155,12 +155,14 @@ class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
     val intCol = Column.int(Array(1, 2, 3))
     val stringCol = Column.string(Array("a", "b", "c"))
 
-    // Typed accessors return properly typed values
-    val intValue: Int = intCol.getInt(0)
-    val stringValue: String = stringCol.getString(1)
-
-    intValue shouldBe 1
-    stringValue shouldBe "b"
+    intCol match {
+      case Column.IntColumn(data, _) => data(0) shouldBe 1
+      case _ => fail("Expected IntColumn")
+    }
+    stringCol match {
+      case Column.StringColumn(data, _) => data(1) shouldBe "b"
+      case _ => fail("Expected StringColumn")
+    }
   }
 
   "ExprInterpreter" should "evaluate expressions with one cast at Cell boundary" in {

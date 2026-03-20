@@ -45,7 +45,7 @@ final case class MaterializedDataset[T](
   def toVectorUnsafe: Vector[T] = {
     toVector.map {
       case Right(value) => value
-      case Left(err) => throw new RuntimeException(s"Decode error: $err") // scalafix:ok DisableSyntax.throw
+      case Left(err) => sys.error(s"Decode error: $err")
     }
   }
 

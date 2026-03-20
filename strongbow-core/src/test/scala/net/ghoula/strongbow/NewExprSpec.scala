@@ -4,15 +4,27 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+import net.ghoula.strongbow.types.ColumnIndex
 
 /** Tests for new expression operations (>=, <=, !=, as, lit, when). */
 class NewExprSpec extends AnyFlatSpec with Matchers {
 
+  private def eval[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    idx: Int
+  ): Either[errors.ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
+
   "lit helper" should "create literal expressions ergonomically" in {
     val expr = Expr.lit[Int, Int](42)
 
-    val result = ExprInterpreter.evalAt(expr, Vector.empty, RowIndex(0))
+    val result = eval(expr, Vector.empty, 0)
     result shouldBe Right(42)
   }
 
@@ -24,8 +36,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
       case _ => fail("Expected Named expression")
     }
 
-    // Named should evaluate to inner expression
-    val result = ExprInterpreter.evalAt(expr, Vector.empty, RowIndex(0))
+    val result = eval(expr, Vector.empty, 0)
     result shouldBe Right(42)
   }
 
@@ -36,7 +47,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = Expr.Cell[Int, Int]("value", ColumnIndex(0)) >= Expr.lit(10)
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(false), Right(true), Right(true), Right(true))
@@ -49,7 +60,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = Expr.Cell[Int, Int]("value", ColumnIndex(0)) <= Expr.lit(10)
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(true), Right(true), Right(false), Right(false))
@@ -64,7 +75,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = Expr.Neq(cellExpr, litExpr)
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(true), Right(false), Right(true), Right(false))
@@ -74,14 +85,13 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.int(Array(5, 15, 25, 35))
     val columns = Vector(col)
 
-    // when(age < 18, "minor", "adult")
     val condition = Expr.Cell[Int, Int]("age", ColumnIndex(0)) < Expr.lit(18)
     val thenExpr = Expr.lit[Int, String]("minor")
     val elseExpr = Expr.lit[Int, String]("adult")
     val expr = Expr.when(condition, thenExpr, elseExpr)
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right("minor"), Right("minor"), Right("adult"), Right("adult"))
@@ -91,7 +101,6 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.int(Array(5, 15, 25, 65))
     val columns = Vector(col)
 
-    // when(age < 18, "minor", when(age < 65, "adult", "senior"))
     val age = Expr.Cell[Int, Int]("age", ColumnIndex(0))
     val expr = Expr.when(
       age < Expr.lit(18),
@@ -104,7 +113,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     )
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right("minor"), Right("minor"), Right("adult"), Right("senior"))
@@ -114,22 +123,19 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.int(Array(-5, 0, 5))
     val columns = Vector(col)
 
-    // Absolute value using when: when(x < 0, -x, x)
     val x = Expr.Cell[Int, Int]("x", ColumnIndex(0))
     val expr = Expr.when(
       x < Expr.lit(0),
-      Expr.lit[Int, Int](0) - x, // -x
+      Expr.lit[Int, Int](0) - x,
       x
     )
 
     val results = (0 until 3).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(5), Right(0), Right(5))
   }
-
-  // --- Like ---
 
   "like" should "match with % wildcard" in {
     val col = Column.string(Array("PROMO STEEL", "STANDARD COPPER", "PROMO BRASS", "ECONOMY TIN"))
@@ -139,7 +145,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = strCell.like("PROMO%")
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(true), Right(false), Right(true), Right(false))
@@ -153,7 +159,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = strCell.like("a_c")
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(true), Right(true), Right(false), Right(false))
@@ -167,7 +173,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = strCell.like("hello")
 
     val results = (0 until 2).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(true), Right(false))
@@ -181,7 +187,7 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val expr = strCell.like("a%ef")
 
     val results = (0 until 4).map { idx =>
-      ExprInterpreter.evalAt(expr, columns, RowIndex(idx))
+      eval(expr, columns, idx)
     }
 
     results shouldBe Seq(Right(true), Right(true), Right(true), Right(false))
@@ -191,8 +197,6 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val strCell = Expr.Cell[String, String]("value", ColumnIndex(0))
     strCell.like("PROMO%").outputType shouldBe Some(ColumnType.BooleanType)
   }
-
-  // --- outputType ---
 
   "outputType" should "return IntType for arithmetic expressions" in {
     val cell = Expr.Cell[Int, Int]("value", ColumnIndex(0))
@@ -248,14 +252,13 @@ class NewExprSpec extends AnyFlatSpec with Matchers {
     val x = Expr.Cell[Int, Int]("x", ColumnIndex(0))
     val ten = Expr.lit[Int, Int](10)
 
-    // All comparison operations should work without casts
     val gteExpr = x >= ten
     val lteExpr = x <= ten
-    val neqExpr = Expr.Neq(x, ten) // Use constructor directly to avoid conflict with Scala's !=
+    val neqExpr = Expr.Neq(x, ten)
 
-    val gteResult = ExprInterpreter.evalAt(gteExpr, columns, RowIndex(0))
-    val lteResult = ExprInterpreter.evalAt(lteExpr, columns, RowIndex(0))
-    val neqResult = ExprInterpreter.evalAt(neqExpr, columns, RowIndex(0))
+    val gteResult = eval(gteExpr, columns, 0)
+    val lteResult = eval(lteExpr, columns, 0)
+    val neqResult = eval(neqExpr, columns, 0)
 
     gteResult shouldBe Right(true)
     lteResult shouldBe Right(true)

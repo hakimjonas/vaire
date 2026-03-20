@@ -4,9 +4,21 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+import net.ghoula.strongbow.types.ColumnIndex
 
 class Phase4ExprSpec extends AnyFlatSpec with Matchers {
+
+  private def eval[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    idx: Int
+  ): Either[errors.ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
 
   private val strData: Array[String] = Array("hello", "world", "foo bar")
   private val strCol = Column.string(strData)
@@ -15,36 +27,36 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
 
   "Md5" should "compute MD5 hash of a string" in {
     val expr = cell.md5
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right("5d41402abc4b2a76b9719d911017c592")
   }
 
   it should "compute MD5 for different inputs" in {
-    val result = ExprInterpreter.evalAt(cell.md5, columns, RowIndex(1))
+    val result = eval(cell.md5, columns, 1)
     result shouldBe Right("7d793037a0760186574b0282f2f435e7")
   }
 
   "Sha1" should "compute SHA-1 hash of a string" in {
     val expr = cell.sha1
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d")
   }
 
   "Sha2" should "compute SHA-256 hash by default (bitLength=0)" in {
     val expr = cell.sha2(0)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
   }
 
   it should "compute SHA-256 hash with bitLength=256" in {
     val expr = cell.sha2(256)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
   }
 
   it should "compute SHA-512 hash" in {
     val expr = cell.sha2(512)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(
       "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043"
     )
@@ -55,8 +67,8 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.evalAt(c.urlEncode, cols, RowIndex(0)) shouldBe Right("hello+world")
-    ExprInterpreter.evalAt(c.urlEncode, cols, RowIndex(1)) shouldBe Right("foo%3Dbar%26baz%3Dqux")
+    eval(c.urlEncode, cols, 0) shouldBe Right("hello+world")
+    eval(c.urlEncode, cols, 1) shouldBe Right("foo%3Dbar%26baz%3Dqux")
   }
 
   "UrlDecode" should "decode a URL-encoded string" in {
@@ -64,13 +76,13 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.evalAt(c.urlDecode, cols, RowIndex(0)) shouldBe Right("hello world")
-    ExprInterpreter.evalAt(c.urlDecode, cols, RowIndex(1)) shouldBe Right("foo=bar&baz=qux")
+    eval(c.urlDecode, cols, 0) shouldBe Right("hello world")
+    eval(c.urlDecode, cols, 1) shouldBe Right("foo=bar&baz=qux")
   }
 
   "Base64Encode" should "encode a string to base64" in {
     val expr = cell.base64Encode
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right("aGVsbG8=")
   }
 
@@ -79,29 +91,29 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.evalAt(c.base64Decode, cols, RowIndex(0)) shouldBe Right("hello")
-    ExprInterpreter.evalAt(c.base64Decode, cols, RowIndex(1)) shouldBe Right("world")
+    eval(c.base64Decode, cols, 0) shouldBe Right("hello")
+    eval(c.base64Decode, cols, 1) shouldBe Right("world")
   }
 
   "Base64 roundtrip" should "encode then decode back to original" in {
     val expr = cell.base64Encode
-    val encoded = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val encoded = eval(expr, columns, 0)
     encoded shouldBe Right("aGVsbG8=")
     val data2: Array[String] = Array("aGVsbG8=")
     val col2 = Column.string(data2)
     val cols2 = Vector(col2)
     val c2 = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.evalAt(c2.base64Decode, cols2, RowIndex(0)) shouldBe Right("hello")
+    eval(c2.base64Decode, cols2, 0) shouldBe Right("hello")
   }
 
   "Hex" should "hex-encode string bytes" in {
     val expr = cell.hex
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right("68656c6c6f")
   }
 
   it should "hex-encode world" in {
-    val result = ExprInterpreter.evalAt(cell.hex, columns, RowIndex(1))
+    val result = eval(cell.hex, columns, 1)
     result shouldBe Right("776f726c64")
   }
 
@@ -110,8 +122,8 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(0)) shouldBe Right("Alice")
-    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(1)) shouldBe Right("Bob")
+    eval(jsonCell.getJsonObject("$.name"), jsonColumns, 0) shouldBe Right("Alice")
+    eval(jsonCell.getJsonObject("$.name"), jsonColumns, 1) shouldBe Right("Bob")
   }
 
   it should "extract nested fields" in {
@@ -119,7 +131,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.a.b.c"), jsonColumns, RowIndex(0)) shouldBe Right("deep")
+    eval(jsonCell.getJsonObject("$.a.b.c"), jsonColumns, 0) shouldBe Right("deep")
   }
 
   it should "return numeric values as strings" in {
@@ -127,8 +139,8 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.count"), jsonColumns, RowIndex(0)) shouldBe Right("42")
-    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.price"), jsonColumns, RowIndex(0)) shouldBe Right("9.99")
+    eval(jsonCell.getJsonObject("$.count"), jsonColumns, 0) shouldBe Right("42")
+    eval(jsonCell.getJsonObject("$.price"), jsonColumns, 0) shouldBe Right("9.99")
   }
 
   it should "return null for missing path" in {
@@ -136,7 +148,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    val result = ExprInterpreter.evalAt(jsonCell.getJsonObject("$.missing"), jsonColumns, RowIndex(0))
+    val result = eval(jsonCell.getJsonObject("$.missing"), jsonColumns, 0)
     result shouldBe Right(null) // scalafix:ok DisableSyntax.null
   }
 
@@ -145,7 +157,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.key"), jsonColumns, RowIndex(0)) shouldBe Right(
+    eval(jsonCell.getJsonObject("$.key"), jsonColumns, 0) shouldBe Right(
       null
     ) // scalafix:ok DisableSyntax.null
   }

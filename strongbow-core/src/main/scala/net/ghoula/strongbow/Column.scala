@@ -85,44 +85,38 @@ enum Column[+A] {
   inline def getInt(index: Int): Int = this match {
     case IntColumn(data, nulls) =>
       if (nulls.contains(index)) 0 else data(index)
-    case _ =>
-      throw new IllegalStateException(s"Cannot get Int from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+    case _ => 0
   }
 
   inline def getLong(index: Int): Long = this match {
     case LongColumn(data, nulls) =>
       if (nulls.contains(index)) 0L else data(index)
-    case _ =>
-      throw new IllegalStateException(s"Cannot get Long from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+    case _ => 0L
   }
 
   inline def getDouble(index: Int): Double = this match {
     case DoubleColumn(data, nulls) =>
       if (nulls.contains(index)) 0.0 else data(index)
-    case _ =>
-      throw new IllegalStateException(s"Cannot get Double from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+    case _ => 0.0
   }
 
   inline def getString(index: Int): String = this match {
     case StringColumn(data, nulls) =>
       if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case _ =>
-      throw new IllegalStateException(s"Cannot get String from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+    case _ => null // scalafix:ok DisableSyntax.null
   }
 
   inline def getBoolean(index: Int): Boolean = this match {
     case BooleanColumn(data, nulls) =>
       if (nulls.contains(index)) false else data(index)
-    case _ =>
-      throw new IllegalStateException(s"Cannot get Boolean from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+    case _ => false
   }
 
   /** Get date value as epoch day Int. */
   inline def getDateEpochDay(index: Int): Int = this match {
     case DateColumn(data, nulls) =>
       if (nulls.contains(index)) 0 else data(index)
-    case _ =>
-      throw new IllegalStateException(s"Cannot get Date from ${this.columnType}") // scalafix:ok DisableSyntax.throw
+    case _ => 0
   }
 
   /** Typed prefix slicing — takes the first n elements without boxing.

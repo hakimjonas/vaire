@@ -5,9 +5,21 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
+import net.ghoula.strongbow.types.{ColumnIndex, Date}
 
 class Phase2ExprSpec extends AnyFlatSpec with Matchers {
+
+  private def eval[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    idx: Int
+  ): Either[errors.ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
 
   private val dblCol = Column.double(Array(4.0, 9.0, 16.0))
   private val dblColumns = Vector(dblCol)
@@ -15,7 +27,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   "sqrt" should "compute square root" in {
     val expr = dblCell.sqrt
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, dblColumns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, dblColumns, i))
     results shouldBe Seq(Right(2.0), Right(3.0), Right(4.0))
   }
 
@@ -27,7 +39,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val e = Expr.Cell[Double, Double]("e", ColumnIndex(1))
     val expr = b.pow(e)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(8.0), Right(9.0))
   }
 
@@ -37,7 +49,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.log
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe 1.0 +- 1e-10 }
   }
@@ -48,7 +60,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.log10
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(0.0), Right(2.0), Right(3.0))
   }
 
@@ -58,7 +70,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.log2
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe 1.0 +- 1e-10 }
     inside(results(2)) { case Right(v: Double) => v shouldBe 3.0 +- 1e-10 }
@@ -70,7 +82,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.exp
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(1.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe Math.E +- 1e-10 }
   }
@@ -81,7 +93,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.sin
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe 1.0 +- 1e-10 }
   }
@@ -92,7 +104,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.cos
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(1.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe -1.0 +- 1e-10 }
   }
@@ -103,7 +115,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.tan
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe 1.0 +- 1e-10 }
   }
@@ -114,7 +126,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.asin
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe (Math.PI / 2) +- 1e-10 }
   }
@@ -125,7 +137,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.acos
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe (Math.PI / 2) +- 1e-10 }
   }
@@ -136,7 +148,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.atan
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results(0) shouldBe Right(0.0)
     inside(results(1)) { case Right(v: Double) => v shouldBe (Math.PI / 4) +- 1e-10 }
   }
@@ -149,7 +161,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val x = Expr.Cell[Double, Double]("x", ColumnIndex(1))
     val expr = y.atan2(x)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     inside(results(0)) { case Right(v: Double) => v shouldBe (Math.PI / 2) +- 1e-10 }
     results(1) shouldBe Right(0.0)
   }
@@ -160,7 +172,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.signum
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(-1.0), Right(0.0), Right(1.0))
   }
 
@@ -169,8 +181,8 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(col)
     val expr = Expr.rand[Double](42L)
 
-    val r1 = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
-    val r2 = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val r1 = eval(expr, columns, 0)
+    val r2 = eval(expr, columns, 0)
     r1.isRight shouldBe true
     r1 shouldBe r2
   }
@@ -205,7 +217,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   "dayOfWeek" should "return day of week (Sunday=1, Saturday=7)" in {
     val expr = dateCell.dayOfWeek
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, dateColumns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, dateColumns, i))
     results(0) shouldBe Right(5)
     results(1) shouldBe Right(5)
     results(2) shouldBe Right(4)
@@ -213,7 +225,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   "dayOfYear" should "return day of year" in {
     val expr = dateCell.dayOfYear
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, dateColumns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, dateColumns, i))
     results(0) shouldBe Right(78)
     results(1) shouldBe Right(1)
     results(2) shouldBe Right(365)
@@ -221,7 +233,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   "weekOfYear" should "return ISO week of year" in {
     val expr = dateCell.weekOfYear
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     inside(r) { case Right(v: Int) =>
       v should be > 0
       v should be <= 53
@@ -230,7 +242,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   "quarter" should "return quarter of year" in {
     val expr = dateCell.quarter
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, dateColumns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, dateColumns, i))
     results(0) shouldBe Right(1)
     results(1) shouldBe Right(1)
     results(2) shouldBe Right(4)
@@ -238,13 +250,13 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
 
   "lastDay" should "return last day of month" in {
     val expr = dateCell.lastDay
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     r shouldBe Right(Date(2026, 3, 31))
   }
 
   "nextDay" should "return next occurrence of given day of week" in {
     val expr = dateCell.nextDay("MONDAY")
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     inside(r) { case Right(v: java.time.LocalDate) =>
       val d = Date.fromLocalDate(v)
       d.getDayOfWeek.getValue shouldBe 1
@@ -264,31 +276,31 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell2 = Expr.Cell[Date, Date]("d2", ColumnIndex(1))
     val expr = cell2.monthsBetween(dateCell)
 
-    val r = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val r = eval(expr, columns, 0)
     inside(r) { case Right(v: Double) => v shouldBe 3.0 +- 0.1 }
   }
 
   "dateTrunc" should "truncate to year" in {
     val expr = dateCell.dateTrunc("year")
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     r shouldBe Right(Date(2026, 1, 1))
   }
 
   it should "truncate to month" in {
     val expr = dateCell.dateTrunc("month")
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     r shouldBe Right(Date(2026, 3, 1))
   }
 
   it should "truncate to quarter" in {
     val expr = dateCell.dateTrunc("quarter")
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     r shouldBe Right(Date(2026, 1, 1))
   }
 
   "dateFormat" should "format date as string" in {
     val expr = dateCell.dateFormat("yyyy/MM/dd")
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     r shouldBe Right("2026/03/19")
   }
 
@@ -302,7 +314,7 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val d = Expr.Cell[Int, Int]("d", ColumnIndex(2))
     val expr = Expr.makeDate[Int](y, m, d)
 
-    val r = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val r = eval(expr, columns, 0)
     r shouldBe Right(Date(2026, 3, 19))
   }
 
@@ -329,8 +341,8 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     Expr.collectSet[Double, Double](cell).outputType shouldBe Some(ColumnType.AnyType)
     Expr.median[Double](cell).outputType shouldBe Some(ColumnType.DoubleType)
 
-    ExprInterpreter.evalAt(Expr.variance[Double](cell), columns, RowIndex(0)).isLeft shouldBe true
-    ExprInterpreter.evalAt(Expr.variancePop[Double](cell), columns, RowIndex(0)).isLeft shouldBe true
+    eval(Expr.variance[Double](cell), columns, 0).isLeft shouldBe true
+    eval(Expr.variancePop[Double](cell), columns, 0).isLeft shouldBe true
   }
 
   "boolAnd/boolOr outputType" should "return BooleanType" in {
@@ -353,9 +365,9 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     Expr.CumeDist[Int]().outputType shouldBe Some(ColumnType.DoubleType)
     Expr.PercentRank[Int]().outputType shouldBe Some(ColumnType.DoubleType)
 
-    ExprInterpreter.evalAt(Expr.NTile[Int](4), columns, RowIndex(0)).isLeft shouldBe true
-    ExprInterpreter.evalAt(Expr.CumeDist[Int](), columns, RowIndex(0)).isLeft shouldBe true
-    ExprInterpreter.evalAt(Expr.PercentRank[Int](), columns, RowIndex(0)).isLeft shouldBe true
+    eval(Expr.NTile[Int](4), columns, 0).isLeft shouldBe true
+    eval(Expr.CumeDist[Int](), columns, 0).isLeft shouldBe true
+    eval(Expr.PercentRank[Int](), columns, 0).isLeft shouldBe true
   }
 
   "math functions" should "compose with each other" in {
@@ -364,13 +376,13 @@ class Phase2ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.exp.log
 
-    val r = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val r = eval(expr, columns, 0)
     inside(r) { case Right(v: Double) => v shouldBe 1.0 +- 1e-10 }
   }
 
   "date functions" should "compose with each other" in {
     val expr = dateCell.lastDay.day
-    val r = ExprInterpreter.evalAt(expr, dateColumns, RowIndex(0))
+    val r = eval(expr, dateColumns, 0)
     r shouldBe Right(31)
   }
 }

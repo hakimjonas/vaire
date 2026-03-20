@@ -6,9 +6,17 @@ import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+import net.ghoula.strongbow.types.ColumnIndex
 
 class Phase3ExprSpec extends AnyFlatSpec with Matchers {
+
+  private def eval[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]], idx: Int): Either[ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
 
   private val arrData: Array[Any] = Array(
     Seq(1, 2, 3),
@@ -21,19 +29,19 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
 
   "ArraySize" should "return the size of an array" in {
     val expr = arrCell.arraySize
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, arrColumns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
     results shouldBe Seq(Right(3), Right(2), Right(4))
   }
 
   "ArrayContains" should "check if array contains a value" in {
     val expr = arrCell.arrayContains(Expr.const(2))
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, arrColumns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
     results shouldBe Seq(Right(true), Right(false), Right(true))
   }
 
   "Explode" should "return UnsupportedOperation" in {
     val expr = arrCell.explode
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Left(ExecutionError.UnsupportedOperation("Explode requires Dataset-level handling"))
   }
 
@@ -43,13 +51,13 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(col)
     val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
     val expr = cell.arraySort
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result.isLeft shouldBe true
   }
 
   "ArrayDistinct" should "remove duplicates from array" in {
     val expr = arrCell.arrayDistinct
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(2))
+    val result = eval(expr, arrColumns, 2)
     result shouldBe Right(Seq(1, 2, 3))
   }
 
@@ -59,7 +67,7 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(arrCol, col2)
     val cell2 = Expr.Cell[Any, Seq[Int]]("arr2", ColumnIndex(1))
     val expr = arrCell.arrayUnion(cell2)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Seq(1, 2, 3, 4))
   }
 
@@ -69,7 +77,7 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(arrCol, col2)
     val cell2 = Expr.Cell[Any, Seq[Int]]("arr2", ColumnIndex(1))
     val expr = arrCell.arrayIntersect(cell2)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Seq(2, 3))
   }
 
@@ -79,7 +87,7 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(arrCol, col2)
     val cell2 = Expr.Cell[Any, Seq[Int]]("arr2", ColumnIndex(1))
     val expr = arrCell.arrayExcept(cell2)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Seq(1))
   }
 
@@ -92,49 +100,49 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(col)
     val cell = Expr.Cell[Any, Seq[Seq[Int]]]("nested", ColumnIndex(0))
     val expr = cell.flatten
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(Seq(1, 2, 3, 4)), Right(Seq(5, 6, 7, 8)))
   }
 
   "ElementAt" should "return element at 1-based positive index" in {
     val expr = arrCell.elementAt(Expr.const(2))
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(2)
   }
 
   it should "return element at negative index from end" in {
     val expr = arrCell.elementAt(Expr.const(-1))
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(3)
   }
 
   it should "return null for positive index past end" in {
     val expr = arrCell.elementAt(Expr.const(10))
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(null) // scalafix:ok DisableSyntax.null
   }
 
   it should "return null for zero index" in {
     val expr = arrCell.elementAt(Expr.const(0))
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(null) // scalafix:ok DisableSyntax.null
   }
 
   it should "return null for negative index past start" in {
     val expr = arrCell.elementAt(Expr.const(-10))
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(null) // scalafix:ok DisableSyntax.null
   }
 
   "ArraySlice" should "return a sub-array" in {
     val expr = arrCell.arraySlice(1, 2)
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(Seq(1, 2))
   }
 
   it should "handle start beyond first element" in {
     val expr = arrCell.arraySlice(2, 2)
-    val result = ExprInterpreter.evalAt(expr, arrColumns, RowIndex(0))
+    val result = eval(expr, arrColumns, 0)
     result shouldBe Right(Seq(2, 3))
   }
 
@@ -148,26 +156,26 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
 
   "MapKeys" should "return all keys of a map" in {
     val expr = mapCell.mapKeys
-    val result = ExprInterpreter.evalAt(expr, mapColumns, RowIndex(0))
+    val result = eval(expr, mapColumns, 0)
     inside(result) { case Right(v: Seq[?]) => v.toSet shouldBe Set("a", "b") }
   }
 
   "MapValues" should "return all values of a map" in {
     val expr = mapCell.mapValues
-    val result = ExprInterpreter.evalAt(expr, mapColumns, RowIndex(0))
+    val result = eval(expr, mapColumns, 0)
     inside(result) { case Right(v: Seq[?]) => v.toSet shouldBe Set(1, 2) }
   }
 
   "MapContainsKey" should "check if map contains a key" in {
     val exprTrue = mapCell.mapContainsKey(Expr.const("a"))
     val exprFalse = mapCell.mapContainsKey(Expr.const("z"))
-    ExprInterpreter.evalAt(exprTrue, mapColumns, RowIndex(0)) shouldBe Right(true)
-    ExprInterpreter.evalAt(exprFalse, mapColumns, RowIndex(0)) shouldBe Right(false)
+    eval(exprTrue, mapColumns, 0) shouldBe Right(true)
+    eval(exprFalse, mapColumns, 0) shouldBe Right(false)
   }
 
   "MapEntries" should "return key-value pairs as a sequence of tuples" in {
     val expr = mapCell.mapEntries
-    val result = ExprInterpreter.evalAt(expr, mapColumns, RowIndex(0))
+    val result = eval(expr, mapColumns, 0)
     inside(result) { case Right(v: Seq[?]) => v.toSet shouldBe Set(("a", 1), ("b", 2)) }
   }
 
@@ -180,7 +188,7 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val keysCell = Expr.Cell[Any, Seq[String]]("keys", ColumnIndex(0))
     val valsCell = Expr.Cell[Any, Seq[Int]]("vals", ColumnIndex(1))
     val expr = Expr.mapFromArrays(keysCell, valsCell)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Map("a" -> 1, "b" -> 2, "c" -> 3))
   }
 
@@ -193,7 +201,7 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val keysCell = Expr.Cell[Any, Seq[String]]("keys", ColumnIndex(0))
     val valsCell = Expr.Cell[Any, Seq[Int]]("vals", ColumnIndex(1))
     val expr = Expr.mapFromArrays(keysCell, valsCell)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Map("a" -> 1, "b" -> 2))
   }
 
@@ -206,7 +214,7 @@ class Phase3ExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(mapCol, col2)
     val cell2 = Expr.Cell[Any, Map[String, Int]]("m2", ColumnIndex(1))
     val expr = mapCell.mapConcat(cell2)
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Map("a" -> 1, "b" -> 2, "c" -> 3, "d" -> 4))
   }
 

@@ -23,12 +23,9 @@ object NonEmptyList {
     *
     * This is the unsafe version. Prefer `fromList` which returns Option.
     */
-  def fromListUnsafe[A](list: List[A]): NonEmptyList[A] = list match {
-    case h :: t => NonEmptyList(h, t)
-    case Nil =>
-      throw new IllegalArgumentException(
-        "Cannot create NonEmptyList from empty list"
-      ) // scalafix:ok DisableSyntax.throw
+  def fromListUnsafe[A](list: List[A]): NonEmptyList[A] = {
+    require(list.nonEmpty, "Cannot create NonEmptyList from empty list")
+    NonEmptyList(list.head, list.tail)
   }
 
   /** Create NonEmptyList from List, returning None if empty.

@@ -7,6 +7,18 @@ import net.ghoula.strongbow.prelude.*
 
 class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
 
+  private def eval[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    idx: Int
+  ): Either[errors.ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
+
   "sample" should "return fraction of rows" in {
     val dataset = createIntDataset((1 to 100).toVector)
 
@@ -15,7 +27,6 @@ class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
       case Left(err) => fail(s"Sample failed: $err")
     }
 
-    // Should be approximately 50 rows (±10 for randomness)
     sampled.length should be >= 40
     sampled.length should be <= 60
   }
@@ -87,7 +98,6 @@ class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
       case Left(err) => fail(s"ZipWithUniqueId failed: $err")
     }
 
-    // In-memory: unique IDs are sequential (same as zipWithIndex)
     indexed shouldBe Vector((10, 0L), (20, 1L), (30, 2L))
   }
 
@@ -129,17 +139,15 @@ class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
     val anyColumn = Column.AnyColumn(Array(Some(1), None, Some(3)), nulls = scala.collection.immutable.BitSet.empty)
     val columns = Vector(anyColumn)
 
-    import net.ghoula.strongbow.types.RowIndex
-
     val expr = Expr.Option2Iterable(Expr.Cell[Any, Option[Int]]("value", ColumnIndex(0)))
 
-    val result0 = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result0 = eval(expr, columns, 0)
     result0 shouldBe Right(List(1))
 
-    val result1 = ExprInterpreter.evalAt(expr, columns, RowIndex(1))
+    val result1 = eval(expr, columns, 1)
     result1 shouldBe Right(List())
 
-    val result2 = ExprInterpreter.evalAt(expr, columns, RowIndex(2))
+    val result2 = eval(expr, columns, 2)
     result2 shouldBe Right(List(3))
   }
 

@@ -4,10 +4,22 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.prelude.*
-import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
+import net.ghoula.strongbow.types.ColumnIndex
 
 /** Tests for Phase 1 Spark Parity expressions. */
 class Phase1ExprSpec extends AnyFlatSpec with Matchers {
+
+  private def eval[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    idx: Int
+  ): Either[errors.ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
 
   "lower" should "convert string to lowercase" in {
     val col = Column.string(Array("HELLO", "World", "test"))
@@ -15,7 +27,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.lower
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("hello"), Right("world"), Right("test"))
   }
 
@@ -25,7 +37,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.upper
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("HELLO"), Right("WORLD"), Right("TEST"))
   }
 
@@ -35,7 +47,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.trim
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("hello"), Right("world"), Right("test"))
   }
 
@@ -45,7 +57,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.ltrim
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("hello  "), Right("world"))
   }
 
@@ -55,7 +67,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.rtrim
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("  hello"), Right("world"))
   }
 
@@ -65,7 +77,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.substring(1, 5)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("hello"), Right("abcde"))
   }
 
@@ -75,7 +87,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.substring(10, 5)
 
-    ExprInterpreter.evalAt(expr, columns, RowIndex(0)) shouldBe Right("")
+    eval(expr, columns, 0) shouldBe Right("")
   }
 
   "replace" should "replace all occurrences of search string" in {
@@ -84,7 +96,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.replace("hello", "hi")
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("hi world hi"), Right("foo bar"))
   }
 
@@ -94,7 +106,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.regexpReplace("[0-9]+", "NUM")
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("abcNUMdefNUM"), Right("no digits"))
   }
 
@@ -104,7 +116,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.regexpExtract("([0-9]+)", 1)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("123"), Right(""))
   }
 
@@ -114,7 +126,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.split(",")
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(Seq("a", "b", "c")), Right(Seq("x")))
   }
 
@@ -125,7 +137,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val prefix = Expr.lit[String, String]("hello")
     val expr = cell.startsWith(prefix)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(true), Right(false))
   }
 
@@ -136,7 +148,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val suffix = Expr.lit[String, String]("world")
     val expr = cell.endsWith(suffix)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(true), Right(false))
   }
 
@@ -147,7 +159,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val substr = Expr.lit[String, String]("lo wo")
     val expr = cell.contains(substr)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(true), Right(false))
   }
 
@@ -161,7 +173,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val c3 = Expr.Cell[String, String]("c3", ColumnIndex(2))
     val expr = Expr.concatWs[String]("-", c1, c2, c3)
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("a-b-c"), Right("d-e-f"))
   }
 
@@ -191,7 +203,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Any, Any]("v", ColumnIndex(0))
     val expr = cell.isNull
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(false), Right(true), Right(false))
   }
 
@@ -204,7 +216,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Any, Any]("v", ColumnIndex(0))
     val expr = cell.isNotNull
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(true), Right(false), Right(true))
   }
 
@@ -214,7 +226,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.in(Vector(2, 4))
 
-    val results = (0 until 5).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 5).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(false), Right(true), Right(false), Right(true), Right(false))
   }
 
@@ -226,7 +238,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val hi = Expr.lit[Int, Int](15)
     val expr = cell.between(lo, hi)
 
-    val results = (0 until 5).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 5).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(false), Right(true), Right(true), Right(true), Right(false))
   }
 
@@ -244,8 +256,8 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val c2 = Expr.Cell[Any, Any]("c2", ColumnIndex(1))
     val expr = Expr.coalesce[Any, Any](c1, c2)
 
-    ExprInterpreter.evalAt(expr, columns, RowIndex(0)) shouldBe Right("x")
-    ExprInterpreter.evalAt(expr, columns, RowIndex(1)) shouldBe Right("b")
+    eval(expr, columns, 0) shouldBe Right("x")
+    eval(expr, columns, 1) shouldBe Right("b")
   }
 
   "null/conditional outputType" should "return correct types" in {
@@ -261,7 +273,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell % Expr.lit[Int, Int](3)
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(1), Right(1), Right(0))
   }
 
@@ -271,7 +283,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell % Expr.lit[Int, Int](0)
 
-    ExprInterpreter.evalAt(expr, columns, RowIndex(0)).isLeft shouldBe true
+    eval(expr, columns, 0).isLeft shouldBe true
   }
 
   "mod (Long)" should "compute modulus" in {
@@ -280,7 +292,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Long, Long]("v", ColumnIndex(0))
     val expr = cell % Expr.lit[Long, Long](3L)
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(1L), Right(1L), Right(0L))
   }
 
@@ -290,7 +302,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.abs
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5), Right(0), Right(5))
   }
 
@@ -300,7 +312,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Long, Long]("v", ColumnIndex(0))
     val expr = cell.abs
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5L), Right(0L), Right(5L))
   }
 
@@ -310,7 +322,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.abs
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5.5), Right(0.0), Right(5.5))
   }
 
@@ -320,7 +332,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.negate
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5), Right(0), Right(-5))
   }
 
@@ -330,7 +342,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Long, Long]("v", ColumnIndex(0))
     val expr = cell.negate
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5L), Right(0L), Right(-5L))
   }
 
@@ -340,7 +352,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.negate
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5.5), Right(-0.0), Right(-5.5))
   }
 
@@ -350,7 +362,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.round(2)
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(3.14), Right(2.72), Right(-1.56))
   }
 
@@ -360,7 +372,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.floor
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(3.0), Right(-3.0), Right(5.0))
   }
 
@@ -370,7 +382,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Double, Double]("v", ColumnIndex(0))
     val expr = cell.ceil
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(4.0), Right(-2.0), Right(5.0))
   }
 
@@ -398,7 +410,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.castToLong
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(1L), Right(2L), Right(3L))
   }
 
@@ -408,7 +420,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.castToDouble
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(1.0), Right(2.0), Right(3.0))
   }
 
@@ -418,7 +430,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Long, Long]("v", ColumnIndex(0))
     val expr = cell.castToDouble
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(1.0), Right(2.0), Right(3.0))
   }
 
@@ -428,7 +440,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.castToString
 
-    val results = (0 until 3).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 3).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("42"), Right("-1"), Right("0"))
   }
 
@@ -448,7 +460,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[String, String]("s", ColumnIndex(0))
     val expr = cell.trim.lower
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right("hello world"), Right("foo bar"))
   }
 
@@ -458,7 +470,7 @@ class Phase1ExprSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     val expr = cell.abs.castToDouble
 
-    val results = (0 until 2).map(i => ExprInterpreter.evalAt(expr, columns, RowIndex(i)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
     results shouldBe Seq(Right(5.0), Right(10.0))
   }
 }

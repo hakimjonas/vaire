@@ -3,9 +3,21 @@ package net.ghoula.strongbow
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
+import net.ghoula.strongbow.types.{ColumnIndex, Date}
 
 class DateExprSpec extends AnyFlatSpec with Matchers {
+
+  private def eval[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    idx: Int
+  ): Either[errors.ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) Vector(Column.int(Array(0)))
+      else columns
+    val colType = ExprInterpreter.inferExprColumnType(expr, effectiveColumns)
+    ExprInterpreter.evalColumn(expr, effectiveColumns, colType).map(_.getValue(idx))
+  }
 
   private def makeDateColumn(dates: Date*): Column[Date] = {
     Column.date(dates.map(_.toEpochDay.toInt).toArray)
@@ -31,7 +43,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("days", ColumnIndex(1))
     )
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Date(2024, 1, 25))
   }
 
@@ -45,7 +57,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("days", ColumnIndex(1))
     )
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Date(2024, 1, 10))
   }
 
@@ -59,7 +71,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("months", ColumnIndex(1))
     )
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(Date(2024, 2, 29))
   }
 
@@ -74,7 +86,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("d1", ColumnIndex(0)),
       Expr.Cell[Any, Date]("d2", ColumnIndex(1))
     )
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(5)
   }
 
@@ -84,7 +96,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(dateCol)
 
     val expr = Expr.ExtractYear(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(2024)
   }
 
@@ -94,7 +106,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(dateCol)
 
     val expr = Expr.ExtractMonth(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(6)
   }
 
@@ -104,7 +116,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(dateCol)
 
     val expr = Expr.ExtractDay(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
-    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
+    val result = eval(expr, columns, 0)
     result shouldBe Right(15)
   }
 
@@ -119,10 +131,10 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val cell2 = Expr.Cell[Any, Date]("d2", ColumnIndex(1))
 
     val gtExpr = Expr.Gt(cell1, cell2, summon[Ordering[Date]])
-    ExprInterpreter.evalAt(gtExpr, columns, RowIndex(0)) shouldBe Right(true)
+    eval(gtExpr, columns, 0) shouldBe Right(true)
 
     val ltExpr = Expr.Lt(cell1, cell2, summon[Ordering[Date]])
-    ExprInterpreter.evalAt(ltExpr, columns, RowIndex(0)) shouldBe Right(false)
+    eval(ltExpr, columns, 0) shouldBe Right(false)
   }
 
   "Date extension methods" should "work on Expr[Row, Date]" in {
@@ -134,13 +146,13 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val dateExpr = Expr.Cell[Any, Date]("date", ColumnIndex(0))
     val daysExpr = Expr.Cell[Any, Int]("days", ColumnIndex(1))
 
-    val addResult = ExprInterpreter.evalAt(dateExpr.addDays(daysExpr), columns, RowIndex(0))
+    val addResult = eval(dateExpr.addDays(daysExpr), columns, 0)
     addResult shouldBe Right(Date(2024, 3, 22))
 
-    val yearResult = ExprInterpreter.evalAt(dateExpr.year, columns, RowIndex(0))
+    val yearResult = eval(dateExpr.year, columns, 0)
     yearResult shouldBe Right(2024)
 
-    val monthResult = ExprInterpreter.evalAt(dateExpr.month, columns, RowIndex(0))
+    val monthResult = eval(dateExpr.month, columns, 0)
     monthResult shouldBe Right(3)
   }
 

@@ -15,36 +15,36 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
 
   "Md5" should "compute MD5 hash of a string" in {
     val expr = cell.md5
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right("5d41402abc4b2a76b9719d911017c592")
   }
 
   it should "compute MD5 for different inputs" in {
-    val result = ExprInterpreter.eval(cell.md5, columns, RowIndex(1))
+    val result = ExprInterpreter.evalAt(cell.md5, columns, RowIndex(1))
     result shouldBe Right("7d793037a0760186574b0282f2f435e7")
   }
 
   "Sha1" should "compute SHA-1 hash of a string" in {
     val expr = cell.sha1
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right("aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d")
   }
 
   "Sha2" should "compute SHA-256 hash by default (bitLength=0)" in {
     val expr = cell.sha2(0)
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
   }
 
   it should "compute SHA-256 hash with bitLength=256" in {
     val expr = cell.sha2(256)
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
   }
 
   it should "compute SHA-512 hash" in {
     val expr = cell.sha2(512)
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(
       "9b71d224bd62f3785d96d46ad3ea3d73319bfbc2890caadae2dff72519673ca72323c3d99ba5c11d7c7acc6e14b8c5da0c4663475c2e5c3adef46f73bcdec043"
     )
@@ -55,8 +55,8 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.eval(c.urlEncode, cols, RowIndex(0)) shouldBe Right("hello+world")
-    ExprInterpreter.eval(c.urlEncode, cols, RowIndex(1)) shouldBe Right("foo%3Dbar%26baz%3Dqux")
+    ExprInterpreter.evalAt(c.urlEncode, cols, RowIndex(0)) shouldBe Right("hello+world")
+    ExprInterpreter.evalAt(c.urlEncode, cols, RowIndex(1)) shouldBe Right("foo%3Dbar%26baz%3Dqux")
   }
 
   "UrlDecode" should "decode a URL-encoded string" in {
@@ -64,13 +64,13 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.eval(c.urlDecode, cols, RowIndex(0)) shouldBe Right("hello world")
-    ExprInterpreter.eval(c.urlDecode, cols, RowIndex(1)) shouldBe Right("foo=bar&baz=qux")
+    ExprInterpreter.evalAt(c.urlDecode, cols, RowIndex(0)) shouldBe Right("hello world")
+    ExprInterpreter.evalAt(c.urlDecode, cols, RowIndex(1)) shouldBe Right("foo=bar&baz=qux")
   }
 
   "Base64Encode" should "encode a string to base64" in {
     val expr = cell.base64Encode
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right("aGVsbG8=")
   }
 
@@ -79,29 +79,29 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val col = Column.string(data)
     val cols = Vector(col)
     val c = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.eval(c.base64Decode, cols, RowIndex(0)) shouldBe Right("hello")
-    ExprInterpreter.eval(c.base64Decode, cols, RowIndex(1)) shouldBe Right("world")
+    ExprInterpreter.evalAt(c.base64Decode, cols, RowIndex(0)) shouldBe Right("hello")
+    ExprInterpreter.evalAt(c.base64Decode, cols, RowIndex(1)) shouldBe Right("world")
   }
 
   "Base64 roundtrip" should "encode then decode back to original" in {
     val expr = cell.base64Encode
-    val encoded = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val encoded = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     encoded shouldBe Right("aGVsbG8=")
     val data2: Array[String] = Array("aGVsbG8=")
     val col2 = Column.string(data2)
     val cols2 = Vector(col2)
     val c2 = Expr.Cell[Any, String]("s", ColumnIndex(0))
-    ExprInterpreter.eval(c2.base64Decode, cols2, RowIndex(0)) shouldBe Right("hello")
+    ExprInterpreter.evalAt(c2.base64Decode, cols2, RowIndex(0)) shouldBe Right("hello")
   }
 
   "Hex" should "hex-encode string bytes" in {
     val expr = cell.hex
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right("68656c6c6f")
   }
 
   it should "hex-encode world" in {
-    val result = ExprInterpreter.eval(cell.hex, columns, RowIndex(1))
+    val result = ExprInterpreter.evalAt(cell.hex, columns, RowIndex(1))
     result shouldBe Right("776f726c64")
   }
 
@@ -110,8 +110,8 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.eval(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(0)) shouldBe Right("Alice")
-    ExprInterpreter.eval(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(1)) shouldBe Right("Bob")
+    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(0)) shouldBe Right("Alice")
+    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.name"), jsonColumns, RowIndex(1)) shouldBe Right("Bob")
   }
 
   it should "extract nested fields" in {
@@ -119,7 +119,7 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.eval(jsonCell.getJsonObject("$.a.b.c"), jsonColumns, RowIndex(0)) shouldBe Right("deep")
+    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.a.b.c"), jsonColumns, RowIndex(0)) shouldBe Right("deep")
   }
 
   it should "return numeric values as strings" in {
@@ -127,8 +127,8 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.eval(jsonCell.getJsonObject("$.count"), jsonColumns, RowIndex(0)) shouldBe Right("42")
-    ExprInterpreter.eval(jsonCell.getJsonObject("$.price"), jsonColumns, RowIndex(0)) shouldBe Right("9.99")
+    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.count"), jsonColumns, RowIndex(0)) shouldBe Right("42")
+    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.price"), jsonColumns, RowIndex(0)) shouldBe Right("9.99")
   }
 
   it should "return null for missing path" in {
@@ -136,16 +136,18 @@ class Phase4ExprSpec extends AnyFlatSpec with Matchers {
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    val result = ExprInterpreter.eval(jsonCell.getJsonObject("$.missing"), jsonColumns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(jsonCell.getJsonObject("$.missing"), jsonColumns, RowIndex(0))
     result shouldBe Right(null) // scalafix:ok DisableSyntax.null
   }
 
-  it should "return error for invalid JSON" in {
+  it should "return null for invalid JSON" in {
     val jsonData: Array[String] = Array("not json")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
-    ExprInterpreter.eval(jsonCell.getJsonObject("$.key"), jsonColumns, RowIndex(0)).isLeft shouldBe true
+    ExprInterpreter.evalAt(jsonCell.getJsonObject("$.key"), jsonColumns, RowIndex(0)) shouldBe Right(
+      null
+    ) // scalafix:ok DisableSyntax.null
   }
 
   "outputType" should "return StringType for all Phase 4 expressions" in {

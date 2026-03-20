@@ -10,661 +10,41 @@ import net.ghoula.strongbow.types.{Date, RowIndex}
 
 /** Zero-cast expression interpreter using typed columnar storage.
   *
-  * Key architectural principle: ONE cast at the Cell evaluation boundary (where we access typed
-  * arrays), then fully typed expression evaluation using GADT evidence.
+  * All evaluation goes through evalColumn (vectorized column operations) or evalAt (single-row via
+  * evalColumn + getValue). No asInstanceOf at the Cell evaluation boundary.
   *
-  * Unlike TypedDataset which casts everywhere (due to Spark's untyped Column), we exploit our typed
-  * array storage (IntColumn, StringColumn, etc.) to minimize casts.
+  * Column[+A] GADT refinement provides typed array access (IntColumn, StringColumn, etc.) without
+  * casts. Aggregations use typed dispatch for Ordering-based operations and getValue for generic
+  * value collection.
   */
 object ExprInterpreter {
 
-  /** Evaluate an expression for a specific row.
+  /** Evaluate an expression at a single row index, returning the value as Any.
     *
-    * GADT pattern matching refines types automatically. The only cast is at Cell evaluation
-    * boundary where we transition from typed column storage to generic type A.
+    * Uses evalColumn internally: evaluates the full column, then extracts the value at the given
+    * row. No asInstanceOf needed -- types are resolved through Column GADT matching in evalColumn,
+    * and getValue returns the unboxed value.
+    *
+    * For null values, returns null (matching SQL NULL semantics).
     */
-  def eval[Row, A](
+  def evalAt[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column[?]],
     rowIdx: RowIndex
-  ): Either[ExecutionError, A] = {
-    (expr: @unchecked) match {
-      case Expr.Const(value) =>
-        Right(value)
-
-      case named: Expr.Named[Row, _] =>
-        eval(named.expr, columns, rowIdx)
-
-      case cell: Expr.Cell[Row, a] =>
-        if (cell.index.toInt >= columns.length) {
-          Left(ExecutionError.IndexOutOfBounds(cell.index.toInt, columns.length))
-        } else {
-          val column = columns(cell.index.toInt)
-          val idx = rowIdx.toInt
-
-          if (idx >= column.length) {
-            Left(ExecutionError.IndexOutOfBounds(idx, column.length))
-          } else {
-            val value: a = column.columnType match {
-              case ColumnType.IntType => column.getInt(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.LongType => column.getLong(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.DoubleType =>
-                column.getDouble(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.StringType =>
-                column.getString(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.BooleanType =>
-                column.getBoolean(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.DateType =>
-                Date
-                  .ofEpochDay(column.getDateEpochDay(idx).toLong)
-                  .asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-              case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
-                column.getValue(idx).asInstanceOf[a] // scalafix:ok DisableSyntax.asInstanceOf
-            }
-            Right(value)
-          }
-        }
-
-      case add: Expr.Add[Row] =>
-        for {
-          l <- eval(add.left, columns, rowIdx)
-          r <- eval(add.right, columns, rowIdx)
-        } yield l + r
-
-      case sub: Expr.Sub[Row] =>
-        for {
-          l <- eval(sub.left, columns, rowIdx)
-          r <- eval(sub.right, columns, rowIdx)
-        } yield l - r
-
-      case mul: Expr.Mul[Row] =>
-        for {
-          l <- eval(mul.left, columns, rowIdx)
-          r <- eval(mul.right, columns, rowIdx)
-        } yield l * r
-
-      case div: Expr.Div[Row] =>
-        for {
-          l <- eval(div.left, columns, rowIdx)
-          r <- eval(div.right, columns, rowIdx)
-          result <-
-            if (r == 0) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
-            else Right(l / r)
-        } yield result
-
-      case add: Expr.AddLong[Row] =>
-        for {
-          l <- eval(add.left, columns, rowIdx)
-          r <- eval(add.right, columns, rowIdx)
-        } yield l + r
-
-      case sub: Expr.SubLong[Row] =>
-        for {
-          l <- eval(sub.left, columns, rowIdx)
-          r <- eval(sub.right, columns, rowIdx)
-        } yield l - r
-
-      case mul: Expr.MulLong[Row] =>
-        for {
-          l <- eval(mul.left, columns, rowIdx)
-          r <- eval(mul.right, columns, rowIdx)
-        } yield l * r
-
-      case div: Expr.DivLong[Row] =>
-        for {
-          l <- eval(div.left, columns, rowIdx)
-          r <- eval(div.right, columns, rowIdx)
-          result <-
-            if (r == 0L) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
-            else Right(l / r)
-        } yield result
-
-      case add: Expr.AddDouble[Row] =>
-        for {
-          l <- eval(add.left, columns, rowIdx)
-          r <- eval(add.right, columns, rowIdx)
-        } yield l + r
-
-      case sub: Expr.SubDouble[Row] =>
-        for {
-          l <- eval(sub.left, columns, rowIdx)
-          r <- eval(sub.right, columns, rowIdx)
-        } yield l - r
-
-      case mul: Expr.MulDouble[Row] =>
-        for {
-          l <- eval(mul.left, columns, rowIdx)
-          r <- eval(mul.right, columns, rowIdx)
-        } yield l * r
-
-      case div: Expr.DivDouble[Row] =>
-        for {
-          l <- eval(div.left, columns, rowIdx)
-          r <- eval(div.right, columns, rowIdx)
-          result <-
-            if (r == 0.0) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
-            else Right(l / r)
-        } yield result
-
-      case eq: Expr.Eq[Row, _] =>
-        for {
-          l <- eval(eq.left, columns, rowIdx)
-          r <- eval(eq.right, columns, rowIdx)
-        } yield java.util.Objects.equals(l, r)
-
-      case gt: Expr.Gt[Row, _] =>
-        for {
-          l <- eval(gt.left, columns, rowIdx)
-          r <- eval(gt.right, columns, rowIdx)
-        } yield gt.ordering.gt(l, r)
-
-      case lt: Expr.Lt[Row, _] =>
-        for {
-          l <- eval(lt.left, columns, rowIdx)
-          r <- eval(lt.right, columns, rowIdx)
-        } yield lt.ordering.lt(l, r)
-
-      case gte: Expr.Gte[Row, _] =>
-        for {
-          l <- eval(gte.left, columns, rowIdx)
-          r <- eval(gte.right, columns, rowIdx)
-        } yield gte.ordering.gteq(l, r)
-
-      case lte: Expr.Lte[Row, _] =>
-        for {
-          l <- eval(lte.left, columns, rowIdx)
-          r <- eval(lte.right, columns, rowIdx)
-        } yield lte.ordering.lteq(l, r)
-
-      case neq: Expr.Neq[Row, _] =>
-        for {
-          l <- eval(neq.left, columns, rowIdx)
-          r <- eval(neq.right, columns, rowIdx)
-        } yield !java.util.Objects.equals(l, r)
-
-      case when: Expr.When[Row, _] =>
-        eval(when.condition, columns, rowIdx).flatMap { cond =>
-          if (cond) eval(when.thenExpr, columns, rowIdx)
-          else eval(when.elseExpr, columns, rowIdx)
-        }
-
-      case and: Expr.And[Row] =>
-        for {
-          l <- eval(and.left, columns, rowIdx)
-          r <- eval(and.right, columns, rowIdx)
-        } yield l && r
-
-      case or: Expr.Or[Row] =>
-        for {
-          l <- eval(or.left, columns, rowIdx)
-          r <- eval(or.right, columns, rowIdx)
-        } yield l || r
-
-      case not: Expr.Not[Row] =>
-        for {
-          v <- eval(not.expr, columns, rowIdx)
-        } yield !v
-
-      case concat: Expr.Concat[Row] =>
-        for {
-          l <- eval(concat.left, columns, rowIdx)
-          r <- eval(concat.right, columns, rowIdx)
-        } yield l + r
-
-      case length: Expr.Length[Row] =>
-        for {
-          v <- eval(length.expr, columns, rowIdx)
-        } yield v.length
-
-      case isDefined: Expr.IsDefined[Row, _] =>
-        eval(isDefined.expr, columns, rowIdx) match {
-          case Right(Some(_)) => Right(true)
-          case Right(None) => Right(false)
-          case Left(err) => Left(err)
-        }
-
-      case getOrElse: Expr.GetOrElse[Row, _] =>
-        eval(getOrElse.expr, columns, rowIdx) match {
-          case Right(Some(value)) => Right(value)
-          case Right(None) => Right(getOrElse.default)
-          case Left(err) => Left(err)
-        }
-
-      case like: Expr.Like[Row] =>
-        for {
-          v <- eval(like.expr, columns, rowIdx)
-        } yield likeToRegex(like.pattern).matches(v)
-
-      case lo: Expr.Lower[Row] =>
-        eval(lo.expr, columns, rowIdx).map(_.toLowerCase)
-
-      case up: Expr.Upper[Row] =>
-        eval(up.expr, columns, rowIdx).map(_.toUpperCase)
-
-      case tr: Expr.Trim[Row] =>
-        eval(tr.expr, columns, rowIdx).map(_.trim)
-
-      case lt: Expr.LTrim[Row] =>
-        eval(lt.expr, columns, rowIdx).map(_.stripLeading.nn)
-
-      case rt: Expr.RTrim[Row] =>
-        eval(rt.expr, columns, rowIdx).map(_.stripTrailing.nn)
-
-      case ss: Expr.Substring[Row] =>
-        eval(ss.expr, columns, rowIdx).map { s =>
-          val start = Math.max(ss.pos - 1, 0)
-          val end = Math.min(start + ss.len, s.length)
-          if (start >= s.length) "" else s.substring(start, end)
-        }
-
-      case sr: Expr.StringReplace[Row] =>
-        eval(sr.expr, columns, rowIdx).map(_.replace(sr.search, sr.replacement))
-
-      case rr: Expr.RegexpReplace[Row] =>
-        eval(rr.expr, columns, rowIdx).map(_.replaceAll(rr.pattern, rr.replacement))
-
-      case re: Expr.RegexpExtract[Row] =>
-        eval(re.expr, columns, rowIdx).map { s =>
-          val m = java.util.regex.Pattern.compile(re.pattern).matcher(s)
-          if (m.find()) m.group(re.groupIdx) else ""
-        }
-
-      case sp: Expr.StringSplit[Row] =>
-        eval(sp.expr, columns, rowIdx).map(s => s.split(sp.delimiter, -1).toSeq)
-
-      case sw: Expr.StartsWith[Row] =>
-        for {
-          v <- eval(sw.expr, columns, rowIdx)
-          p <- eval(sw.prefix, columns, rowIdx)
-        } yield v.startsWith(p)
-
-      case ew: Expr.EndsWith[Row] =>
-        for {
-          v <- eval(ew.expr, columns, rowIdx)
-          s <- eval(ew.suffix, columns, rowIdx)
-        } yield v.endsWith(s)
-
-      case sc: Expr.StringContains[Row] =>
-        for {
-          v <- eval(sc.expr, columns, rowIdx)
-          s <- eval(sc.substr, columns, rowIdx)
-        } yield v.contains(s)
-
-      case cw: Expr.ConcatWs[Row] =>
-        cw.exprs
-          .foldLeft[Either[ExecutionError, Vector[String]]](Right(Vector.empty)) {
-            case (Right(acc), e) => eval(e, columns, rowIdx).map(acc :+ _)
-            case (err, _) => err
-          }
-          .map(_.mkString(cw.separator))
-
-      case co: Expr.Coalesce[Row, _] =>
-        co.exprs
-          .foldLeft[Either[ExecutionError, Option[A]]](Right(None)) {
-            case (Right(None), e) =>
-              eval(e, columns, rowIdx).map(v => Option(v))
-            case (found, _) => found
-          }
-          .flatMap {
-            case Some(v) => Right(v)
-            case None => Left(ExecutionError.UnsupportedOperation("Coalesce: all expressions were null"))
-          }
-
-      case in: Expr.IsNull[Row, _] =>
-        eval(in.expr, columns, rowIdx).map(v => Option(v).isEmpty)
-
-      case inn: Expr.IsNotNull[Row, _] =>
-        eval(inn.expr, columns, rowIdx).map(v => Option(v).isDefined)
-
-      case inV: Expr.In[Row, _] =>
-        eval(inV.expr, columns, rowIdx).map(v => inV.values.contains(v))
-
-      case btw: Expr.Between[Row, _] =>
-        for {
-          v <- eval(btw.expr, columns, rowIdx)
-          lo <- eval(btw.lower, columns, rowIdx)
-          hi <- eval(btw.upper, columns, rowIdx)
-        } yield btw.ordering.gteq(v, lo) && btw.ordering.lteq(v, hi)
-
-      case m: Expr.Mod[Row] =>
-        for {
-          l <- eval(m.left, columns, rowIdx)
-          r <- eval(m.right, columns, rowIdx)
-          result <-
-            if (r == 0) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
-            else Right(l % r)
-        } yield result
-
-      case ml: Expr.ModLong[Row] =>
-        for {
-          l <- eval(ml.left, columns, rowIdx)
-          r <- eval(ml.right, columns, rowIdx)
-          result <-
-            if (r == 0L) Left(ExecutionError.DivisionByZero(rowIdx.toInt))
-            else Right(l % r)
-        } yield result
-
-      case ab: Expr.Abs[Row] =>
-        eval(ab.expr, columns, rowIdx).map(v => Math.abs(v))
-
-      case abl: Expr.AbsLong[Row] =>
-        eval(abl.expr, columns, rowIdx).map(v => Math.abs(v))
-
-      case abd: Expr.AbsDouble[Row] =>
-        eval(abd.expr, columns, rowIdx).map(v => Math.abs(v))
-
-      case neg: Expr.Negate[Row] =>
-        eval(neg.expr, columns, rowIdx).map(v => -v)
-
-      case negl: Expr.NegateLong[Row] =>
-        eval(negl.expr, columns, rowIdx).map(v => -v)
-
-      case negd: Expr.NegateDouble[Row] =>
-        eval(negd.expr, columns, rowIdx).map(v => -v)
-
-      case rnd: Expr.Round[Row] =>
-        eval(rnd.expr, columns, rowIdx).map { v =>
-          val bd = BigDecimal(v).setScale(rnd.scale, BigDecimal.RoundingMode.HALF_UP)
-          bd.toDouble
-        }
-
-      case fl: Expr.Floor[Row] =>
-        eval(fl.expr, columns, rowIdx).map(v => Math.floor(v))
-
-      case cl: Expr.Ceil[Row] =>
-        eval(cl.expr, columns, rowIdx).map(v => Math.ceil(v))
-
-      case ctl: Expr.CastToLong[Row] =>
-        eval(ctl.expr, columns, rowIdx).map(_.toLong)
-
-      case ctd: Expr.CastToDouble[Row] =>
-        eval(ctd.expr, columns, rowIdx).map(_.toDouble)
-
-      case cltd: Expr.CastLongToDouble[Row] =>
-        eval(cltd.expr, columns, rowIdx).map(_.toDouble)
-
-      case cts: Expr.CastToString[Row, _] =>
-        eval(cts.expr, columns, rowIdx).map(v => String.valueOf(v))
-
-      case opt2iter: Expr.Option2Iterable[Row, _] =>
-        eval(opt2iter.expr, columns, rowIdx).map(_.toList)
-
-      case sq: Expr.Sqrt[Row] =>
-        eval(sq.expr, columns, rowIdx).map(v => Math.sqrt(v))
-
-      case pw: Expr.Pow[Row] =>
-        for {
-          b <- eval(pw.base, columns, rowIdx)
-          e <- eval(pw.exponent, columns, rowIdx)
-        } yield Math.pow(b, e)
-
-      case lg: Expr.Log[Row] =>
-        eval(lg.expr, columns, rowIdx).map(v => Math.log(v))
-
-      case lg10: Expr.Log10[Row] =>
-        eval(lg10.expr, columns, rowIdx).map(v => Math.log10(v))
-
-      case lg2: Expr.Log2[Row] =>
-        eval(lg2.expr, columns, rowIdx).map(v => Math.log(v) / Math.log(2.0))
-
-      case ex: Expr.Exp[Row] =>
-        eval(ex.expr, columns, rowIdx).map(v => Math.exp(v))
-
-      case sn: Expr.Sin[Row] =>
-        eval(sn.expr, columns, rowIdx).map(v => Math.sin(v))
-
-      case cs: Expr.Cos[Row] =>
-        eval(cs.expr, columns, rowIdx).map(v => Math.cos(v))
-
-      case tn: Expr.Tan[Row] =>
-        eval(tn.expr, columns, rowIdx).map(v => Math.tan(v))
-
-      case asn: Expr.Asin[Row] =>
-        eval(asn.expr, columns, rowIdx).map(v => Math.asin(v))
-
-      case acs: Expr.Acos[Row] =>
-        eval(acs.expr, columns, rowIdx).map(v => Math.acos(v))
-
-      case atn: Expr.Atan[Row] =>
-        eval(atn.expr, columns, rowIdx).map(v => Math.atan(v))
-
-      case atn2: Expr.Atan2[Row] =>
-        for {
-          y <- eval(atn2.y, columns, rowIdx)
-          x <- eval(atn2.x, columns, rowIdx)
-        } yield Math.atan2(y, x)
-
-      case sg: Expr.Signum[Row] =>
-        eval(sg.expr, columns, rowIdx).map(v => Math.signum(v))
-
-      case rnd: Expr.Rand[Row] =>
-        Right(new java.util.Random(rnd.seed).nextDouble())
-
-      case _: Expr.Sum[Row] | _: Expr.SumDouble[Row] | _: Expr.SumLong[Row] | _: Expr.Count[Row] | _: Expr.Max[Row, ?] |
-          _: Expr.Min[Row, ?] | _: Expr.Avg[Row] | _: Expr.CountDistinct[Row, ?] | _: Expr.CountIf[Row] |
-          _: Expr.StdDev[Row] | _: Expr.StdDevPop[Row] | _: Expr.First[Row, ?] | _: Expr.Collect[Row, ?] |
-          _: Expr.PercentileApprox[Row] | _: Expr.MaxBy[Row, ?, ?] | _: Expr.MinBy[Row, ?, ?] | _: Expr.MaxN[Row, ?] |
-          _: Expr.MinN[Row, ?] | _: Expr.MaxByN[Row, ?, ?] | _: Expr.MinByN[Row, ?, ?] | _: Expr.Variance[Row] |
-          _: Expr.VariancePop[Row] | _: Expr.ApproxCountDistinct[Row, ?] | _: Expr.CollectSet[Row, ?] |
-          _: Expr.ExprLast[Row, ?] | _: Expr.AnyValue[Row, ?] | _: Expr.BoolAnd[Row] | _: Expr.BoolOr[Row] |
-          _: Expr.Corr[Row] | _: Expr.CovarSamp[Row] | _: Expr.CovarPop[Row] | _: Expr.Median[Row] |
-          _: Expr.Mode[Row, ?] =>
-        Left(ExecutionError.UnsupportedOperation("Aggregations not supported in row-level eval"))
-
-      case dad: Expr.DateAddDays[Row] =>
-        for {
-          d <- eval(dad.date, columns, rowIdx)
-          n <- eval(dad.days, columns, rowIdx)
-        } yield d.plusDays(n.toLong)
-
-      case dsd: Expr.DateSubDays[Row] =>
-        for {
-          d <- eval(dsd.date, columns, rowIdx)
-          n <- eval(dsd.days, columns, rowIdx)
-        } yield d.minusDays(n.toLong)
-
-      case dam: Expr.DateAddMonths[Row] =>
-        for {
-          d <- eval(dam.date, columns, rowIdx)
-          n <- eval(dam.months, columns, rowIdx)
-        } yield d.plusMonths(n.toLong)
-
-      case dd: Expr.DateDiff[Row] =>
-        for {
-          l <- eval(dd.left, columns, rowIdx)
-          r <- eval(dd.right, columns, rowIdx)
-        } yield java.time.temporal.ChronoUnit.DAYS.between(r.toLocalDate, l.toLocalDate).toInt
-
-      case ey: Expr.ExtractYear[Row] =>
-        eval(ey.date, columns, rowIdx).map(_.getYear)
-
-      case em: Expr.ExtractMonth[Row] =>
-        eval(em.date, columns, rowIdx).map(_.getMonthValue)
-
-      case ed: Expr.ExtractDay[Row] =>
-        eval(ed.date, columns, rowIdx).map(_.getDayOfMonth)
-
-      case dow: Expr.DayOfWeek[Row] =>
-        eval(dow.date, columns, rowIdx).map(d => d.getDayOfWeek.getValue % 7 + 1)
-
-      case doy: Expr.DayOfYear[Row] =>
-        eval(doy.date, columns, rowIdx).map(_.getDayOfYear)
-
-      case woy: Expr.WeekOfYear[Row] =>
-        eval(woy.date, columns, rowIdx).map { d =>
-          d.toLocalDate.get(java.time.temporal.IsoFields.WEEK_OF_WEEK_BASED_YEAR)
-        }
-
-      case q: Expr.Quarter[Row] =>
-        eval(q.date, columns, rowIdx).map(d => (d.getMonthValue - 1) / 3 + 1)
-
-      case ld: Expr.LastDay[Row] =>
-        eval(ld.date, columns, rowIdx).map(d => Date.fromLocalDate(d.toLocalDate.withDayOfMonth(d.lengthOfMonth)))
-
-      case nd: Expr.NextDay[Row] =>
-        eval(nd.date, columns, rowIdx).map { d =>
-          val target = java.time.DayOfWeek.valueOf(nd.dayOfWeek.toUpperCase.nn)
-          Date.fromLocalDate(d.toLocalDate.`with`(java.time.temporal.TemporalAdjusters.next(target)))
-        }
-
-      case mb: Expr.MonthsBetween[Row] =>
-        for {
-          e <- eval(mb.end, columns, rowIdx)
-          s <- eval(mb.start, columns, rowIdx)
-        } yield {
-          val period = java.time.Period.between(s.toLocalDate, e.toLocalDate)
-          period.toTotalMonths.toDouble + period.getDays.toDouble / 31.0
-        }
-
-      case dt: Expr.DateTrunc[Row] =>
-        eval(dt.date, columns, rowIdx).map { d =>
-          val ld = d.toLocalDate
-          Date.fromLocalDate(dt.unit.toUpperCase.nn match {
-            case "YEAR" => ld.withDayOfYear(1)
-            case "MONTH" => ld.withDayOfMonth(1)
-            case "WEEK" => ld.`with`(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))
-            case "QUARTER" =>
-              val qMonth = (ld.getMonthValue - 1) / 3 * 3 + 1
-              java.time.LocalDate.of(ld.getYear, qMonth, 1)
-            case _ => ld
-          })
-        }
-
-      case df: Expr.DateFormat[Row] =>
-        eval(df.date, columns, rowIdx).map { d =>
-          d.toLocalDate.format(java.time.format.DateTimeFormatter.ofPattern(df.format))
-        }
-
-      case md: Expr.MakeDate[Row] =>
-        for {
-          y <- eval(md.year, columns, rowIdx)
-          m <- eval(md.month, columns, rowIdx)
-          d <- eval(md.day, columns, rowIdx)
-        } yield Date(y, m, d)
-
-      case as: Expr.ArraySize[Row, _] =>
-        eval(as.expr, columns, rowIdx).map(_.size)
-
-      case ac: Expr.ArrayContains[Row, _] =>
-        for {
-          arr <- eval(ac.expr, columns, rowIdx)
-          v <- eval(ac.value, columns, rowIdx)
-        } yield arr.contains(v)
-
-      case _: Expr.Explode[Row, _] =>
-        Left(ExecutionError.UnsupportedOperation("Explode requires Dataset-level handling"))
-
-      case asrt: Expr.ArraySort[Row, _] =>
-        eval(asrt.expr, columns, rowIdx).map(_.sorted(using asrt.ordering))
-
-      case ad: Expr.ArrayDistinct[Row, _] =>
-        eval(ad.expr, columns, rowIdx).map(_.distinct)
-
-      case au: Expr.ArrayUnion[Row, _] =>
-        for {
-          l <- eval(au.left, columns, rowIdx)
-          r <- eval(au.right, columns, rowIdx)
-        } yield (l ++ r).distinct
-
-      case ai: Expr.ArrayIntersect[Row, _] =>
-        for {
-          l <- eval(ai.left, columns, rowIdx)
-          r <- eval(ai.right, columns, rowIdx)
-        } yield l.intersect(r)
-
-      case ae: Expr.ArrayExcept[Row, _] =>
-        for {
-          l <- eval(ae.left, columns, rowIdx)
-          r <- eval(ae.right, columns, rowIdx)
-        } yield l.diff(r)
-
-      case fl: Expr.Flatten[Row, _] =>
-        eval(fl.expr, columns, rowIdx).map(_.flatten)
-
-      case ea: Expr.ElementAt[Row, _] =>
-        for {
-          arr <- eval(ea.expr, columns, rowIdx)
-          idx <- eval(ea.index, columns, rowIdx)
-          resolved = if (idx > 0) idx - 1 else arr.size + idx
-          result <-
-            if (resolved >= 0 && resolved < arr.size) Right(arr(resolved))
-            else Left(ExecutionError.IndexOutOfBounds(resolved, arr.size))
-        } yield result
-
-      case as: Expr.ArraySlice[Row, _] =>
-        eval(as.expr, columns, rowIdx).map { arr =>
-          val start = Math.max(as.start - 1, 0)
-          arr.slice(start, start + as.length)
-        }
-
-      case mk: Expr.MapKeys[Row, _, _] =>
-        eval(mk.expr, columns, rowIdx).map(_.keys.toSeq)
-
-      case mv: Expr.MapValues[Row, _, _] =>
-        eval(mv.expr, columns, rowIdx).map(_.values.toSeq)
-
-      case mck: Expr.MapContainsKey[Row, _, _] =>
-        for {
-          m <- eval(mck.expr, columns, rowIdx)
-          k <- eval(mck.key, columns, rowIdx)
-        } yield m.contains(k)
-
-      case me: Expr.MapEntries[Row, _, _] =>
-        eval(me.expr, columns, rowIdx).map(_.toSeq)
-
-      case mfa: Expr.MapFromArrays[Row, _, _] =>
-        for {
-          ks <- eval(mfa.keys, columns, rowIdx)
-          vs <- eval(mfa.values, columns, rowIdx)
-          result <-
-            if (ks.size == vs.size) Right(ks.zip(vs).toMap)
-            else Left(ExecutionError.InvalidValue(s"MapFromArrays: keys length ${ks.size} != values length ${vs.size}"))
-        } yield result
-
-      case mc: Expr.MapConcat[Row, _, _] =>
-        for {
-          l <- eval(mc.left, columns, rowIdx)
-          r <- eval(mc.right, columns, rowIdx)
-        } yield l ++ r
-
-      case md: Expr.Md5[Row] =>
-        eval(md.expr, columns, rowIdx).map(s =>
-          hexEncode(java.security.MessageDigest.getInstance("MD5").nn.digest(s.getBytes("UTF-8")).nn)
-        )
-
-      case sh: Expr.Sha1[Row] =>
-        eval(sh.expr, columns, rowIdx).map(s =>
-          hexEncode(java.security.MessageDigest.getInstance("SHA-1").nn.digest(s.getBytes("UTF-8")).nn)
-        )
-
-      case sh2: Expr.Sha2[Row] =>
-        eval(sh2.expr, columns, rowIdx).map { s =>
-          val algo = sha2Algorithm(sh2.bitLength)
-          hexEncode(java.security.MessageDigest.getInstance(algo).nn.digest(s.getBytes("UTF-8")).nn)
-        }
-
-      case ue: Expr.UrlEncode[Row] =>
-        eval(ue.expr, columns, rowIdx).map(s => java.net.URLEncoder.encode(s, "UTF-8").nn)
-
-      case ud: Expr.UrlDecode[Row] =>
-        eval(ud.expr, columns, rowIdx).map(s => java.net.URLDecoder.decode(s, "UTF-8").nn)
-
-      case b64e: Expr.Base64Encode[Row] =>
-        eval(b64e.expr, columns, rowIdx).map(s => java.util.Base64.getEncoder.nn.encodeToString(s.getBytes("UTF-8")).nn)
-
-      case b64d: Expr.Base64Decode[Row] =>
-        eval(b64d.expr, columns, rowIdx).map(s => new String(java.util.Base64.getDecoder.nn.decode(s), "UTF-8"))
-
-      case hx: Expr.Hex[Row] =>
-        eval(hx.expr, columns, rowIdx).map(s => hexEncode(s.getBytes("UTF-8")))
-
-      case gjo: Expr.GetJsonObject[Row] =>
-        eval(gjo.expr, columns, rowIdx).flatMap(s => extractJsonPath(s, gjo.path))
-
-      case _: Expr.RowNumber[Row] | _: Expr.Rank[Row] | _: Expr.DenseRank[Row] | _: Expr.Lag[Row, ?] |
-          _: Expr.Lead[Row, ?] | _: Expr.NTile[Row] | _: Expr.CumeDist[Row] | _: Expr.PercentRank[Row] |
-          _: Expr.NthValue[Row, ?] | _: Expr.FirstValue[Row, ?] | _: Expr.LastValue[Row, ?] =>
-        Left(ExecutionError.UnsupportedOperation("Window functions not supported in row-level eval"))
+  ): Either[ExecutionError, Any] = {
+    val effectiveColumns =
+      if (columns.isEmpty || columns.head.length == 0) {
+        Vector(Column.int(Array(0)))
+      } else {
+        columns
+      }
+    val colType = inferExprColumnType(expr, effectiveColumns)
+    evalColumn(expr, effectiveColumns, colType).flatMap { col =>
+      val idx = rowIdx.toInt
+      if (idx >= col.length)
+        Left(errors.ExecutionError.IndexOutOfBounds(idx, col.length))
+      else
+        Right(col.getValue(idx))
     }
   }
 
@@ -758,7 +138,7 @@ object ExprInterpreter {
     *
     * Vectorized: operates on entire arrays instead of row-by-row where possible. For Cell
     * references, returns the column directly (zero work). For arithmetic/comparisons/string ops,
-    * uses while-loops on typed arrays. Falls back to row-by-row eval for unsupported patterns.
+    * uses while-loops on typed arrays.
     */
   def evalColumn[Row, A](
     expr: Expr[Row, A],
@@ -2689,7 +2069,7 @@ object ExprInterpreter {
   def evalAggregation[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column[?]]
-  ): Either[ExecutionError, A] = {
+  ): Either[ExecutionError, Any] = {
     if (columns.isEmpty || columns.head.length == 0) {
       (expr: @unchecked) match {
         case _: Expr.Count[Row] => Right(0L)
@@ -2704,18 +2084,18 @@ object ExprInterpreter {
         case _: Expr.StdDev[Row] => Right(0.0)
         case _: Expr.StdDevPop[Row] => Right(0.0)
         case _: Expr.First[Row, ?] => Right(None)
-        case _: Expr.Collect[Row, a] => Right(Seq.empty[a])
+        case _: Expr.Collect[Row, ?] => Right(Seq.empty)
         case _: Expr.PercentileApprox[Row] => Right(0.0)
         case _: Expr.MaxBy[Row, ?, ?] => Right(None)
         case _: Expr.MinBy[Row, ?, ?] => Right(None)
-        case _: Expr.MaxN[Row, a] => Right(Seq.empty[a])
-        case _: Expr.MinN[Row, a] => Right(Seq.empty[a])
-        case _: Expr.MaxByN[Row, a, ?] => Right(Seq.empty[a])
-        case _: Expr.MinByN[Row, a, ?] => Right(Seq.empty[a])
+        case _: Expr.MaxN[Row, ?] => Right(Seq.empty)
+        case _: Expr.MinN[Row, ?] => Right(Seq.empty)
+        case _: Expr.MaxByN[Row, ?, ?] => Right(Seq.empty)
+        case _: Expr.MinByN[Row, ?, ?] => Right(Seq.empty)
         case _: Expr.Variance[Row] => Right(0.0)
         case _: Expr.VariancePop[Row] => Right(0.0)
         case _: Expr.ApproxCountDistinct[Row, ?] => Right(0L)
-        case _: Expr.CollectSet[Row, a] => Right(Seq.empty[a])
+        case _: Expr.CollectSet[Row, ?] => Right(Seq.empty)
         case _: Expr.ExprLast[Row, ?] => Right(None)
         case _: Expr.AnyValue[Row, ?] => Right(None)
         case _: Expr.BoolAnd[Row] => Right(true)
@@ -3012,225 +2392,168 @@ object ExprInterpreter {
             }
           }
 
-        case countDist: Expr.CountDistinct[Row, a] =>
-          val values = scala.collection.mutable.HashSet.empty[a]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(countDist.expr, columns, RowIndex(i)) match {
-              case Right(v) => values += v
-              case _ => ()
+        case countDist: Expr.CountDistinct[Row, ?] =>
+          val colType = inferExprColumnType(countDist.expr, columns)
+          evalColumn(countDist.expr, columns, colType).map { col =>
+            val values = scala.collection.mutable.HashSet.empty[Any]
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (!col.isNull(RowIndex(i))) values += col.getValue(i)
+              i += 1
             }
-            i += 1
+            values.size.toLong
           }
-          Right(values.size.toLong)
 
-        case acd: Expr.ApproxCountDistinct[Row, a] =>
-          val values = scala.collection.mutable.HashSet.empty[a]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(acd.expr, columns, RowIndex(i)) match {
-              case Right(v) => values += v
-              case _ => ()
+        case acd: Expr.ApproxCountDistinct[Row, ?] =>
+          val colType = inferExprColumnType(acd.expr, columns)
+          evalColumn(acd.expr, columns, colType).map { col =>
+            val values = scala.collection.mutable.HashSet.empty[Any]
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (!col.isNull(RowIndex(i))) values += col.getValue(i)
+              i += 1
             }
-            i += 1
+            values.size.toLong
           }
-          Right(values.size.toLong)
 
-        case max: Expr.Max[Row, a] =>
-          var best: Option[a] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(max.expr, columns, RowIndex(i)) match {
-              case Right(value) =>
-                best = best match {
-                  case None => Some(value)
-                  case Some(m) => Some(if (max.ordering.gt(value, m)) value else m)
-                }
-              case _ => ()
-            }
-            i += 1
+        case max: Expr.Max[Row, ?] =>
+          val colType = inferExprColumnType(max.expr, columns)
+          evalColumn(max.expr, columns, colType).map { col =>
+            findExtremum(col, rowCount, isMax = true)
           }
-          Right(best)
 
-        case min: Expr.Min[Row, a] =>
-          var best: Option[a] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(min.expr, columns, RowIndex(i)) match {
-              case Right(value) =>
-                best = best match {
-                  case None => Some(value)
-                  case Some(m) => Some(if (min.ordering.lt(value, m)) value else m)
-                }
-              case _ => ()
-            }
-            i += 1
+        case min: Expr.Min[Row, ?] =>
+          val colType = inferExprColumnType(min.expr, columns)
+          evalColumn(min.expr, columns, colType).map { col =>
+            findExtremum(col, rowCount, isMax = false)
           }
-          Right(best)
 
-        case first: Expr.First[Row, a] =>
-          var result: Option[a] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount && result.isEmpty) {
-            eval(first.expr, columns, RowIndex(i)) match {
-              case Right(v) => result = Some(v)
-              case _ => ()
+        case first: Expr.First[Row, ?] =>
+          val colType = inferExprColumnType(first.expr, columns)
+          evalColumn(first.expr, columns, colType).map { col =>
+            var result: Option[Any] = None // scalafix:ok DisableSyntax.var
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount && result.isEmpty) {
+              if (!col.isNull(RowIndex(i))) result = Some(col.getValue(i))
+              i += 1
             }
-            i += 1
+            result
           }
-          Right(result)
 
-        case last: Expr.ExprLast[Row, a] =>
-          var result: Option[a] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(last.expr, columns, RowIndex(i)) match {
-              case Right(v) => result = Some(v)
-              case _ => ()
+        case last: Expr.ExprLast[Row, ?] =>
+          val colType = inferExprColumnType(last.expr, columns)
+          evalColumn(last.expr, columns, colType).map { col =>
+            var result: Option[Any] = None // scalafix:ok DisableSyntax.var
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (!col.isNull(RowIndex(i))) result = Some(col.getValue(i))
+              i += 1
             }
-            i += 1
+            result
           }
-          Right(result)
 
-        case anyVal: Expr.AnyValue[Row, a] =>
-          var result: Option[a] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount && result.isEmpty) {
-            eval(anyVal.expr, columns, RowIndex(i)) match {
-              case Right(v) => result = Some(v)
-              case _ => ()
+        case anyVal: Expr.AnyValue[Row, ?] =>
+          val colType = inferExprColumnType(anyVal.expr, columns)
+          evalColumn(anyVal.expr, columns, colType).map { col =>
+            var result: Option[Any] = None // scalafix:ok DisableSyntax.var
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount && result.isEmpty) {
+              if (!col.isNull(RowIndex(i))) result = Some(col.getValue(i))
+              i += 1
             }
-            i += 1
+            result
           }
-          Right(result)
 
-        case mode: Expr.Mode[Row, a] =>
-          val counts = scala.collection.mutable.LinkedHashMap.empty[a, Int]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(mode.expr, columns, RowIndex(i)) match {
-              case Right(v) => counts(v) = counts.getOrElse(v, 0) + 1
-              case _ => ()
+        case mode: Expr.Mode[Row, ?] =>
+          val colType = inferExprColumnType(mode.expr, columns)
+          evalColumn(mode.expr, columns, colType).map { col =>
+            val counts = scala.collection.mutable.LinkedHashMap.empty[Any, Int]
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (!col.isNull(RowIndex(i))) {
+                val v = col.getValue(i)
+                counts(v) = counts.getOrElse(v, 0) + 1
+              }
+              i += 1
             }
-            i += 1
+            if (counts.isEmpty) None else Some(counts.maxBy(_._2)._1)
           }
-          Right(if (counts.isEmpty) None else Some(counts.maxBy(_._2)._1))
 
-        case collect: Expr.Collect[Row, a] =>
-          val builder = Vector.newBuilder[a]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(collect.expr, columns, RowIndex(i)) match {
-              case Right(v) => builder += v
-              case _ => ()
+        case collect: Expr.Collect[Row, ?] =>
+          val colType = inferExprColumnType(collect.expr, columns)
+          evalColumn(collect.expr, columns, colType).map { col =>
+            val builder = Vector.newBuilder[Any]
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (!col.isNull(RowIndex(i))) builder += col.getValue(i)
+              i += 1
             }
-            i += 1
+            builder.result().toSeq
           }
-          Right(builder.result().toSeq)
 
-        case cs: Expr.CollectSet[Row, a] =>
-          val set = scala.collection.mutable.LinkedHashSet.empty[a]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(cs.expr, columns, RowIndex(i)) match {
-              case Right(v) => set += v
-              case _ => ()
+        case cs: Expr.CollectSet[Row, ?] =>
+          val colType = inferExprColumnType(cs.expr, columns)
+          evalColumn(cs.expr, columns, colType).map { col =>
+            val set = scala.collection.mutable.LinkedHashSet.empty[Any]
+            var i = 0 // scalafix:ok DisableSyntax.var
+            while (i < rowCount) {
+              if (!col.isNull(RowIndex(i))) set += col.getValue(i)
+              i += 1
             }
-            i += 1
+            set.toSeq
           }
-          Right(set.toSeq)
 
-        case mb: Expr.MaxBy[Row, a, k] =>
-          var bestValue: Option[a] = None // scalafix:ok DisableSyntax.var
-          var bestKey: Option[k] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            (eval(mb.valueExpr, columns, RowIndex(i)), eval(mb.orderExpr, columns, RowIndex(i))) match {
-              case (Right(value), Right(key)) =>
-                bestKey match {
-                  case None =>
-                    bestValue = Some(value)
-                    bestKey = Some(key)
-                  case Some(bk) if mb.ordering.gt(key, bk) =>
-                    bestValue = Some(value)
-                    bestKey = Some(key)
-                  case _ => ()
-                }
-              case _ => ()
-            }
-            i += 1
+        case mb: Expr.MaxBy[Row, ?, ?] =>
+          val valColType = inferExprColumnType(mb.valueExpr, columns)
+          val keyColType = inferExprColumnType(mb.orderExpr, columns)
+          for {
+            valCol <- evalColumn(mb.valueExpr, columns, valColType)
+            keyCol <- evalColumn(mb.orderExpr, columns, keyColType)
+          } yield {
+            findExtremumByKey(valCol, keyCol, rowCount, isMax = true)
           }
-          Right(bestValue)
 
-        case mb: Expr.MinBy[Row, a, k] =>
-          var bestValue: Option[a] = None // scalafix:ok DisableSyntax.var
-          var bestKey: Option[k] = None // scalafix:ok DisableSyntax.var
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            (eval(mb.valueExpr, columns, RowIndex(i)), eval(mb.orderExpr, columns, RowIndex(i))) match {
-              case (Right(value), Right(key)) =>
-                bestKey match {
-                  case None =>
-                    bestValue = Some(value)
-                    bestKey = Some(key)
-                  case Some(bk) if mb.ordering.lt(key, bk) =>
-                    bestValue = Some(value)
-                    bestKey = Some(key)
-                  case _ => ()
-                }
-              case _ => ()
-            }
-            i += 1
+        case mb: Expr.MinBy[Row, ?, ?] =>
+          val valColType = inferExprColumnType(mb.valueExpr, columns)
+          val keyColType = inferExprColumnType(mb.orderExpr, columns)
+          for {
+            valCol <- evalColumn(mb.valueExpr, columns, valColType)
+            keyCol <- evalColumn(mb.orderExpr, columns, keyColType)
+          } yield {
+            findExtremumByKey(valCol, keyCol, rowCount, isMax = false)
           }
-          Right(bestValue)
 
-        case mn: Expr.MaxN[Row, a] =>
-          val values = Vector.newBuilder[a]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(mn.expr, columns, RowIndex(i)) match {
-              case Right(v) => values += v
-              case _ => ()
-            }
-            i += 1
+        case mn: Expr.MaxN[Row, ?] =>
+          val colType = inferExprColumnType(mn.expr, columns)
+          evalColumn(mn.expr, columns, colType).map { col =>
+            topNValues(col, rowCount, mn.n, isMax = true)
           }
-          Right(values.result().sorted(using mn.ordering.reverse).take(mn.n).toSeq)
 
-        case mn: Expr.MinN[Row, a] =>
-          val values = Vector.newBuilder[a]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            eval(mn.expr, columns, RowIndex(i)) match {
-              case Right(v) => values += v
-              case _ => ()
-            }
-            i += 1
+        case mn: Expr.MinN[Row, ?] =>
+          val colType = inferExprColumnType(mn.expr, columns)
+          evalColumn(mn.expr, columns, colType).map { col =>
+            topNValues(col, rowCount, mn.n, isMax = false)
           }
-          Right(values.result().sorted(using mn.ordering).take(mn.n).toSeq)
 
-        case mbn: Expr.MaxByN[Row, a, k] =>
-          val pairs = Vector.newBuilder[(a, k)]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            (eval(mbn.valueExpr, columns, RowIndex(i)), eval(mbn.orderExpr, columns, RowIndex(i))) match {
-              case (Right(value), Right(key)) => pairs += ((value, key))
-              case _ => ()
-            }
-            i += 1
+        case mbn: Expr.MaxByN[Row, ?, ?] =>
+          val valColType = inferExprColumnType(mbn.valueExpr, columns)
+          val keyColType = inferExprColumnType(mbn.orderExpr, columns)
+          for {
+            valCol <- evalColumn(mbn.valueExpr, columns, valColType)
+            keyCol <- evalColumn(mbn.orderExpr, columns, keyColType)
+          } yield {
+            topNByKey(valCol, keyCol, rowCount, mbn.n, isMax = true)
           }
-          Right(pairs.result().sortBy(_._2)(using mbn.ordering.reverse).take(mbn.n).map(_._1).toSeq)
 
-        case mbn: Expr.MinByN[Row, a, k] =>
-          val pairs = Vector.newBuilder[(a, k)]
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < rowCount) {
-            (eval(mbn.valueExpr, columns, RowIndex(i)), eval(mbn.orderExpr, columns, RowIndex(i))) match {
-              case (Right(value), Right(key)) => pairs += ((value, key))
-              case _ => ()
-            }
-            i += 1
+        case mbn: Expr.MinByN[Row, ?, ?] =>
+          val valColType = inferExprColumnType(mbn.valueExpr, columns)
+          val keyColType = inferExprColumnType(mbn.orderExpr, columns)
+          for {
+            valCol <- evalColumn(mbn.valueExpr, columns, valColType)
+            keyCol <- evalColumn(mbn.orderExpr, columns, keyColType)
+          } yield {
+            topNByKey(valCol, keyCol, rowCount, mbn.n, isMax = false)
           }
-          Right(pairs.result().sortBy(_._2)(using mbn.ordering).take(mbn.n).map(_._1).toSeq)
       }
     }
   }
@@ -3269,6 +2592,224 @@ object ExprInterpreter {
     val builder = Array.newBuilder[Double]
     var i = 0 // scalafix:ok DisableSyntax.var
     while (i < data.length) {
+      if (!nulls.contains(i)) builder += data(i)
+      i += 1
+    }
+    builder.result()
+  }
+
+  private def findExtremum(col: Column[?], rowCount: Int, isMax: Boolean): Option[Any] = {
+    col match {
+      case Column.IntColumn(data, nulls) =>
+        var best: Option[Int] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            best = best match {
+              case None => Some(data(i))
+              case Some(b) =>
+                Some(if (isMax && data(i) > b) data(i) else if (!isMax && data(i) < b) data(i) else b)
+            }
+          }
+          i += 1
+        }
+        best
+      case Column.LongColumn(data, nulls) =>
+        var best: Option[Long] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            best = best match {
+              case None => Some(data(i))
+              case Some(b) =>
+                Some(if (isMax && data(i) > b) data(i) else if (!isMax && data(i) < b) data(i) else b)
+            }
+          }
+          i += 1
+        }
+        best
+      case Column.DoubleColumn(data, nulls) =>
+        var best: Option[Double] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            best = best match {
+              case None => Some(data(i))
+              case Some(b) =>
+                Some(if (isMax && data(i) > b) data(i) else if (!isMax && data(i) < b) data(i) else b)
+            }
+          }
+          i += 1
+        }
+        best
+      case Column.StringColumn(data, nulls) =>
+        var best: Option[String] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            best = best match {
+              case None => Some(data(i))
+              case Some(b) =>
+                val cmp = data(i).compareTo(b)
+                Some(if (isMax && cmp > 0) data(i) else if (!isMax && cmp < 0) data(i) else b)
+            }
+          }
+          i += 1
+        }
+        best
+      case Column.DateColumn(data, nulls) =>
+        var best: Option[Date] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            val d = Date.ofEpochDay(data(i).toLong)
+            best = best match {
+              case None => Some(d)
+              case Some(b) =>
+                val cmp = data(i).compareTo(b.toEpochDay.toInt)
+                Some(if (isMax && cmp > 0) d else if (!isMax && cmp < 0) d else b)
+            }
+          }
+          i += 1
+        }
+        best
+      case Column.BooleanColumn(data, nulls) =>
+        var best: Option[Boolean] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            best = best match {
+              case None => Some(data(i))
+              case Some(b) =>
+                Some(
+                  if (isMax && data(i) && !b) data(i)
+                  else if (!isMax && !data(i) && b) data(i)
+                  else b
+                )
+            }
+          }
+          i += 1
+        }
+        best
+      case Column.AnyColumn(data, nulls) =>
+        var best: Option[Any] = None // scalafix:ok DisableSyntax.var
+        var i = 0 // scalafix:ok DisableSyntax.var
+        while (i < rowCount) {
+          if (!nulls.contains(i)) {
+            best = best match {
+              case None => Some(data(i))
+              case Some(b) =>
+                (data(i), b) match {
+                  case (a: Comparable[?], bc: Comparable[?]) =>
+                    val cmp = a.asInstanceOf[Comparable[Any]].compareTo(bc) // scalafix:ok DisableSyntax.asInstanceOf
+                    Some(if (isMax && cmp > 0) data(i) else if (!isMax && cmp < 0) data(i) else b)
+                  case _ => Some(b)
+                }
+            }
+          }
+          i += 1
+        }
+        best
+    }
+  }
+
+  private def findExtremumByKey(
+    valCol: Column[?],
+    keyCol: Column[?],
+    rowCount: Int,
+    isMax: Boolean
+  ): Option[Any] = {
+    var bestValue: Option[Any] = None // scalafix:ok DisableSyntax.var
+    var bestKeyIdx: Int = -1 // scalafix:ok DisableSyntax.var
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
+      if (!valCol.isNull(RowIndex(i)) && !keyCol.isNull(RowIndex(i))) {
+        if (bestKeyIdx < 0 || compareColumnValues(keyCol, i, bestKeyIdx, isMax)) {
+          bestValue = Some(valCol.getValue(i))
+          bestKeyIdx = i
+        }
+      }
+      i += 1
+    }
+    bestValue
+  }
+
+  private def compareColumnValues(col: Column[?], i: Int, j: Int, wantGreater: Boolean): Boolean = {
+    col match {
+      case Column.IntColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.LongColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.DoubleColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.StringColumn(data, _) =>
+        val cmp = data(i).compareTo(data(j))
+        if (wantGreater) cmp > 0 else cmp < 0
+      case Column.DateColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.BooleanColumn(data, _) =>
+        if (wantGreater) data(i) && !data(j) else !data(i) && data(j)
+      case Column.AnyColumn(data, _) =>
+        (data(i), data(j)) match {
+          case (a: Comparable[?], b: Comparable[?]) =>
+            val cmp = a.asInstanceOf[Comparable[Any]].compareTo(b) // scalafix:ok DisableSyntax.asInstanceOf
+            if (wantGreater) cmp > 0 else cmp < 0
+          case _ => false
+        }
+    }
+  }
+
+  private def topNValues(col: Column[?], rowCount: Int, n: Int, isMax: Boolean): Seq[Any] = {
+    col match {
+      case Column.IntColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Int].reverse) else vals.sorted
+        sorted.take(n).toSeq
+      case Column.LongColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
+        sorted.take(n).toSeq
+      case Column.DoubleColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Double].reverse) else vals.sorted
+        sorted.take(n).toSeq
+      case Column.StringColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[String].reverse) else vals.sorted
+        sorted.take(n).toSeq
+      case Column.DateColumn(data, nulls) =>
+        val vals = (0 until rowCount).filter(!nulls.contains(_)).map(i => Date.ofEpochDay(data(i).toLong)).toVector
+        val sorted = if (isMax) vals.sorted(using Ordering[Date].reverse) else vals.sorted
+        sorted.take(n).toSeq
+      case Column.BooleanColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Boolean].reverse) else vals.sorted
+        sorted.take(n).toSeq
+      case Column.AnyColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        vals.take(n).toSeq
+    }
+  }
+
+  private def topNByKey(
+    valCol: Column[?],
+    keyCol: Column[?],
+    rowCount: Int,
+    n: Int,
+    isMax: Boolean
+  ): Seq[Any] = {
+    val indices = (0 until rowCount).filter(i => !valCol.isNull(RowIndex(i)) && !keyCol.isNull(RowIndex(i)))
+    val sortedIndices = indices.sortWith { (a, b) =>
+      if (isMax) compareColumnValues(keyCol, a, b, wantGreater = true)
+      else compareColumnValues(keyCol, a, b, wantGreater = false)
+    }
+    sortedIndices.take(n).map(i => valCol.getValue(i)).toSeq
+  }
+
+  private def collectNonNullTyped[T](data: Array[T], nulls: BitSet, rowCount: Int): Vector[T] = {
+    val builder = Vector.newBuilder[T]
+    var i = 0 // scalafix:ok DisableSyntax.var
+    while (i < rowCount) {
       if (!nulls.contains(i)) builder += data(i)
       i += 1
     }

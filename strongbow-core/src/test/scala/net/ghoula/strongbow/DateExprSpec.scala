@@ -31,7 +31,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("days", ColumnIndex(1))
     )
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(Date(2024, 1, 25))
   }
 
@@ -45,7 +45,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("days", ColumnIndex(1))
     )
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(Date(2024, 1, 10))
   }
 
@@ -59,7 +59,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("date", ColumnIndex(0)),
       Expr.Cell[Any, Int]("months", ColumnIndex(1))
     )
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(Date(2024, 2, 29))
   }
 
@@ -74,7 +74,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
       Expr.Cell[Any, Date]("d1", ColumnIndex(0)),
       Expr.Cell[Any, Date]("d2", ColumnIndex(1))
     )
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(5)
   }
 
@@ -84,7 +84,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(dateCol)
 
     val expr = Expr.ExtractYear(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(2024)
   }
 
@@ -94,7 +94,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(dateCol)
 
     val expr = Expr.ExtractMonth(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(6)
   }
 
@@ -104,7 +104,7 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val columns = Vector(dateCol)
 
     val expr = Expr.ExtractDay(Expr.Cell[Any, Date]("date", ColumnIndex(0)))
-    val result = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result shouldBe Right(15)
   }
 
@@ -119,10 +119,10 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val cell2 = Expr.Cell[Any, Date]("d2", ColumnIndex(1))
 
     val gtExpr = Expr.Gt(cell1, cell2, summon[Ordering[Date]])
-    ExprInterpreter.eval(gtExpr, columns, RowIndex(0)) shouldBe Right(true)
+    ExprInterpreter.evalAt(gtExpr, columns, RowIndex(0)) shouldBe Right(true)
 
     val ltExpr = Expr.Lt(cell1, cell2, summon[Ordering[Date]])
-    ExprInterpreter.eval(ltExpr, columns, RowIndex(0)) shouldBe Right(false)
+    ExprInterpreter.evalAt(ltExpr, columns, RowIndex(0)) shouldBe Right(false)
   }
 
   "Date extension methods" should "work on Expr[Row, Date]" in {
@@ -134,13 +134,13 @@ class DateExprSpec extends AnyFlatSpec with Matchers {
     val dateExpr = Expr.Cell[Any, Date]("date", ColumnIndex(0))
     val daysExpr = Expr.Cell[Any, Int]("days", ColumnIndex(1))
 
-    val addResult = ExprInterpreter.eval(dateExpr.addDays(daysExpr), columns, RowIndex(0))
+    val addResult = ExprInterpreter.evalAt(dateExpr.addDays(daysExpr), columns, RowIndex(0))
     addResult shouldBe Right(Date(2024, 3, 22))
 
-    val yearResult = ExprInterpreter.eval(dateExpr.year, columns, RowIndex(0))
+    val yearResult = ExprInterpreter.evalAt(dateExpr.year, columns, RowIndex(0))
     yearResult shouldBe Right(2024)
 
-    val monthResult = ExprInterpreter.eval(dateExpr.month, columns, RowIndex(0))
+    val monthResult = ExprInterpreter.evalAt(dateExpr.month, columns, RowIndex(0))
     monthResult shouldBe Right(3)
   }
 

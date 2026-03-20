@@ -158,23 +158,17 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     val intColumn = Column.IntColumn(Array(10, 20, 30), nulls = scala.collection.immutable.BitSet.empty)
     val columns = Vector(intColumn)
 
-    // Count returns Long - GADT refines A to Long, no cast needed
-    val countResult: Either[ExecutionError, Long] =
-      ExprInterpreter.evalAggregation(Expr.Count[Int](), columns)
+    val countResult = ExprInterpreter.evalAggregation(Expr.Count[Int](), columns)
 
-    // Sum returns Int - GADT refines A to Int, no cast needed
-    val sumResult: Either[ExecutionError, Int] =
-      ExprInterpreter.evalAggregation(
-        Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0))),
-        columns
-      )
+    val sumResult = ExprInterpreter.evalAggregation(
+      Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0))),
+      columns
+    )
 
-    // Max returns Option[Int] - GADT refines A to Option[Int], no cast needed
-    val maxResult: Either[ExecutionError, Option[Int]] =
-      ExprInterpreter.evalAggregation(
-        Expr.Max(Expr.Cell[Int, Int]("value", ColumnIndex(0)), summon[Ordering[Int]]),
-        columns
-      )
+    val maxResult = ExprInterpreter.evalAggregation(
+      Expr.Max(Expr.Cell[Int, Int]("value", ColumnIndex(0)), summon[Ordering[Int]]),
+      columns
+    )
 
     countResult shouldBe Right(3L)
     sumResult shouldBe Right(60)
@@ -218,8 +212,8 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
 
     // stddev should be approximately 2.0
     result match {
-      case Right(value) => math.abs(value - 2.0) should be < 0.2
-      case Left(err) => fail(s"Stddev failed: $err")
+      case Right(value: Double) => math.abs(value - 2.0) should be < 0.2
+      case other => fail(s"Stddev failed: $other")
     }
   }
 
@@ -291,8 +285,8 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     val medianExpr = Expr.percentileApprox(Expr.Cell[Double, Double]("value", ColumnIndex(0)), 0.5)
     val median = ExprInterpreter.evalAggregation(medianExpr, columns)
     median match {
-      case Right(v) => v should (be >= 5.0 and be <= 6.0)
-      case Left(err) => fail(s"Percentile failed: $err")
+      case Right(v: Double) => v should (be >= 5.0 and be <= 6.0)
+      case other => fail(s"Percentile failed: $other")
     }
 
     // p0 (min)
@@ -431,8 +425,8 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
 
     // stddevPop should be approximately 1.87
     result match {
-      case Right(value) => math.abs(value - 1.87) should be < 0.2
-      case Left(err) => fail(s"StddevPop failed: $err")
+      case Right(value: Double) => math.abs(value - 1.87) should be < 0.2
+      case other => fail(s"StddevPop failed: $other")
     }
   }
 }

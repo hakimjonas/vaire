@@ -206,13 +206,16 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
   private def applyFilterViaMap[T](parent: SparkPlan[T], predicate: Expr[T, Boolean]): SparkPlan[T] = {
     val values = collectValues(parent)
     val filtered = values.filter { v =>
-      import net.ghoula.strongbow.ExprInterpreter
-      import net.ghoula.strongbow.types.RowIndex
+      import net.ghoula.strongbow.{ExprInterpreter, ColumnType}
       val encoded = parent.schema.encode(v)
       val cols = encoded.zipWithIndex.map { case (value, idx) =>
         SBColumn.fromValues(Vector(value), parent.schema.columnTypes(idx))
       }.collect { case Right(c) => c }.toVector
-      ExprInterpreter.eval(predicate, cols, RowIndex(0)) == Right(true)
+      ExprInterpreter.evalColumn(predicate, cols, ColumnType.BooleanType) match {
+        case Right(SBColumn.BooleanColumn(data, nulls)) =>
+          data.length > 0 && !nulls.contains(0) && data(0)
+        case _ => false
+      }
     }
     SparkPlan(createDataFrame(filtered, parent.schema), parent.schema)
   }

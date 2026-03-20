@@ -133,13 +133,13 @@ class DatasetTransformationsSpec extends AnyFlatSpec with Matchers {
 
     val expr = Expr.Option2Iterable(Expr.Cell[Any, Option[Int]]("value", ColumnIndex(0)))
 
-    val result0 = ExprInterpreter.eval(expr, columns, RowIndex(0))
+    val result0 = ExprInterpreter.evalAt(expr, columns, RowIndex(0))
     result0 shouldBe Right(List(1))
 
-    val result1 = ExprInterpreter.eval(expr, columns, RowIndex(1))
+    val result1 = ExprInterpreter.evalAt(expr, columns, RowIndex(1))
     result1 shouldBe Right(List())
 
-    val result2 = ExprInterpreter.eval(expr, columns, RowIndex(2))
+    val result2 = ExprInterpreter.evalAt(expr, columns, RowIndex(2))
     result2 shouldBe Right(List(3))
   }
 

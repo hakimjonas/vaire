@@ -289,25 +289,19 @@ object ExprMacro {
     val w = fieldTypeRepr.widen
     if (w =:= TypeRepr.of[Int]) {
       val expr = compileIntExpr[T](term, paramName, labels)
-      '{ ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.IntType) } // scalafix:ok DisableSyntax.asInstanceOf
+      '{ ($nameExpr, $expr, ColumnType.IntType) }
     } else if (w =:= TypeRepr.of[Long]) {
       val expr = compileLongExpr[T](term, paramName, labels)
-      '{ ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.LongType) } // scalafix:ok DisableSyntax.asInstanceOf
+      '{ ($nameExpr, $expr, ColumnType.LongType) }
     } else if (w =:= TypeRepr.of[Double]) {
       val expr = compileDoubleExpr[T](term, paramName, labels)
-      '{
-        ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.DoubleType)
-      } // scalafix:ok DisableSyntax.asInstanceOf
+      '{ ($nameExpr, $expr, ColumnType.DoubleType) }
     } else if (w =:= TypeRepr.of[String]) {
       val expr = compileStringExpr[T](term, paramName, labels)
-      '{
-        ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.StringType)
-      } // scalafix:ok DisableSyntax.asInstanceOf
+      '{ ($nameExpr, $expr, ColumnType.StringType) }
     } else if (w =:= TypeRepr.of[Boolean]) {
       val expr = compileBooleanValueExpr[T](term, paramName, labels)
-      '{
-        ($nameExpr, $expr.asInstanceOf[SExpr[T, Any]], ColumnType.BooleanType)
-      } // scalafix:ok DisableSyntax.asInstanceOf
+      '{ ($nameExpr, $expr, ColumnType.BooleanType) }
     } else {
       report.errorAndAbort(s"Unsupported field type ${w.show} in copy replacement expression.")
     }

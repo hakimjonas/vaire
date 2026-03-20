@@ -200,34 +200,6 @@ object DatasetInterpreter extends Interpreter {
           withWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
         }
 
-      case rbk: Dataset.ReduceByKey[k, v] =>
-        execute(rbk.parent).flatMap { parent =>
-          val rows = parent.toVectorUnsafe
-          val reduced = reduceByKeyHelper(rows, rbk.reduce)
-          given Schema[k] = rbk.schemaK
-          given Schema[v] = rbk.schemaV
-          MaterializedDataset.fromVector(reduced)(using Schema.tuple2Schema[k, v])
-        }
-
-      case abk: Dataset.AggregateByKey[k, v, r] =>
-        execute(abk.parent).flatMap { parent =>
-          val rows = parent.toVectorUnsafe
-          val result = aggregateByKeyHelper(rows, abk.extractors, abk.reducers, abk.assembler)
-          given Schema[k] = abk.schemaK
-          given Schema[r] = abk.schemaR
-          MaterializedDataset.fromVector(result)(using Schema.tuple2Schema[k, r])
-        }
-
-      case mwk: Dataset.MapWithKeyExpr[t, k] =>
-        execute(mwk.parent).flatMap { parent =>
-          ExprInterpreter.evalColumn(mwk.keyExpr, parent.columns, mwk.keyType).map { keyCol =>
-            given Schema[k] = mwk.schemaK
-            given Schema[t] = mwk.schemaT
-            val tupleSchema = Schema.tuple2Schema[k, t]
-            MaterializedDataset(Vector(keyCol) ++ parent.columns, tupleSchema)
-          }
-        }
-
       case agg: Dataset.Aggregate[_, T] =>
         execute(agg.parent).flatMap { parent =>
           globalAggregate(parent, agg.aggSpecs, agg.resultSchema)
@@ -1064,41 +1036,6 @@ object DatasetInterpreter extends Interpreter {
           .map(windowCols => MaterializedDataset(dataset.columns ++ windowCols, outputSchema))
       }
     } yield result
-  }
-
-  private def reduceByKeyHelper[K, V](pairs: Vector[(K, V)], reduce: (V, V) => V): Vector[(K, V)] = {
-    val builder = scala.collection.mutable.HashMap.empty[K, V]
-    pairs.foreach { case (k, v) =>
-      builder.get(k) match {
-        case Some(existing) => builder(k) = reduce(existing, v)
-        case None => builder(k) = v
-      }
-    }
-    builder.toVector
-  }
-
-  private def aggregateByKeyHelper[K, V, R](
-    pairs: Vector[(K, V)],
-    extractors: Vector[V => Any],
-    reducers: Vector[(Any, Any) => Any],
-    assembler: Vector[Any] => R
-  ): Vector[(K, R)] = {
-    val n = extractors.length
-    val builder = scala.collection.mutable.HashMap.empty[K, Array[Any]]
-    pairs.foreach { case (k, v) =>
-      val extracted = extractors.map(_(v))
-      builder.get(k) match {
-        case Some(existing) =>
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < n) {
-            existing(i) = reducers(i)(existing(i), extracted(i))
-            i += 1
-          }
-        case None =>
-          builder(k) = extracted.toArray
-      }
-    }
-    builder.toVector.map { case (k, aggs) => (k, assembler(aggs.toVector)) }
   }
 
   private def globalAggregate[In, Out](

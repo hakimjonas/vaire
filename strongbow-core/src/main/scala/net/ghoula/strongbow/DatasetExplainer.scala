@@ -112,15 +112,6 @@ object DatasetExplainer {
         val cols = windowExprs.map(_.name).mkString(", ")
         s"WithWindow[$cols]\n${explain(parent, indent + 1)}"
 
-      case Dataset.ReduceByKey(parent, _, _, _) =>
-        s"ReduceByKey[func]\n${explain(parent, indent + 1)}"
-
-      case Dataset.AggregateByKey(parent, extractors, _, _, _, _) =>
-        s"AggregateByKey[${extractors.length} aggs]\n${explain(parent, indent + 1)}"
-
-      case Dataset.MapWithKeyExpr(parent, _, _, _, _) =>
-        s"MapWithKeyExpr[expr]\n${explain(parent, indent + 1)}"
-
       case Dataset.Aggregate(parent, aggSpecs, _) =>
         val aggs = aggSpecs.map(_.name).mkString(", ")
         s"Aggregate[aggs=($aggs)]\n${explain(parent, indent + 1)}"

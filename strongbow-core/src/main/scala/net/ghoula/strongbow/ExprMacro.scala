@@ -796,16 +796,6 @@ extension [T](ds: Dataset[T]) {
     Dataset.SortByExpr(ds, expr, colType, ord)
   }
 
-  /** Group by field, compiled to GroupByExpr. */
-  inline def groupByColumn[K](inline f: T => K)(using
-    m: Mirror.ProductOf[T],
-    sk: Schema[K],
-    st: Schema[T]
-  ): Grouped[K, T] = {
-    val (expr, colType) = ExprMacro.column(f)
-    ds.groupByExpr(expr, colType)
-  }
-
   /** Modify fields using .copy() syntax, compiled to SelectExprs at compile time.
     *
     * @example

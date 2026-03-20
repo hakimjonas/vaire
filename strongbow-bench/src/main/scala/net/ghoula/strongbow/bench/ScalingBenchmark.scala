@@ -225,10 +225,17 @@ object ScalingBenchmark {
     given schemaInt: Schema[Int] = Schema.intSchema
     given schemaStrInt: Schema[(String, Int)] = Schema.tuple2Schema[String, Int]
     val groupByResult = benchmarkOperation(scale, rows, "GroupBy", 20, 50) {
-      val grouped = dataset.groupBy(_._1)
-      val reduced = grouped.reduceByKey((a, b) => (a._1, a._2 + b._2))
-      val pairs = reduced.toPairs.collect.toOption.get
-      pairs.length
+      val keyCell: Expr[(String, Int), Any] = Expr.Cell("key", ColumnIndex(0))
+      val valCell: Expr[(String, Int), Int] = Expr.Cell("value", ColumnIndex(1))
+      val aggKeys = Vector(KeySpec[(String, Int), Any]("key", keyCell, ColumnType.StringType))
+      val aggs = Vector(AggSpec("total", Expr.Sum(valCell), ColumnType.IntType))
+      val grouped = dataset.groupByAgg[(String, Int)](aggKeys, aggs)
+      val materialized = DatasetInterpreter
+        .execute(grouped)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
     }
     results += groupByResult
     println(
@@ -300,7 +307,7 @@ object ScalingBenchmark {
       f"${distinctResult.medianMs}%.2f ms (alloc: ${distinctResult.allocatedMB}%.1f MB, heap: ${distinctResult.maxHeapMB}%.0f MB, GC: ${distinctResult.gcCollections})"
     )
 
-    // Join (Grouped key-based join — comparable to Crossbow's column-based join)
+    // Join (expression-based equi-join)
     print("  Join... ")
     val (keys1, values1) = generateData(rows / 2, groups / 2)
     val (keys2, values2) = generateData(rows / 2, groups / 2)
@@ -308,11 +315,15 @@ object ScalingBenchmark {
     val dataset2 = createDataset(keys2, values2)
 
     val joinResult = benchmarkOperation(scale, rows / 2, "Join", 20, 50) {
-      val grouped1 = dataset1.groupBy(_._1)
-      val grouped2 = dataset2.groupBy(_._1)
-      val joined = grouped1.join(grouped2)
-      val pairs = joined.toPairs.collect.toOption.get
-      pairs.length
+      val leftKey: Expr[(String, Int), String] = Expr.Cell("key", ColumnIndex(0))
+      val rightKey: Expr[(String, Int), String] = Expr.Cell("key", ColumnIndex(0))
+      val joined = dataset1.joinOn(dataset2, leftKey, rightKey, ColumnType.StringType, ColumnType.StringType)
+      val materialized = DatasetInterpreter
+        .execute(joined)
+        .getOrElse(
+          throw new RuntimeException("Benchmark execution failed") // scalafix:ok DisableSyntax.throw
+        )
+      materialized.rowCount
     }
     results += joinResult
     println(

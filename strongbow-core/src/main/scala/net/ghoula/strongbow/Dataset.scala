@@ -122,31 +122,6 @@ enum Dataset[T] {
     schema: Schema[Out]
   ) extends Dataset[Out]
 
-  // Grouped elimination: key-value operations flattened into Dataset
-  case ReduceByKey[K, V](
-    parent: Dataset[(K, V)],
-    reduce: (V, V) => V,
-    schemaK: Schema[K],
-    schemaV: Schema[V]
-  ) extends Dataset[(K, V)]
-
-  case AggregateByKey[K, V, R](
-    parent: Dataset[(K, V)],
-    extractors: Vector[V => Any],
-    reducers: Vector[(Any, Any) => Any],
-    assembler: Vector[Any] => R,
-    schemaK: Schema[K],
-    schemaR: Schema[R]
-  ) extends Dataset[(K, R)]
-
-  case MapWithKeyExpr[T, K](
-    parent: Dataset[T],
-    keyExpr: Expr[T, K],
-    keyType: ColumnType,
-    schemaK: Schema[K],
-    schemaT: Schema[T]
-  ) extends Dataset[(K, T)]
-
   // Global aggregation (no grouping keys)
   case Aggregate[T, R](
     parent: Dataset[T],
@@ -237,23 +212,6 @@ object Dataset {
     /** Sort by expression — avoids decoding rows, reads sort keys directly from columns. */
     inline def sortByExpr[K](keyExpr: Expr[T, K], keyType: ColumnType)(using ord: Ordering[K]): Dataset[T] = {
       SortByExpr(ds, keyExpr, keyType, ord)
-    }
-
-    inline def groupBy[K](key: T => K)(using schemaK: Schema[K], schemaT: Schema[T]): Grouped[K, T] = {
-      given Schema[(K, T)] = Schema.tuple2Schema[K, T]
-      Grouped(ds.map(t => (key(t), t)))
-    }
-
-    inline def keyBy[K](key: T => K)(using Schema[K], Schema[T]): Grouped[K, T] = {
-      groupBy(key)
-    }
-
-    /** Group by expression — enables Spark pushdown via native df.groupBy(). */
-    inline def groupByExpr[K](keyExpr: Expr[T, K], keyType: ColumnType)(using
-      schemaK: Schema[K],
-      schemaT: Schema[T]
-    ): Grouped[K, T] = {
-      Grouped(MapWithKeyExpr(ds, keyExpr, keyType, schemaK, schemaT))
     }
 
     /** Select columns by evaluating expressions. */
@@ -468,9 +426,8 @@ object Dataset {
 
     /** GROUP BY with arbitrary keys and aggregations, producing a new Dataset.
       *
-      * Unlike the Grouped path, this uses Expr throughout — fully pushable to Spark. Supports any
-      * number of keys and aggregations (no 2-5 arity limit). HAVING is just `.filter()` on the
-      * result.
+      * Uses Expr throughout — fully pushable to Spark. Supports any number of keys and
+      * aggregations. HAVING is just `.filter()` on the result.
       */
     inline def groupByAgg[Out](
       keys: Vector[KeySpec[T]],

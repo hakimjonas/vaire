@@ -444,21 +444,6 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
     macroResult shouldBe manualResult
   }
 
-  // --- groupByColumn extension tests ---
-
-  "groupByColumn extension" should "produce same groups as groupByExpr" in {
-    val dataset = createDataset(testUsers)
-
-    // Manual
-    val ageCell = Expr.Cell[User, Int]("age", ColumnIndex(2))
-    val manualResult = dataset.groupByExpr(ageCell, ColumnType.IntType).toPairs.collect.toOption.get
-
-    // Macro
-    val macroResult = dataset.groupByColumn(_.age).toPairs.collect.toOption.get
-
-    macroResult should contain theSameElementsAs manualResult
-  }
-
   // --- parity check ---
 
   "macro-compiled expressions" should "match manual Expr construction when evaluated" in {

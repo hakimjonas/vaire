@@ -193,61 +193,9 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         val parent = buildPlan(ww.parent)
         applyWithWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
 
-      case rbk: Dataset.ReduceByKey[k, v] =>
-        val parent = buildPlan(rbk.parent)
-        val values = collectValues(parent).asInstanceOf[Vector[(k, v)]] // scalafix:ok DisableSyntax.asInstanceOf
-        val reduced = sparkReduceByKey(values, rbk.reduce)
-        given Schema[k] = rbk.schemaK
-        given Schema[v] = rbk.schemaV
-        val tupleSchema = Schema.tuple2Schema[k, v]
-        SparkPlan(
-          createDataFrame(reduced, tupleSchema),
-          tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-        )
-
-      case abk: Dataset.AggregateByKey[k, v, r] =>
-        val parent = buildPlan(abk.parent)
-        val values = collectValues(parent).asInstanceOf[Vector[(k, v)]] // scalafix:ok DisableSyntax.asInstanceOf
-        val result = sparkAggregateByKey(values, abk.extractors, abk.reducers, abk.assembler)
-        given Schema[k] = abk.schemaK
-        given Schema[r] = abk.schemaR
-        val tupleSchema = Schema.tuple2Schema[k, r]
-        SparkPlan(
-          createDataFrame(result, tupleSchema),
-          tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-        )
-
       case agg: Dataset.Aggregate[_, T] =>
         val parent = buildPlan(agg.parent)
         applyGlobalAggregate(parent, agg.aggSpecs, agg.resultSchema)
-
-      case mwk: Dataset.MapWithKeyExpr[t, k] =>
-        val parent = buildPlan(mwk.parent)
-        val values = collectValues(parent)
-        val mat = net.ghoula.strongbow.MaterializedDataset.fromVector(values)(using parent.schema) match {
-          case Right(m) => m
-          case Left(err) =>
-            throw new RuntimeException(
-              s"MapWithKeyExpr materialization failed: $err"
-            ) // scalafix:ok DisableSyntax.throw
-        }
-        val keyCol = net.ghoula.strongbow.ExprInterpreter.evalColumn(mwk.keyExpr, mat.columns, mwk.keyType) match {
-          case Right(col) => col
-          case Left(err) =>
-            throw new RuntimeException(s"MapWithKeyExpr key eval failed: $err") // scalafix:ok DisableSyntax.throw
-        }
-        val pairs = values.indices
-          .map(i =>
-            (keyCol.getValue(i).asInstanceOf[k], values(i)) // scalafix:ok DisableSyntax.asInstanceOf
-          )
-          .toVector
-        given Schema[k] = mwk.schemaK
-        given Schema[t] = mwk.schemaT
-        val tupleSchema = Schema.tuple2Schema[k, t]
-        SparkPlan(
-          createDataFrame(pairs, tupleSchema),
-          tupleSchema.asInstanceOf[Schema[T]] // scalafix:ok DisableSyntax.asInstanceOf
-        )
     }
   }
 
@@ -662,41 +610,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
 
     SparkPlan(df, schema)
-  }
-
-  private def sparkReduceByKey[K, V](pairs: Vector[(K, V)], reduce: (V, V) => V): Vector[(K, V)] = {
-    val builder = scala.collection.mutable.HashMap.empty[K, V]
-    pairs.foreach { case (k, v) =>
-      builder.get(k) match {
-        case Some(existing) => builder(k) = reduce(existing, v)
-        case None => builder(k) = v
-      }
-    }
-    builder.toVector
-  }
-
-  private def sparkAggregateByKey[K, V, R](
-    pairs: Vector[(K, V)],
-    extractors: Vector[V => Any],
-    reducers: Vector[(Any, Any) => Any],
-    assembler: Vector[Any] => R
-  ): Vector[(K, R)] = {
-    val n = extractors.length
-    val builder = scala.collection.mutable.HashMap.empty[K, Array[Any]]
-    pairs.foreach { case (k, v) =>
-      val extracted = extractors.map(_(v))
-      builder.get(k) match {
-        case Some(existing) =>
-          var i = 0 // scalafix:ok DisableSyntax.var
-          while (i < n) {
-            existing(i) = reducers(i)(existing(i), extracted(i))
-            i += 1
-          }
-        case None =>
-          builder(k) = extracted.toArray
-      }
-    }
-    builder.toVector.map { case (k, aggs) => (k, assembler(aggs.toVector)) }
   }
 
   private[spark] def createDataFrame[T](values: Vector[T], schema: Schema[T]): DataFrame = {

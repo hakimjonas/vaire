@@ -20,15 +20,11 @@ package net.ghoula.strongbow
   * // Expression DSL
   * val expr: Expr[Int, Boolean] =
   *   Expr.cell("age", ColumnIndex(0)) > Expr.const(18)
-  *
-  * // Grouped operations
-  * val grouped: Grouped[String, Int] =
-  *   dataset.groupBy(identity)
   *   }}}
   */
 object prelude {
   // Core types and companion objects
-  export net.ghoula.strongbow.{Dataset, Grouped, Expr, Column, ColumnType, Schema}
+  export net.ghoula.strongbow.{Dataset, Expr, Column, ColumnType, Schema}
 
   // Materialized result
   export net.ghoula.strongbow.MaterializedDataset

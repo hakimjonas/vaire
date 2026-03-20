@@ -31,22 +31,6 @@ class SparkWorkflowSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     sparkResult shouldBe inMemory
   }
 
-  "groupBy -> reduceByKey -> values -> sort" should "produce same results" in {
-    val col = Column.int(Array(1, 2, 3, 1, 2, 3, 1))
-    val ds = Dataset
-      .fromColumns(Vector(col), Schema.intSchema)
-      .toOption
-      .get
-      .groupBy(identity)
-      .reduceByKey(_ + _)
-      .values
-      .sort
-
-    val inMemory = DatasetInterpreter.execute(ds).map(_.toVectorUnsafe)
-    val sparkResult = sparkInterpreter.execute(ds).map(_.toVectorUnsafe)
-    sparkResult shouldBe inMemory
-  }
-
   "union -> distinct -> sort" should "produce same results" in {
     val col1 = Column.int(Array(1, 2, 3, 4))
     val col2 = Column.int(Array(3, 4, 5, 6))

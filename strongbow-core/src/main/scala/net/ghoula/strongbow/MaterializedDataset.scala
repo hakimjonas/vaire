@@ -11,7 +11,7 @@ import net.ghoula.strongbow.errors.ExecutionError
   *   The row type decoded from columns
   */
 final case class MaterializedDataset[T](
-  columns: Vector[Column],
+  columns: Vector[Column[?]],
   schema: Schema[T]
 ) {
   require(columns.nonEmpty, "MaterializedDataset cannot be empty")
@@ -27,7 +27,7 @@ final case class MaterializedDataset[T](
   def columnCount: Int = columns.length
 
   /** Get a column by index. */
-  def column(idx: Int): Column = columns(idx)
+  def column(idx: Int): Column[?] = columns(idx)
 
   /** Get all rows as a Vector. Decodes each row using the schema. */
   def toVector: Vector[Either[errors.DecodeError, T]] = {
@@ -66,7 +66,7 @@ final case class MaterializedDataset[T](
     val newColumnsOrError = if (encodedRows.isEmpty) {
       Right(Vector.empty)
     } else {
-      (0 until schemaU.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+      (0 until schemaU.columnCount).foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
         (acc, colIdx) =>
           acc.flatMap { cols =>
             val values = encodedRows.map(_(colIdx))
@@ -113,7 +113,7 @@ object MaterializedDataset {
     val columnsOrError = if (encodedRows.isEmpty) {
       Right(Vector.fill(schema.columnCount)(Column.empty(schema.columnTypes.head)))
     } else {
-      (0 until schema.columnCount).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+      (0 until schema.columnCount).foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
         (acc, colIdx) =>
           acc.flatMap { cols =>
             val colValues = encodedRows.map(_(colIdx))

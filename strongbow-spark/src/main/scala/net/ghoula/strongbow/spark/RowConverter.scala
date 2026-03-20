@@ -71,7 +71,7 @@ object RowConverter {
     * Uses typed Row accessors (getInt, getLong, getDouble, etc.) to read directly into primitive
     * arrays. Null values are tracked via BitSet, matching Column's SQL NULL contract.
     */
-  private def extractColumn(rows: Array[Row], colIdx: Int, ct: ColumnType, rowCount: Int): Column = {
+  private def extractColumn(rows: Array[Row], colIdx: Int, ct: ColumnType, rowCount: Int): Column[?] = {
     ct match {
       case ColumnType.IntType =>
         val data = new Array[Int](rowCount)

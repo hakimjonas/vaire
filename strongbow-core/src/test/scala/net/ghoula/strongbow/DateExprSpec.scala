@@ -7,7 +7,7 @@ import net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
 
 class DateExprSpec extends AnyFlatSpec with Matchers {
 
-  private def makeDateColumn(dates: Date*): Column = {
+  private def makeDateColumn(dates: Date*): Column[Date] = {
     Column.date(dates.map(_.toEpochDay.toInt).toArray)
   }
 

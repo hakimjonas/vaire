@@ -31,7 +31,7 @@ object DataFrameBuilder {
   /** Build a DataFrame from columns and schema directly. */
   def fromColumns[T](
     spark: SparkSession,
-    columns: Vector[SBColumn],
+    columns: Vector[SBColumn[?]],
     schema: Schema[T]
   ): DataFrame = {
     val structType = SchemaConverter.toStructType(schema)

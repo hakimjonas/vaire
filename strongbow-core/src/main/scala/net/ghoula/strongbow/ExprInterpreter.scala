@@ -25,7 +25,7 @@ object ExprInterpreter {
     */
   def eval[Row, A](
     expr: Expr[Row, A],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowIdx: RowIndex
   ): Either[ExecutionError, A] = {
     (expr: @unchecked) match {
@@ -668,7 +668,7 @@ object ExprInterpreter {
     }
   }
 
-  private def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column]): ColumnType = {
+  private[strongbow] def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]]): ColumnType = {
     (expr: @unchecked) match {
       case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
       case c: Expr.Const[_, _] =>
@@ -762,9 +762,9 @@ object ExprInterpreter {
     */
   def evalColumn[Row, A](
     expr: Expr[Row, A],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     columnType: ColumnType
-  ): Either[ExecutionError, Column] = {
+  ): Either[ExecutionError, Column[?]] = {
     if (columns.isEmpty || columns.head.length == 0) {
       return Right(Column.empty(columnType)) // scalafix:ok DisableSyntax.return
     }
@@ -2430,9 +2430,9 @@ object ExprInterpreter {
   private def vectorizedIntBinOp[Row](
     left: Expr[Row, Int],
     right: Expr[Row, Int],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Int, Int) => Int): Either[ExecutionError, Column] = {
+  )(op: (Int, Int) => Int): Either[ExecutionError, Column[?]] = {
     for {
       leftCol <- evalColumn(left, columns, ColumnType.IntType)
       rightCol <- evalColumn(right, columns, ColumnType.IntType)
@@ -2449,7 +2449,7 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column] = {
+  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] = {
     val out = new Array[Int](rowCount)
     var i = 0 // scalafix:ok DisableSyntax.var
     while (i < rowCount) {
@@ -2463,9 +2463,9 @@ object ExprInterpreter {
   private def vectorizedLongBinOp[Row](
     left: Expr[Row, Long],
     right: Expr[Row, Long],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Long, Long) => Long): Either[ExecutionError, Column] = {
+  )(op: (Long, Long) => Long): Either[ExecutionError, Column[?]] = {
     for {
       leftCol <- evalColumn(left, columns, ColumnType.LongType)
       rightCol <- evalColumn(right, columns, ColumnType.LongType)
@@ -2486,7 +2486,7 @@ object ExprInterpreter {
     left: Array[Long],
     right: Array[Long],
     rowCount: Int
-  ): Either[ExecutionError, Column] = {
+  ): Either[ExecutionError, Column[?]] = {
     val out = new Array[Long](rowCount)
     var i = 0 // scalafix:ok DisableSyntax.var
     while (i < rowCount) {
@@ -2500,9 +2500,9 @@ object ExprInterpreter {
   private def vectorizedDoubleBinOp[Row](
     left: Expr[Row, Double],
     right: Expr[Row, Double],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Double, Double) => Double): Either[ExecutionError, Column] = {
+  )(op: (Double, Double) => Double): Either[ExecutionError, Column[?]] = {
     for {
       leftCol <- evalColumn(left, columns, ColumnType.DoubleType)
       rightCol <- evalColumn(right, columns, ColumnType.DoubleType)
@@ -2523,7 +2523,7 @@ object ExprInterpreter {
     left: Array[Double],
     right: Array[Double],
     rowCount: Int
-  ): Either[ExecutionError, Column] = {
+  ): Either[ExecutionError, Column[?]] = {
     val out = new Array[Double](rowCount)
     var i = 0 // scalafix:ok DisableSyntax.var
     while (i < rowCount) {
@@ -2537,14 +2537,14 @@ object ExprInterpreter {
   private def typedComparison[Row, A](
     left: Expr[Row, A],
     right: Expr[Row, A],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
   )(
     intCmp: (Int, Int) => Boolean,
     longCmp: (Long, Long) => Boolean,
     doubleCmp: (Double, Double) => Boolean,
     stringCmp: (String, String) => Boolean
-  ): Either[ExecutionError, Column] = {
+  ): Either[ExecutionError, Column[?]] = {
     val opType = inferExprColumnType(left, columns)
     for {
       leftCol <- evalColumn(left, columns, opType)
@@ -2585,9 +2585,9 @@ object ExprInterpreter {
   private def equalityComparison[Row, A](
     left: Expr[Row, A],
     right: Expr[Row, A],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
-  )(cmp: (Any, Any) => Boolean): Either[ExecutionError, Column] = {
+  )(cmp: (Any, Any) => Boolean): Either[ExecutionError, Column[?]] = {
     val opType = inferExprColumnType(left, columns)
     for {
       leftCol <- evalColumn(left, columns, opType)
@@ -2603,7 +2603,11 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column] = {
+  private def vectorizedIntMod(
+    left: Array[Int],
+    right: Array[Int],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] = {
     val out = new Array[Int](rowCount)
     var i = 0 // scalafix:ok DisableSyntax.var
     while (i < rowCount) {
@@ -2618,7 +2622,7 @@ object ExprInterpreter {
     left: Array[Long],
     right: Array[Long],
     rowCount: Int
-  ): Either[ExecutionError, Column] = {
+  ): Either[ExecutionError, Column[?]] = {
     val out = new Array[Long](rowCount)
     var i = 0 // scalafix:ok DisableSyntax.var
     while (i < rowCount) {
@@ -2631,9 +2635,9 @@ object ExprInterpreter {
 
   private def vectorizedDoubleUnaryOp[Row](
     expr: Expr[Row, Double],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
-  )(op: Double => Double): Either[ExecutionError, Column] = {
+  )(op: Double => Double): Either[ExecutionError, Column[?]] = {
     evalColumn(expr, columns, ColumnType.DoubleType).map {
       case Column.DoubleColumn(data, nulls) =>
         val out = new Array[Double](rowCount)
@@ -2647,9 +2651,9 @@ object ExprInterpreter {
 
   private def vectorizedStringHash[Row](
     expr: Expr[Row, String],
-    columns: Vector[Column],
+    columns: Vector[Column[?]],
     rowCount: Int
-  )(algorithm: String): Either[ExecutionError, Column] = {
+  )(algorithm: String): Either[ExecutionError, Column[?]] = {
     evalColumn(expr, columns, ColumnType.StringType).map {
       case Column.StringColumn(data, nulls) =>
         val digest = java.security.MessageDigest.getInstance(algorithm).nn
@@ -2684,7 +2688,7 @@ object ExprInterpreter {
     */
   def evalAggregation[Row, A](
     expr: Expr[Row, A],
-    columns: Vector[Column]
+    columns: Vector[Column[?]]
   ): Either[ExecutionError, A] = {
     if (columns.isEmpty || columns.head.length == 0) {
       (expr: @unchecked) match {
@@ -3238,7 +3242,7 @@ object ExprInterpreter {
     */
   private def aggregateDoubleExpr[Row](
     subExpr: Expr[Row, Double],
-    columns: Vector[Column]
+    columns: Vector[Column[?]]
   )(f: (Array[Double], BitSet) => Double): Either[ExecutionError, Double] = {
     evalColumn(subExpr, columns, ColumnType.DoubleType).map { col =>
       col match {

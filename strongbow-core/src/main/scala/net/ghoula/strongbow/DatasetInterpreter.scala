@@ -2,7 +2,6 @@ package net.ghoula.strongbow
 
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
-import net.ghoula.strongbow.types.RowIndex
 
 /** Main interpreter for Dataset execution.
   *
@@ -151,9 +150,7 @@ object DatasetInterpreter extends Interpreter {
         execute(srtBy.parent).flatMap(parent => sortBy(parent, srtBy.key, srtBy.ordering))
 
       case srtExpr: Dataset.SortByExpr[T, _] =>
-        execute(srtExpr.parent).flatMap(parent =>
-          sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType, srtExpr.ordering)
-        )
+        execute(srtExpr.parent).flatMap(parent => sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType))
 
       case samp: Dataset.Sample[T] =>
         execute(samp.parent).map { parent =>
@@ -174,13 +171,11 @@ object DatasetInterpreter extends Interpreter {
         execute(persist.parent)
 
       case cp: Dataset.Checkpoint[T] =>
-        // Materialize into fresh dataset (truncates logical plan)
         execute(cp.parent).flatMap { parent =>
           MaterializedDataset.fromVector(parent.toVectorUnsafe)(using parent.schema)
         }
 
       case reb: Dataset.Rebalance[T] =>
-        // No-op in-memory: no partitions to rebalance
         execute(reb.parent)
 
       case gba: Dataset.GroupByAgg[_, T] =>
@@ -225,16 +220,11 @@ object DatasetInterpreter extends Interpreter {
 
       case mwk: Dataset.MapWithKeyExpr[t, k] =>
         execute(mwk.parent).flatMap { parent =>
-          ExprInterpreter.evalColumn(mwk.keyExpr, parent.columns, mwk.keyType).flatMap { keyCol =>
-            val rows = parent.toVectorUnsafe
-            val pairs = rows.indices.iterator
-              .map(i =>
-                (keyCol.getValue(i).asInstanceOf[k], rows(i)) // scalafix:ok DisableSyntax.asInstanceOf
-              )
-              .toVector
+          ExprInterpreter.evalColumn(mwk.keyExpr, parent.columns, mwk.keyType).map { keyCol =>
             given Schema[k] = mwk.schemaK
             given Schema[t] = mwk.schemaT
-            MaterializedDataset.fromVector(pairs)(using Schema.tuple2Schema[k, t])
+            val tupleSchema = Schema.tuple2Schema[k, t]
+            MaterializedDataset(Vector(keyCol) ++ parent.columns, tupleSchema)
           }
         }
 
@@ -307,7 +297,7 @@ object DatasetInterpreter extends Interpreter {
     } else {
       left.columns
         .zip(right.columns)
-        .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { case (acc, (leftCol, rightCol)) =>
+        .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { case (acc, (leftCol, rightCol)) =>
           acc.flatMap { cols =>
             leftCol.concat(rightCol).map(cols :+ _)
           }
@@ -343,43 +333,40 @@ object DatasetInterpreter extends Interpreter {
   private def sortByExpr[T, K](
     dataset: MaterializedDataset[T],
     keyExpr: Expr[T, K],
-    keyType: ColumnType,
-    ord: Ordering[K]
+    keyType: ColumnType
   ): Either[ExecutionError, MaterializedDataset[T]] = {
     ExprInterpreter.evalColumn(keyExpr, dataset.columns, keyType).map { keyCol =>
       val rowCount = dataset.rowCount
-      val indices = keyCol match {
-        case Column.IntColumn(data, _) =>
-          val intOrd = ord.asInstanceOf[Ordering[Int]] // scalafix:ok DisableSyntax.asInstanceOf
-          (0 until rowCount).sortWith((a, b) => intOrd.lt(data(a), data(b))).toArray
-        case Column.LongColumn(data, _) =>
-          val longOrd = ord.asInstanceOf[Ordering[Long]] // scalafix:ok DisableSyntax.asInstanceOf
-          (0 until rowCount).sortWith((a, b) => longOrd.lt(data(a), data(b))).toArray
-        case Column.DoubleColumn(data, _) =>
-          val dblOrd = ord.asInstanceOf[Ordering[Double]] // scalafix:ok DisableSyntax.asInstanceOf
-          (0 until rowCount).sortWith((a, b) => dblOrd.lt(data(a), data(b))).toArray
-        case Column.StringColumn(data, _) =>
-          val strOrd = ord.asInstanceOf[Ordering[String]] // scalafix:ok DisableSyntax.asInstanceOf
-          (0 until rowCount).sortWith((a, b) => strOrd.lt(data(a), data(b))).toArray
-        case _ =>
-          (0 until rowCount).sortWith { (a, b) =>
-            ord.lt(
-              keyCol.getValue(a).asInstanceOf[K],
-              keyCol.getValue(b).asInstanceOf[K]
-            ) // scalafix:ok DisableSyntax.asInstanceOf
-          }.toArray
-      }
+      val indices = sortIndicesByColumn(keyCol, rowCount)
       val newColumns = dataset.columns.map(_.slice(indices))
       MaterializedDataset(newColumns, dataset.schema)
     }
   }
+
+  private def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] =
+    col match {
+      case Column.IntColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
+      case Column.LongColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
+      case Column.DoubleColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => java.lang.Double.compare(data(a), data(b)) < 0).toArray
+      case Column.StringColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a).compareTo(data(b)) < 0).toArray
+      case Column.DateColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
+      case Column.BooleanColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => !data(a) && data(b)).toArray
+      case Column.AnyColumn(data, _) =>
+        (0 until rowCount).sortWith((a, b) => String.valueOf(data(a)).compareTo(String.valueOf(data(b))) < 0).toArray
+    }
 
   private def selectExpressions[In, Out](
     dataset: MaterializedDataset[In],
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
     outputSchema: Schema[Out]
   ): Either[ExecutionError, MaterializedDataset[Out]] = {
-    val newColumnsOrError = exprs.foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+    val newColumnsOrError = exprs.foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
       case (acc, (_, expr, columnType)) =>
         acc.flatMap { cols =>
           ExprInterpreter.evalColumn(expr, dataset.columns, columnType).map(cols :+ _)
@@ -553,7 +540,7 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)(using left.schema)
   }
 
-  private def buildKeyIndex(keyCol: Column, rowCount: Int): scala.collection.mutable.HashMap[Any, Vector[Int]] = {
+  private def buildKeyIndex(keyCol: Column[?], rowCount: Int): scala.collection.mutable.HashMap[Any, Vector[Int]] = {
     val index = scala.collection.mutable.HashMap.empty[Any, Vector[Int]]
     (0 until rowCount).foreach { i =>
       val key = keyCol.getValue(i)
@@ -570,7 +557,7 @@ object DatasetInterpreter extends Interpreter {
     right: MaterializedDataset[B],
     leftIndices: Array[Int],
     rightIndices: Array[Int]
-  ): (Vector[Column], Schema[(A, B)]) = {
+  ): (Vector[Column[?]], Schema[(A, B)]) = {
     val leftCols = left.columns.map(_.slice(leftIndices))
     val rightCols = right.columns.map(_.slice(rightIndices))
     val schema = Schema.tuple2Schema[A, B](using left.schema, right.schema)
@@ -764,37 +751,31 @@ object DatasetInterpreter extends Interpreter {
       return Right(MaterializedDataset(emptyCols, outputSchema)) // scalafix:ok DisableSyntax.return
     }
 
-    // Evaluate key columns
-    val keyColsOrError = keySpecs.foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+    val keyColsOrError = keySpecs.foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
       case (acc, spec) =>
         acc.flatMap(cols => ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ _))
     }
 
     keyColsOrError.flatMap { keyCols =>
-      // Build groups: composite key -> row indices
       val groups = scala.collection.mutable.LinkedHashMap.empty[Vector[Any], scala.collection.mutable.ArrayBuffer[Int]]
       (0 until rowCount).foreach { i =>
         val key = keyCols.map(_.getValue(i))
         groups.getOrElseUpdate(key, scala.collection.mutable.ArrayBuffer.empty[Int]) += i
       }
 
-      // For each group, evaluate aggregations
       val groupEntries = groups.toVector
 
-      // Build key output columns
       val keyOutputCols = keySpecs.zipWithIndex.map { case (spec, ki) =>
         val values = groupEntries.map(_._1(ki))
         Column.fromValues(values, spec.columnType)
       }
 
-      // Build agg output columns
       val aggOutputCols = aggSpecs.map { spec =>
         val aggValues = groupEntries.map { case (_, rowIndices) =>
           val groupIndices = rowIndices.toArray
           val groupColumns = dataset.columns.map(_.slice(groupIndices))
           ExprInterpreter.evalAggregation(spec.expr, groupColumns)
         }
-        // Check for errors
         val firstError = aggValues.collectFirst { case Left(err) => err }
         firstError match {
           case Some(err) => Left(err)
@@ -804,9 +785,8 @@ object DatasetInterpreter extends Interpreter {
         }
       }
 
-      // Combine all columns
       val allColsResult =
-        (keyOutputCols ++ aggOutputCols).foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
+        (keyOutputCols ++ aggOutputCols).foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
           case (acc, colOrErr) => acc.flatMap(cols => colOrErr.map(cols :+ _))
         }
 
@@ -821,13 +801,13 @@ object DatasetInterpreter extends Interpreter {
     val rowCount = dataset.rowCount
     if (rowCount <= 1) return Right(dataset) // scalafix:ok DisableSyntax.return
 
-    // Evaluate all sort key columns
-    val keyColsOrError = sortKeys.foldLeft[Either[ExecutionError, Vector[(Column, SortSpec[T])]]](Right(Vector.empty)) {
-      case (acc, spec) =>
-        acc.flatMap(cols =>
-          ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ (_, spec))
-        )
-    }
+    val keyColsOrError =
+      sortKeys.foldLeft[Either[ExecutionError, Vector[(Column[?], SortSpec[T])]]](Right(Vector.empty)) {
+        case (acc, spec) =>
+          acc.flatMap(cols =>
+            ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ (_, spec))
+          )
+      }
 
     keyColsOrError.map { keyCols =>
       val indices = (0 until rowCount).sortWith { (a, b) =>
@@ -835,7 +815,7 @@ object DatasetInterpreter extends Interpreter {
         var result = 0 // scalafix:ok DisableSyntax.var
         while (i < keyCols.length && result == 0) {
           val (col, spec) = keyCols(i)
-          result = compareColumnValues(col, a, b, spec.ordering)
+          result = compareColumnValues(col, a, b)
           if (!spec.ascending) result = -result
           i += 1
         }
@@ -847,55 +827,55 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Compare two column values using typed Ordering.
+  /** Compare two column values at indices a and b.
     *
-    * Uses Column pattern matching with typed fast paths, replicating the existing `sortByExpr`
-    * pattern. The asInstanceOf casts are sound because ColumnType and Column are in sync, and the
-    * Ordering was summoned for the correct type at construction.
+    * Uses GADT Column[A] pattern matching to dispatch to concrete typed comparisons. Each branch
+    * uses the JDK compare method for the matched primitive type, requiring zero casts.
     */
-  private def compareColumnValues[K](col: Column, a: Int, b: Int, ordering: Ordering[K]): Int =
+  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int =
     col match {
       case Column.IntColumn(data, nulls) =>
         val na = nulls.contains(a); val nb = nulls.contains(b)
         if (na && nb) 0
         else if (na) -1
         else if (nb) 1
-        else ordering.asInstanceOf[Ordering[Int]].compare(data(a), data(b)) // scalafix:ok DisableSyntax.asInstanceOf
+        else Integer.compare(data(a), data(b))
       case Column.LongColumn(data, nulls) =>
         val na = nulls.contains(a); val nb = nulls.contains(b)
         if (na && nb) 0
         else if (na) -1
         else if (nb) 1
-        else ordering.asInstanceOf[Ordering[Long]].compare(data(a), data(b)) // scalafix:ok DisableSyntax.asInstanceOf
+        else java.lang.Long.compare(data(a), data(b))
       case Column.DoubleColumn(data, nulls) =>
         val na = nulls.contains(a); val nb = nulls.contains(b)
         if (na && nb) 0
         else if (na) -1
         else if (nb) 1
-        else ordering.asInstanceOf[Ordering[Double]].compare(data(a), data(b)) // scalafix:ok DisableSyntax.asInstanceOf
+        else java.lang.Double.compare(data(a), data(b))
       case Column.StringColumn(data, nulls) =>
         val na = nulls.contains(a); val nb = nulls.contains(b)
         if (na && nb) 0
         else if (na) -1
         else if (nb) 1
-        else ordering.asInstanceOf[Ordering[String]].compare(data(a), data(b)) // scalafix:ok DisableSyntax.asInstanceOf
+        else data(a).compareTo(data(b))
       case Column.DateColumn(data, nulls) =>
         val na = nulls.contains(a); val nb = nulls.contains(b)
         if (na && nb) 0
         else if (na) -1
         else if (nb) 1
-        else ordering.asInstanceOf[Ordering[Int]].compare(data(a), data(b)) // scalafix:ok DisableSyntax.asInstanceOf
-      case _ =>
-        val va = col.getValue(a)
-        val vb = col.getValue(b)
-        if (Option(va).isEmpty && Option(vb).isEmpty) 0
-        else if (Option(va).isEmpty) -1
-        else if (Option(vb).isEmpty) 1
-        else
-          ordering.compare(
-            va.asInstanceOf[K], // scalafix:ok DisableSyntax.asInstanceOf
-            vb.asInstanceOf[K] // scalafix:ok DisableSyntax.asInstanceOf
-          )
+        else Integer.compare(data(a), data(b))
+      case Column.BooleanColumn(data, nulls) =>
+        val na = nulls.contains(a); val nb = nulls.contains(b)
+        if (na && nb) 0
+        else if (na) -1
+        else if (nb) 1
+        else java.lang.Boolean.compare(data(a), data(b))
+      case Column.AnyColumn(data, nulls) =>
+        val na = nulls.contains(a); val nb = nulls.contains(b)
+        if (na && nb) 0
+        else if (na) -1
+        else if (nb) 1
+        else Ordering.String.compare(data(a).toString, data(b).toString)
     }
 
   private def leftSemiJoinOnExpr[A, B, K](
@@ -937,15 +917,14 @@ object DatasetInterpreter extends Interpreter {
       return Right(MaterializedDataset(parentCols ++ windowCols, outputSchema)) // scalafix:ok DisableSyntax.return
     }
 
-    // Evaluate partition-by columns
-    val partColsOrError = windowSpec.partitionBy.foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) {
-      case (acc, spec) =>
-        acc.flatMap(cols => ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ _))
-    }
+    val partColsOrError =
+      windowSpec.partitionBy.foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
+        case (acc, spec) =>
+          acc.flatMap(cols => ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ _))
+      }
 
-    // Evaluate order-by columns (with typed SortSpec)
     val orderColsOrError =
-      windowSpec.orderBy.foldLeft[Either[ExecutionError, Vector[(Column, SortSpec[In])]]](Right(Vector.empty)) {
+      windowSpec.orderBy.foldLeft[Either[ExecutionError, Vector[(Column[?], SortSpec[In])]]](Right(Vector.empty)) {
         case (acc, spec) =>
           acc.flatMap(cols =>
             ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ (_, spec))
@@ -956,7 +935,6 @@ object DatasetInterpreter extends Interpreter {
       partCols <- partColsOrError
       orderCols <- orderColsOrError
       result <- {
-        // Build partitions: composite key -> row indices
         val partitions =
           scala.collection.mutable.LinkedHashMap.empty[Vector[Any], scala.collection.mutable.ArrayBuffer[Int]]
         (0 until rowCount).foreach { i =>
@@ -964,14 +942,13 @@ object DatasetInterpreter extends Interpreter {
           partitions.getOrElseUpdate(key, scala.collection.mutable.ArrayBuffer.empty[Int]) += i
         }
 
-        // Sort rows within each partition using typed ordering
         val sortedPartitions = partitions.toVector.map { case (key, indices) =>
           val sorted = indices.sortWith { (a, b) =>
             var i = 0 // scalafix:ok DisableSyntax.var
             var result = 0 // scalafix:ok DisableSyntax.var
             while (i < orderCols.length && result == 0) {
               val (col, spec) = orderCols(i)
-              result = compareColumnValues(col, a, b, spec.ordering)
+              result = compareColumnValues(col, a, b)
               if (!spec.ascending) result = -result
               i += 1
             }
@@ -980,7 +957,6 @@ object DatasetInterpreter extends Interpreter {
           (key, sorted)
         }
 
-        // Evaluate window functions: produce per-row values
         val windowResultCols = windowExprs.map { spec =>
           val resultArray = new Array[Any](rowCount)
           var exprError: Option[ExecutionError] = None // scalafix:ok DisableSyntax.var
@@ -996,6 +972,7 @@ object DatasetInterpreter extends Interpreter {
 
               case _: Expr.Rank[_] =>
                 var pos = 0 // scalafix:ok DisableSyntax.var
+                var lastRank = 1 // scalafix:ok DisableSyntax.var
                 while (pos < partSize) {
                   val rank =
                     if (pos == 0) 1
@@ -1005,10 +982,10 @@ object DatasetInterpreter extends Interpreter {
                       val same = orderCols.forall { case (col, _) =>
                         java.util.Objects.equals(col.getValue(prev), col.getValue(curr))
                       }
-                      if (same)
-                        resultArray(sortedIndices(pos - 1)).asInstanceOf[Int] // scalafix:ok DisableSyntax.asInstanceOf
+                      if (same) lastRank
                       else pos + 1
                     }
+                  lastRank = rank
                   resultArray(sortedIndices(pos)) = rank
                   pos += 1
                 }
@@ -1032,37 +1009,41 @@ object DatasetInterpreter extends Interpreter {
               case lag: Expr.Lag[_, _] =>
                 val offset = lag.offset
                 val defaultVal = lag.default.getOrElse(null) // scalafix:ok DisableSyntax.null
-                val innerExpr = lag.expr
-                var pos = 0 // scalafix:ok DisableSyntax.var
-                while (pos < partSize) {
-                  val srcPos = pos - offset
-                  if (srcPos >= 0 && srcPos < partSize) {
-                    val srcRow = sortedIndices(srcPos)
-                    resultArray(sortedIndices(pos)) = ExprInterpreter
-                      .eval(innerExpr, dataset.columns, RowIndex(srcRow))
-                      .getOrElse(defaultVal)
-                  } else {
-                    resultArray(sortedIndices(pos)) = defaultVal
-                  }
-                  pos += 1
+                val innerType = ExprInterpreter.inferExprColumnType(lag.expr, dataset.columns)
+                ExprInterpreter.evalColumn(lag.expr, dataset.columns, innerType) match {
+                  case Right(innerCol) =>
+                    var pos = 0 // scalafix:ok DisableSyntax.var
+                    while (pos < partSize) {
+                      val srcPos = pos - offset
+                      if (srcPos >= 0 && srcPos < partSize) {
+                        resultArray(sortedIndices(pos)) = innerCol.getValue(sortedIndices(srcPos))
+                      } else {
+                        resultArray(sortedIndices(pos)) = defaultVal
+                      }
+                      pos += 1
+                    }
+                  case Left(err) =>
+                    exprError = Some(err)
                 }
 
               case lead: Expr.Lead[_, _] =>
                 val offset = lead.offset
                 val defaultVal = lead.default.getOrElse(null) // scalafix:ok DisableSyntax.null
-                val innerExpr = lead.expr
-                var pos = 0 // scalafix:ok DisableSyntax.var
-                while (pos < partSize) {
-                  val srcPos = pos + offset
-                  if (srcPos >= 0 && srcPos < partSize) {
-                    val srcRow = sortedIndices(srcPos)
-                    resultArray(sortedIndices(pos)) = ExprInterpreter
-                      .eval(innerExpr, dataset.columns, RowIndex(srcRow))
-                      .getOrElse(defaultVal)
-                  } else {
-                    resultArray(sortedIndices(pos)) = defaultVal
-                  }
-                  pos += 1
+                val innerType = ExprInterpreter.inferExprColumnType(lead.expr, dataset.columns)
+                ExprInterpreter.evalColumn(lead.expr, dataset.columns, innerType) match {
+                  case Right(innerCol) =>
+                    var pos = 0 // scalafix:ok DisableSyntax.var
+                    while (pos < partSize) {
+                      val srcPos = pos + offset
+                      if (srcPos >= 0 && srcPos < partSize) {
+                        resultArray(sortedIndices(pos)) = innerCol.getValue(sortedIndices(srcPos))
+                      } else {
+                        resultArray(sortedIndices(pos)) = defaultVal
+                      }
+                      pos += 1
+                    }
+                  case Left(err) =>
+                    exprError = Some(err)
                 }
 
               case other =>
@@ -1076,9 +1057,8 @@ object DatasetInterpreter extends Interpreter {
           }
         }
 
-        // Collect all window columns, checking for errors
         windowResultCols
-          .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { case (acc, colOrErr) =>
+          .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { case (acc, colOrErr) =>
             acc.flatMap(cols => colOrErr.map(cols :+ _))
           }
           .map(windowCols => MaterializedDataset(dataset.columns ++ windowCols, outputSchema))
@@ -1138,7 +1118,7 @@ object DatasetInterpreter extends Interpreter {
     }
 
     aggOutputCols
-      .foldLeft[Either[ExecutionError, Vector[Column]]](Right(Vector.empty)) { case (acc, colOrErr) =>
+      .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { case (acc, colOrErr) =>
         acc.flatMap(cols => colOrErr.map(cols :+ _))
       }
       .map(cols => MaterializedDataset(cols, outputSchema))

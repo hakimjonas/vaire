@@ -12,7 +12,7 @@ import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
   *   The row type of this dataset
   */
 enum Dataset[T] {
-  case Root[T](columns: Vector[Column], schema: Schema[T]) extends Dataset[T]
+  case Root[T](columns: Vector[Column[?]], schema: Schema[T]) extends Dataset[T]
   case Filter[T](parent: Dataset[T], predicate: Expr[T, Boolean]) extends Dataset[T]
   case Map[A, B](parent: Dataset[A], func: A => B, schema: Schema[B]) extends Dataset[B]
   case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B], schema: Schema[B]) extends Dataset[B]
@@ -163,7 +163,7 @@ object Dataset {
     * on Left.
     */
   def fromColumns[T](
-    cols: Vector[Column],
+    cols: Vector[Column[?]],
     schema: Schema[T]
   ): Either[NonEmptyList[SchemaError], Dataset[T]] = {
     val validations = List(
@@ -181,7 +181,7 @@ object Dataset {
   }
 
   /** Unsafe constructor for internal use when validation already done. */
-  private[strongbow] inline def unsafeRoot[T](cols: Vector[Column], schema: Schema[T]): Dataset[T] = {
+  private[strongbow] inline def unsafeRoot[T](cols: Vector[Column[?]], schema: Schema[T]): Dataset[T] = {
     Root(cols, schema)
   }
 
@@ -512,7 +512,7 @@ object Dataset {
   }
 
   private def validateColumnCount[T](
-    cols: Vector[Column],
+    cols: Vector[Column[?]],
     schema: Schema[T]
   ): Either[List[SchemaError], Unit] = {
     if (cols.length == schema.columnCount) {
@@ -523,7 +523,7 @@ object Dataset {
   }
 
   private def validateColumnTypes[T](
-    cols: Vector[Column],
+    cols: Vector[Column[?]],
     schema: Schema[T]
   ): Either[List[SchemaError], Unit] = {
     val mismatches = cols.zip(schema.columnTypes).zipWithIndex.collect {
@@ -539,7 +539,7 @@ object Dataset {
   }
 
   private def validateColumnLengths(
-    cols: Vector[Column]
+    cols: Vector[Column[?]]
   ): Either[List[SchemaError], Unit] = {
     if (cols.isEmpty) {
       Right(())

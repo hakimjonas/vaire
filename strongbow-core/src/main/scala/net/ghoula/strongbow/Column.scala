@@ -8,16 +8,16 @@ import net.ghoula.strongbow.types.RowIndex
 /** Specialized columnar storage avoiding boxing.
   *
   * Each column type uses primitive arrays where possible. Nullability tracked via BitSet for memory
-  * efficiency.
+  * efficiency. The type parameter `A` tracks the logical element type via GADT refinement.
   */
-enum Column {
-  case IntColumn(data: Array[Int], nulls: BitSet)
-  case LongColumn(data: Array[Long], nulls: BitSet)
-  case DoubleColumn(data: Array[Double], nulls: BitSet)
-  case StringColumn(data: Array[String], nulls: BitSet)
-  case BooleanColumn(data: Array[Boolean], nulls: BitSet)
-  case DateColumn(data: Array[Int], nulls: BitSet) // epoch days since 1970-01-01
-  case AnyColumn(data: Array[Any], nulls: BitSet)
+enum Column[+A] {
+  case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
+  case LongColumn(data: Array[Long], nulls: BitSet) extends Column[Long]
+  case DoubleColumn(data: Array[Double], nulls: BitSet) extends Column[Double]
+  case StringColumn(data: Array[String], nulls: BitSet) extends Column[String]
+  case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
+  case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
+  case AnyColumn(data: Array[Any], nulls: BitSet) extends Column[Any]
 
   inline def length: Int = this match {
     case IntColumn(data, _) => data.length
@@ -133,7 +133,7 @@ enum Column {
     * @param n
     *   Number of elements to take from the front. Clamped to column length.
     */
-  def take(n: Int): Column = {
+  def take(n: Int): Column[A] = {
     val len = Math.min(n, length)
     this match {
       case IntColumn(data, nulls) =>
@@ -162,7 +162,7 @@ enum Column {
     * @param other
     *   Column to append. Must be the same column type.
     */
-  def concat(other: Column): Either[ExecutionError, Column] = {
+  def concat(other: Column[?]): Either[ExecutionError, Column[A]] = {
     if (this.columnType != other.columnType) {
       Left(ExecutionError.TypeMismatch(this.columnType.toString, other.columnType.toString, "Column.concat"))
     } else {
@@ -250,7 +250,7 @@ enum Column {
     *   Array of source indices to include in the result. Using Array instead of IndexedSeq provides
     *   2x better performance (benchmarked at 500K elements).
     */
-  def slice(indices: Array[Int]): Column = this match {
+  def slice(indices: Array[Int]): Column[A] = this match {
     case IntColumn(data, nulls) =>
       IntColumn(sliceArray(data, indices, nulls, 0), buildNullSet(nulls, indices))
     case LongColumn(data, nulls) =>
@@ -298,37 +298,37 @@ enum Column {
 }
 
 object Column {
-  inline def int(data: Array[Int], nulls: BitSet = BitSet.empty): Column = {
+  inline def int(data: Array[Int], nulls: BitSet = BitSet.empty): Column[Int] = {
     IntColumn(data, nulls)
   }
 
-  inline def long(data: Array[Long], nulls: BitSet = BitSet.empty): Column = {
+  inline def long(data: Array[Long], nulls: BitSet = BitSet.empty): Column[Long] = {
     LongColumn(data, nulls)
   }
 
-  inline def double(data: Array[Double], nulls: BitSet = BitSet.empty): Column = {
+  inline def double(data: Array[Double], nulls: BitSet = BitSet.empty): Column[Double] = {
     DoubleColumn(data, nulls)
   }
 
-  inline def string(data: Array[String], nulls: BitSet = BitSet.empty): Column = {
+  inline def string(data: Array[String], nulls: BitSet = BitSet.empty): Column[String] = {
     StringColumn(data, nulls)
   }
 
-  inline def boolean(data: Array[Boolean], nulls: BitSet = BitSet.empty): Column = {
+  inline def boolean(data: Array[Boolean], nulls: BitSet = BitSet.empty): Column[Boolean] = {
     BooleanColumn(data, nulls)
   }
 
   /** Create a DateColumn from epoch day values. */
-  inline def date(data: Array[Int], nulls: BitSet = BitSet.empty): Column = {
+  inline def date(data: Array[Int], nulls: BitSet = BitSet.empty): Column[types.Date] = {
     DateColumn(data, nulls)
   }
 
-  inline def any(data: Array[Any], nulls: BitSet = BitSet.empty): Column = {
+  inline def any(data: Array[Any], nulls: BitSet = BitSet.empty): Column[Any] = {
     AnyColumn(data, nulls)
   }
 
   /** Create an empty column of the given type. */
-  def empty(columnType: ColumnType): Column = columnType match {
+  def empty(columnType: ColumnType): Column[?] = columnType match {
     case ColumnType.IntType => IntColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.LongType => LongColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.DoubleType => DoubleColumn(Array.empty[Double], BitSet.empty)
@@ -357,7 +357,7 @@ object Column {
     * Uses single-pass foldLeft with VectorBuilder to avoid double traversal and short-circuits on
     * first error.
     */
-  def fromValues(values: Vector[Any], columnType: ColumnType): Either[ExecutionError, Column] = {
+  def fromValues(values: Vector[Any], columnType: ColumnType): Either[ExecutionError, Column[?]] = {
     val nullIndices = values.zipWithIndex.collect {
       case (v, idx) if Option(v).isEmpty => idx
     }.to(BitSet)
@@ -367,7 +367,7 @@ object Column {
         val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Int]]](
           Right(new scala.collection.immutable.VectorBuilder[Int]())
         ) {
-          case (Left(err), _) => Left(err) // Short-circuit on first error
+          case (Left(err), _) => Left(err)
           case (Right(builder), v) =>
             Option(v) match {
               case None => Right(builder += 0)
@@ -453,7 +453,7 @@ object Column {
             Option(v) match {
               case None => Right(builder += 0)
               case Some(d: java.time.LocalDate) => Right(builder += d.toEpochDay.toInt)
-              case Some(i: Int) => Right(builder += i) // already epoch days
+              case Some(i: Int) => Right(builder += i)
               case Some(other) =>
                 Left(ExecutionError.TypeMismatch("LocalDate", other.getClass.getSimpleName, "Column.fromValues"))
             }

@@ -16,13 +16,7 @@ object DataFrameBuilder {
     val cols = dataset.columns
     val colCount = cols.length
     val rows = Array.tabulate(dataset.rowCount) { rowIdx =>
-      val values = new Array[Any](colCount)
-      var j = 0 // scalafix:ok DisableSyntax.var
-      while (j < colCount) {
-        values(j) = cols(j).getValue(rowIdx)
-        j += 1
-      }
-      Row.fromSeq(values.toIndexedSeq)
+      Row.fromSeq(cols.map(_.getValue(rowIdx)))
     }
     val javaRows = java.util.Arrays.asList(rows*)
     spark.createDataFrame(javaRows, structType)
@@ -38,13 +32,7 @@ object DataFrameBuilder {
     val rowCount = if (columns.isEmpty) 0 else columns.head.length
     val colCount = columns.length
     val rows = Array.tabulate(rowCount) { rowIdx =>
-      val values = new Array[Any](colCount)
-      var j = 0 // scalafix:ok DisableSyntax.var
-      while (j < colCount) {
-        values(j) = columns(j).getValue(rowIdx)
-        j += 1
-      }
-      Row.fromSeq(values.toIndexedSeq)
+      Row.fromSeq(columns.map(_.getValue(rowIdx)))
     }
     val javaRows = java.util.Arrays.asList(rows*)
     spark.createDataFrame(javaRows, structType)

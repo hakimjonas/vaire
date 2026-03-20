@@ -214,24 +214,11 @@ enum Column[+A] {
     nulls: BitSet,
     defaultValue: T
   ): Array[T] = {
-    val newData = new Array[T](indices.length)
-    var i = 0 // scalafix:ok DisableSyntax.var
-    while (i < indices.length) {
-      val srcIdx = indices(i)
-      newData(i) = if (nulls.contains(srcIdx)) defaultValue else data(srcIdx)
-      i += 1
-    }
-    newData
+    Array.tabulate(indices.length)(i => if (nulls.contains(indices(i))) defaultValue else data(indices(i)))
   }
 
   private def buildNullSet(nulls: BitSet, indices: Array[Int]): BitSet = {
-    val mutableSet = scala.collection.mutable.BitSet.empty
-    var i = 0 // scalafix:ok DisableSyntax.var
-    while (i < indices.length) {
-      if (nulls.contains(indices(i))) mutableSet += i
-      i += 1
-    }
-    BitSet.empty ++ mutableSet
+    BitSet.fromSpecific(indices.indices.filter(i => nulls.contains(indices(i))))
   }
 }
 

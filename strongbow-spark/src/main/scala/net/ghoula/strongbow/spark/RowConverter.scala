@@ -44,7 +44,7 @@ object RowConverter {
   def fromRowUnsafe[T](row: Row, schema: Schema[T]): T = {
     fromRow(row, schema) match {
       case Right(value) => value
-      case Left(err) => throw new RuntimeException(s"Row decode failed: $err") // scalafix:ok DisableSyntax.throw
+      case Left(err) => sys.error(s"Row decode failed: $err")
     }
   }
 
@@ -74,81 +74,50 @@ object RowConverter {
   private def extractColumn(rows: Array[Row], colIdx: Int, ct: ColumnType, rowCount: Int): Column[?] = {
     ct match {
       case ColumnType.IntType =>
-        val data = new Array[Int](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).getInt(colIdx)
-          i += 1
-        }
-        Column.int(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.int(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0 else rows(i).getInt(colIdx)), nulls)
 
       case ColumnType.LongType =>
-        val data = new Array[Long](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).getLong(colIdx)
-          i += 1
-        }
-        Column.long(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.long(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0L else rows(i).getLong(colIdx)), nulls)
 
       case ColumnType.DoubleType =>
-        val data = new Array[Double](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).getDouble(colIdx)
-          i += 1
-        }
-        Column.double(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.double(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0.0 else rows(i).getDouble(colIdx)), nulls)
 
       case ColumnType.StringType =>
-        val data = new Array[String](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).getString(colIdx)
-          i += 1
-        }
-        Column.string(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.string(
+          Array.tabulate(rowCount)(i =>
+            if (nulls.contains(i)) null else rows(i).getString(colIdx) // scalafix:ok DisableSyntax.null
+          ),
+          nulls
+        )
 
       case ColumnType.BooleanType =>
-        val data = new Array[Boolean](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).getBoolean(colIdx)
-          i += 1
-        }
-        Column.boolean(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.boolean(
+          Array.tabulate(rowCount)(i => if (nulls.contains(i)) false else rows(i).getBoolean(colIdx)),
+          nulls
+        )
 
       case ColumnType.DateType =>
-        val data = new Array[Int](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).getDate(colIdx).toLocalDate.toEpochDay.toInt
-          i += 1
-        }
-        Column.date(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.date(
+          Array.tabulate(rowCount)(i =>
+            if (nulls.contains(i)) 0 else rows(i).getDate(colIdx).toLocalDate.toEpochDay.toInt
+          ),
+          nulls
+        )
 
       case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
-        val data = new Array[Any](rowCount)
-        val nulls = scala.collection.mutable.BitSet.empty
-        var i = 0 // scalafix:ok DisableSyntax.var
-        while (i < rowCount) {
-          if (rows(i).isNullAt(colIdx)) nulls += i
-          else data(i) = rows(i).get(colIdx)
-          i += 1
-        }
-        Column.any(data, if (nulls.isEmpty) BitSet.empty else BitSet.empty ++ nulls)
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.any(
+          Array.tabulate(rowCount)(i =>
+            if (nulls.contains(i)) null else rows(i).get(colIdx) // scalafix:ok DisableSyntax.null
+          ),
+          nulls
+        )
     }
   }
 }

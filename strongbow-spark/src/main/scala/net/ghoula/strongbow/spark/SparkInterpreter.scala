@@ -24,6 +24,14 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
   }
 
+  /** Build a Spark DataFrame from a Dataset plan without collecting results.
+    *
+    * Returns the DataFrame for lazy Spark operations: `.count()`, `.write.parquet(path)`,
+    * `.createTempView(name)`, or chaining with native Spark API.
+    */
+  def toDataFrame[T](dataset: Dataset[T]): Either[ExecutionError, DataFrame] =
+    buildPlan(dataset).map(_.df)
+
   private def buildPlan[T](dataset: Dataset[T]): Either[ExecutionError, SparkPlan[T]] = {
     dataset match {
 

@@ -350,4 +350,77 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     val ds = Dataset.fromColumns(Vector(col), Schema.stringSchema).toOption.get
     assertParity(ds)
   }
+
+  // --- toDataFrame ---
+
+  "toDataFrame" should "return a valid DataFrame for Root" in {
+    val col = Column.int(Array(1, 2, 3))
+    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+    val df = sparkInterpreter.toDataFrame(ds)
+    df.isRight shouldBe true
+    df.toOption.get.count() shouldBe 3L
+  }
+
+  it should "return count matching execute().rowCount for filter" in {
+    val col = Column.int(Array(10, 20, 30, 40, 50))
+    val ds = Dataset
+      .fromColumns(Vector(col), Schema.intSchema)
+      .toOption
+      .get
+      .filter(
+        Expr.Gt(
+          Expr.Cell("value", ColumnIndex(0)),
+          Expr.Const(25),
+          summon[Ordering[Int]]
+        )
+      )
+    val dfCount = sparkInterpreter.toDataFrame(ds).toOption.get.count()
+    val executeCount = sparkInterpreter.execute(ds).toOption.get.rowCount.toLong
+    dfCount shouldBe executeCount
+  }
+
+  it should "return count matching execute().rowCount for join" in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+    val col1 = Column.int(Array(1, 2, 3))
+    val col2 = Column.int(Array(2, 3, 4))
+    val ds1 = Dataset.fromColumns(Vector(col1), Schema.intSchema).toOption.get
+    val ds2 = Dataset.fromColumns(Vector(col2), Schema.intSchema).toOption.get
+    val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val rightKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val joined = ds1.joinOn(ds2, leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
+    val dfCount = sparkInterpreter.toDataFrame(joined).toOption.get.count()
+    val executeCount = sparkInterpreter.execute(joined).toOption.get.rowCount.toLong
+    dfCount shouldBe executeCount
+  }
+
+  it should "return count matching execute().rowCount for groupByAgg" in {
+    case class Sale(region: String, amount: Double)
+    given saleSchema: Schema[Sale] = Schema.derived
+    case class Result(region: String, total: Double)
+    given resultSchema: Schema[Result] = Schema.derived
+
+    val regionCol = Column.string(Array("East", "West", "East"))
+    val amountCol = Column.double(Array(10.0, 20.0, 30.0))
+    val ds = Dataset.fromColumns(Vector(regionCol, amountCol), saleSchema).toOption.get
+
+    import net.ghoula.strongbow.specs.{AggSpec, KeySpec}
+    val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
+    val amountCell: Expr[Sale, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+    val keys = Vector(KeySpec[Sale, Any]("region", regionCell, ColumnType.StringType))
+    val aggs = Vector(AggSpec("total", Expr.SumDouble(amountCell), ColumnType.DoubleType))
+    val grouped = ds.groupByAgg[Result](keys, aggs)
+
+    val dfCount = sparkInterpreter.toDataFrame(grouped).toOption.get.count()
+    val executeCount = sparkInterpreter.execute(grouped).toOption.get.rowCount.toLong
+    dfCount shouldBe executeCount
+  }
+
+  it should "produce a DataFrame that can be registered as a temp view" in {
+    val col = Column.int(Array(1, 2, 3, 4, 5))
+    val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get
+    val df = sparkInterpreter.toDataFrame(ds).toOption.get
+    df.createOrReplaceTempView("test_view")
+    val sqlResult = spark.sql("SELECT count(*) FROM test_view").collect()
+    sqlResult.head.getLong(0) shouldBe 5L
+  }
 }

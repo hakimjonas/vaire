@@ -47,6 +47,8 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     )
   }
 
+  private val threadBean = ManagementFactory.getThreadMXBean.asInstanceOf[com.sun.management.ThreadMXBean]
+  private val memoryBean = ManagementFactory.getMemoryMXBean
   private val gcBeans = ManagementFactory.getGarbageCollectorMXBeans.asScala.toList
 
   private def getGCStats(): (Long, Long) = {
@@ -54,6 +56,9 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     val totalGCTime = gcBeans.map(_.getCollectionTime).sum
     (totalCollections, totalGCTime)
   }
+
+  private def getHeapUsageMB(): Double =
+    memoryBean.getHeapMemoryUsage.getUsed / (1024.0 * 1024.0)
 
   case class BenchRow(key: String, value: Int)
   given benchRowSchema: Schema[BenchRow] = Schema.derived
@@ -101,36 +106,74 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     operation: String,
     medianMs: Double,
     p95Ms: Double,
+    planAllocMB: Double,
+    execAllocMB: Double,
+    totalAllocMB: Double,
+    peakHeapMB: Double,
     gcCollections: Long,
     gcTimeMs: Long,
     gcOverhead: Double
   )
 
-  private def benchmarkOp(operation: String, warmups: Int, runs: Int)(f: => Long): ScaleResult = {
-    (0 until warmups).foreach(_ => f)
+  private def benchmarkOp(
+    operation: String,
+    warmups: Int,
+    runs: Int
+  )(planF: => org.apache.spark.sql.DataFrame): ScaleResult = {
+    (0 until warmups).foreach(_ => planF.count())
 
+    val threadId = Thread.currentThread().threadId()
     val (gcBefore, gcTimeBefore) = getGCStats()
+    val allocBefore = threadBean.getThreadAllocatedBytes(threadId)
+    val heapSamples = scala.collection.mutable.ArrayBuffer[Double]()
+    var totalPlanAlloc = 0L
+    var totalExecAlloc = 0L
     val startWall = System.nanoTime()
 
     val times = (0 until runs).map { _ =>
+      heapSamples += getHeapUsageMB()
+
+      val a0 = threadBean.getThreadAllocatedBytes(threadId)
       val start = System.nanoTime()
-      f
+      val df = planF
+      val a1 = threadBean.getThreadAllocatedBytes(threadId)
+      df.count()
       val end = System.nanoTime()
+      val a2 = threadBean.getThreadAllocatedBytes(threadId)
+
+      totalPlanAlloc += (a1 - a0)
+      totalExecAlloc += (a2 - a1)
       (end - start) / 1_000_000.0
     }
 
     val endWall = System.nanoTime()
     val totalWallMs = (endWall - startWall) / 1_000_000.0
+    val allocAfter = threadBean.getThreadAllocatedBytes(threadId)
     val (gcAfter, gcTimeAfter) = getGCStats()
 
     val sorted = times.sorted
     val median = sorted(runs / 2)
     val p95 = sorted((runs * 0.95).toInt)
+    val planAllocMB = totalPlanAlloc / (1024.0 * 1024.0) / runs
+    val execAllocMB = totalExecAlloc / (1024.0 * 1024.0) / runs
+    val totalAllocMB = (allocAfter - allocBefore) / (1024.0 * 1024.0) / runs
+    val peakHeap = heapSamples.max
     val gcCollections = gcAfter - gcBefore
     val gcTimeMs = gcTimeAfter - gcTimeBefore
     val gcOverhead = if (totalWallMs > 0) (gcTimeMs.toDouble / totalWallMs) * 100.0 else 0.0
 
-    ScaleResult(operation, median, p95, gcCollections, gcTimeMs, gcOverhead)
+    ScaleResult(
+      operation,
+      median,
+      p95,
+      planAllocMB,
+      execAllocMB,
+      totalAllocMB,
+      peakHeap,
+      gcCollections,
+      gcTimeMs,
+      gcOverhead
+    )
   }
 
   private def runScale(rows: Int, groups: Int): Unit = {
@@ -150,7 +193,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     val filterResult = benchmarkOp("Filter", warmups, runs) {
       val valCell = Expr.Cell[BenchRow, Int]("value_value", ColumnIndex(1))
       val filtered = dataset.filter(valCell > Expr.lit(500))
-      sparkInterpreter.toDataFrame(filtered).toOption.get.count()
+      sparkInterpreter.toDataFrame(filtered).toOption.get
     }
     results += filterResult
 
@@ -160,32 +203,32 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       val aggKeys = Vector(KeySpec[BenchRow, Any]("key", keyCell, ColumnType.StringType))
       val aggs = Vector(AggSpec("total", Expr.Sum(valCell), ColumnType.LongType))
       val grouped = dataset.groupByAgg[(String, Long)](aggKeys, aggs)
-      sparkInterpreter.toDataFrame(grouped).toOption.get.count()
+      sparkInterpreter.toDataFrame(grouped).toOption.get
     }
     results += groupByResult
 
     val sortResult = benchmarkOp("Sort", warmups, runs) {
       val valCell = Expr.Cell[BenchRow, Int]("value_value", ColumnIndex(1))
       val sorted = dataset.sortByExpr(valCell, ColumnType.IntType)(using Ordering[Int])
-      sparkInterpreter.toDataFrame(sorted).toOption.get.count()
+      sparkInterpreter.toDataFrame(sorted).toOption.get
     }
     results += sortResult
 
     val limitResult = benchmarkOp("Limit", warmups, runs) {
       val limited = dataset.limit(rows / 2)
-      sparkInterpreter.toDataFrame(limited).toOption.get.count()
+      sparkInterpreter.toDataFrame(limited).toOption.get
     }
     results += limitResult
 
     val unionResult = benchmarkOp("Union", warmups, runs) {
       val unioned = dataset.union(dataset)
-      sparkInterpreter.toDataFrame(unioned).toOption.get.count()
+      sparkInterpreter.toDataFrame(unioned).toOption.get
     }
     results += unionResult
 
     val distinctResult = benchmarkOp("Distinct", warmups, runs) {
       val distincted = dataset.distinct
-      sparkInterpreter.toDataFrame(distincted).toOption.get.count()
+      sparkInterpreter.toDataFrame(distincted).toOption.get
     }
     results += distinctResult
 
@@ -197,7 +240,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       val leftKey: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
       val rightKey: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
       val joined = dataset1.joinOn(dataset2, leftKey, rightKey, ColumnType.StringType, ColumnType.StringType)
-      sparkInterpreter.toDataFrame(joined).toOption.get.count()
+      sparkInterpreter.toDataFrame(joined).toOption.get
     }
     results += joinResult
 
@@ -210,7 +253,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
         AggSpec("cnt", Expr.Count[BenchRow](), ColumnType.LongType)
       )
       val grouped = dataset.groupByAgg[AggResult](aggKeys, aggs)
-      sparkInterpreter.toDataFrame(grouped).toOption.get.count()
+      sparkInterpreter.toDataFrame(grouped).toOption.get
     }
     results += groupByAggResult
 
@@ -222,18 +265,72 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
         SortSpec(keyCell, summon[Ordering[String]], ColumnType.StringType, true)
       )
       val sorted = dataset.sortByExprs(sortKeys)
-      sparkInterpreter.toDataFrame(sorted).toOption.get.count()
+      sparkInterpreter.toDataFrame(sorted).toOption.get
     }
     results += sortByExprsResult
 
-    val header = s"STRONGBOW SPARK — $scale rows, $groups groups (Spark 4.1.1)"
-    val colHeader = f"${"Operation"}%-14s ${"Median"}%12s ${"P95"}%12s ${"GC"}%8s ${"GC%"}%8s"
-    val separator = "-" * 70
-    val lines = results.map { r =>
-      f"${r.operation}%-14s ${r.medianMs}%9.2f ms ${r.p95Ms}%9.2f ms ${r.gcCollections}%8d ${r.gcOverhead}%7.1f%%"
+    import org.apache.spark.sql.{functions => F}
+
+    val sourceDf = dataset match {
+      case Dataset.Root(src: SparkSource, _) => src.df
+      case _ => throw new RuntimeException("Expected SparkSource") // scalafix:ok DisableSyntax.throw
+    }
+    val sourceDf1 = dataset1 match {
+      case Dataset.Root(src: SparkSource, _) => src.df
+      case _ => throw new RuntimeException("Expected SparkSource") // scalafix:ok DisableSyntax.throw
+    }
+    val sourceDf2 = dataset2 match {
+      case Dataset.Root(src: SparkSource, _) => src.df
+      case _ => throw new RuntimeException("Expected SparkSource") // scalafix:ok DisableSyntax.throw
     }
 
-    val block = (Vector(s"\n${"=" * 70}", header, "=" * 70, colHeader, separator) ++ lines).mkString("\n")
+    val nativeResults = scala.collection.mutable.ArrayBuffer[ScaleResult]()
+
+    nativeResults += benchmarkOp("Filter", warmups, runs) {
+      sourceDf.filter(F.col("value_value") > F.lit(500))
+    }
+    nativeResults += benchmarkOp("GroupBy", warmups, runs) {
+      sourceDf.groupBy("key_value").agg(F.sum("value_value").as("total"))
+    }
+    nativeResults += benchmarkOp("Sort", warmups, runs) {
+      sourceDf.sort(F.col("value_value"))
+    }
+    nativeResults += benchmarkOp("Limit", warmups, runs) {
+      sourceDf.limit(rows / 2)
+    }
+    nativeResults += benchmarkOp("Union", warmups, runs) {
+      sourceDf.union(sourceDf)
+    }
+    nativeResults += benchmarkOp("Distinct", warmups, runs) {
+      sourceDf.distinct()
+    }
+    nativeResults += benchmarkOp("Join", warmups, runs) {
+      sourceDf1.alias("_l").join(sourceDf2.alias("_r"), F.col("_l.key_value") === F.col("_r.key_value"))
+    }
+    nativeResults += benchmarkOp("GroupByAgg", warmups, runs) {
+      sourceDf.groupBy("key_value").agg(F.sum("value_value").as("totalValue"), F.count("*").as("cnt"))
+    }
+    nativeResults += benchmarkOp("SortByExprs", warmups, runs) {
+      sourceDf.sort(F.col("value_value").asc, F.col("key_value").asc)
+    }
+
+    val header = s"STRONGBOW SPARK — $scale rows, $groups groups (Spark 4.1.1)"
+    val colHeader =
+      f"${"Operation"}%-14s ${"Median"}%10s ${"Plan"}%10s ${"Exec"}%10s ${"Total"}%10s ${"PeakHeap"}%10s ${"GC"}%6s"
+    val separator = "-" * 90
+    val lines = results.map { r =>
+      f"${r.operation}%-14s ${r.medianMs}%7.2f ms ${r.planAllocMB}%7.1f MB ${r.execAllocMB}%7.1f MB ${r.totalAllocMB}%7.1f MB ${r.peakHeapMB}%7.0f MB ${r.gcCollections}%6d"
+    }
+
+    val nativeHeader = s"NATIVE SPARK CONTROL — $scale rows, $groups groups (Spark 4.1.1)"
+    val nativeLines = nativeResults.map { r =>
+      f"${r.operation}%-14s ${r.medianMs}%7.2f ms ${r.planAllocMB}%7.1f MB ${r.execAllocMB}%7.1f MB ${r.totalAllocMB}%7.1f MB ${r.peakHeapMB}%7.0f MB ${r.gcCollections}%6d"
+    }
+
+    val block = (
+      Vector(s"\n${"=" * 70}", header, "=" * 70, colHeader, separator) ++ lines ++
+        Vector(s"\n${"=" * 70}", nativeHeader, "=" * 70, colHeader, separator) ++ nativeLines
+    ).mkString("\n")
     info(block)
     writeToFile(block)
   }

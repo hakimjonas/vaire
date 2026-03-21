@@ -9,7 +9,7 @@ class SetOperationsSpec extends AnyFlatSpec with Matchers {
 
   private def createIntDataset(values: Vector[Int]): Dataset[Int] = {
     val mat = MaterializedDataset.fromVector(values).toOption.get
-    Dataset.Root(mat.columns, summon[Schema[Int]])
+    Dataset.Root(InMemorySource(mat.columns), summon[Schema[Int]])
   }
 
   "intersect" should "return common rows, deduplicated" in {
@@ -116,8 +116,8 @@ class SetOperationsSpec extends AnyFlatSpec with Matchers {
 
     val mat1 = MaterializedDataset.fromVector(points1).toOption.get
     val mat2 = MaterializedDataset.fromVector(points2).toOption.get
-    val ds1 = Dataset.Root(mat1.columns, summon[Schema[Point]])
-    val ds2 = Dataset.Root(mat2.columns, summon[Schema[Point]])
+    val ds1 = Dataset.Root(InMemorySource(mat1.columns), summon[Schema[Point]])
+    val ds2 = Dataset.Root(InMemorySource(mat2.columns), summon[Schema[Point]])
 
     val result = ds1.intersect(ds2).collect.toOption.get
 

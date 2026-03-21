@@ -238,7 +238,7 @@ class SchemaDerivedSpec extends AnyFlatSpec with Matchers {
     )
 
     val dataset = MaterializedDataset.fromVector(users) match {
-      case Right(mat) => Dataset.Root(mat.columns, summon[Schema[User]])
+      case Right(mat) => Dataset.Root(InMemorySource(mat.columns), summon[Schema[User]])
       case Left(err) => fail(s"Dataset creation failed: $err")
     }
 
@@ -259,7 +259,7 @@ class SchemaDerivedSpec extends AnyFlatSpec with Matchers {
     )
 
     val dataset = MaterializedDataset.fromVector(products) match {
-      case Right(mat) => Dataset.Root(mat.columns, summon[Schema[Product]])
+      case Right(mat) => Dataset.Root(InMemorySource(mat.columns), summon[Schema[Product]])
       case Left(err) => fail(s"Dataset creation failed: $err")
     }
 

@@ -15,7 +15,15 @@ object DatasetInterpreter extends Interpreter {
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
     (dataset: @unchecked) match {
       case root: Dataset.Root[T] =>
-        Right(MaterializedDataset(root.columns, root.schema))
+        root.source match {
+          case InMemorySource(columns) => Right(MaterializedDataset(columns, root.schema))
+          case other =>
+            Left(
+              errors.ExecutionError.UnsupportedOperation(
+                s"DatasetInterpreter does not support ${other.getClass.getSimpleName}"
+              )
+            )
+        }
 
       case filt: Dataset.Filter[T] =>
         execute(filt.parent).flatMap(parent => filter(parent, filt.predicate))

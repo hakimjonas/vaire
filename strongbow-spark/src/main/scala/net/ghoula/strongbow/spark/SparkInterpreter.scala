@@ -36,8 +36,19 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     dataset match {
 
       case root: Dataset.Root[T] =>
-        val df = DataFrameBuilder.fromColumns(spark, root.columns, root.schema)
-        Right(SparkPlan(df, root.schema))
+        root.source match {
+          case SparkSource(df) =>
+            Right(SparkPlan(df, root.schema))
+          case net.ghoula.strongbow.InMemorySource(columns) =>
+            val df = DataFrameBuilder.fromColumns(spark, columns, root.schema)
+            Right(SparkPlan(df, root.schema))
+          case other =>
+            Left(
+              ExecutionError.UnsupportedOperation(
+                s"SparkInterpreter does not support ${other.getClass.getSimpleName}"
+              )
+            )
+        }
 
       case filt: Dataset.Filter[T] =>
         buildPlan(filt.parent).flatMap { parent =>

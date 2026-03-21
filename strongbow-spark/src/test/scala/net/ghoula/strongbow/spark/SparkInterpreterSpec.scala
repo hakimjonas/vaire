@@ -4,6 +4,7 @@ import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.{Column, ColumnType, Dataset, DatasetInterpreter, Expr, Schema}
+import net.ghoula.strongbow.specs.{AggSpec, KeySpec}
 import net.ghoula.strongbow.types.ColumnIndex
 
 /** Parity tests: every Dataset operation should produce the same result via SparkInterpreter as via
@@ -422,5 +423,71 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     df.createOrReplaceTempView("test_view")
     val sqlResult = spark.sql("SELECT count(*) FROM test_view").collect()
     sqlResult.head.getLong(0) shouldBe 5L
+  }
+
+  // --- SparkSource (zero-overhead path) ---
+
+  "SparkSource" should "skip array conversion for root" in {
+    import org.apache.spark.sql.types.{IntegerType, StructField, StructType}
+    import org.apache.spark.sql.Row
+
+    val rows = java.util.Arrays.asList(Row(1), Row(2), Row(3))
+    val structType = StructType(Array(StructField("value", IntegerType, nullable = false)))
+    val nativeDf = spark.createDataFrame(rows, structType)
+
+    val ds = SparkDatasets.fromDataFrame(nativeDf, Schema.intSchema)
+    val df = sparkInterpreter.toDataFrame(ds)
+    df.isRight shouldBe true
+    df.toOption.get.count() shouldBe 3L
+  }
+
+  it should "produce same results as InMemorySource for filter" in {
+    import org.apache.spark.sql.types.{IntegerType, StructField, StructType}
+    import org.apache.spark.sql.Row
+
+    val data = Array(10, 20, 30, 40, 50)
+    val rows = java.util.Arrays.asList(data.map(Row(_))*)
+    val structType = StructType(Array(StructField("value", IntegerType, nullable = false)))
+    val nativeDf = spark.createDataFrame(rows, structType)
+
+    val sparkDs = SparkDatasets.fromDataFrame(nativeDf, Schema.intSchema)
+      .filter(Expr.Gt(Expr.Cell("value", ColumnIndex(0)), Expr.Const(25), summon[Ordering[Int]]))
+
+    val inMemDs = Dataset.fromColumns(Vector(Column.int(data)), Schema.intSchema).toOption.get
+      .filter(Expr.Gt(Expr.Cell("value", ColumnIndex(0)), Expr.Const(25), summon[Ordering[Int]]))
+
+    val sparkCount = sparkInterpreter.toDataFrame(sparkDs).toOption.get.count()
+    val inMemCount = sparkInterpreter.toDataFrame(inMemDs).toOption.get.count()
+    sparkCount shouldBe inMemCount
+  }
+
+  it should "work with groupByAgg" in {
+    import org.apache.spark.sql.types.{DoubleType => SparkDoubleType, StringType => SparkStringType, StructField, StructType}
+    import org.apache.spark.sql.Row
+
+    case class Sale(region: String, amount: Double)
+    given saleSchema: Schema[Sale] = Schema.derived
+    case class Result(region: String, total: Double)
+    given resultSchema: Schema[Result] = Schema.derived
+
+    val rows = java.util.Arrays.asList(
+      Row("East", 10.0), Row("West", 20.0), Row("East", 30.0)
+    )
+    val structType = StructType(Array(
+      StructField("region_value", SparkStringType, nullable = false),
+      StructField("amount_value", SparkDoubleType, nullable = false)
+    ))
+    val nativeDf = spark.createDataFrame(rows, structType)
+
+    val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
+    val amountCell: Expr[Sale, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+    val keys = Vector(KeySpec[Sale, Any]("region", regionCell, ColumnType.StringType))
+    val aggs = Vector(AggSpec("total", Expr.SumDouble(amountCell), ColumnType.DoubleType))
+
+    val ds = SparkDatasets.fromDataFrame[Sale](nativeDf, saleSchema)
+      .groupByAgg[Result](keys, aggs)
+
+    val df = sparkInterpreter.toDataFrame(ds).toOption.get
+    df.count() shouldBe 2L
   }
 }

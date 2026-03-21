@@ -6,8 +6,13 @@ object DatasetExplainer {
   def explain[T](dataset: Dataset[T], indent: Int = 0): String = {
     val prefix = "  " * indent
     val node = dataset match {
-      case Dataset.Root(columns, schema) =>
-        s"Root[${columns.length} columns, ${columns.headOption.map(_.length).getOrElse(0)} rows]"
+      case Dataset.Root(source, _) =>
+        source match {
+          case InMemorySource(columns) =>
+            s"Root[${columns.length} columns, ${columns.headOption.map(_.length).getOrElse(0)} rows]"
+          case other =>
+            s"Root[${other.getClass.getSimpleName}]"
+        }
 
       case Dataset.Filter(parent, predicate) =>
         s"Filter($predicate)\n${explain(parent, indent + 1)}"

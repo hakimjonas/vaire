@@ -392,7 +392,7 @@ class DatasetJoinSpec extends AnyFlatSpec with Matchers {
     MaterializedDataset.fromVector(values) match {
       case Right(mat) =>
         // Convert MaterializedDataset to Dataset
-        Dataset.Root(mat.columns, schema)
+        Dataset.Root(InMemorySource(mat.columns), schema)
       case Left(err) => fail(s"Dataset creation failed: $err")
     }
   }

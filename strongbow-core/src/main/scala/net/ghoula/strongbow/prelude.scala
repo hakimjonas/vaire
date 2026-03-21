@@ -13,7 +13,7 @@ package net.ghoula.strongbow
   *   }}}
   */
 object prelude {
-  export net.ghoula.strongbow.{Dataset, Expr, Column, ColumnType, Schema}
+  export net.ghoula.strongbow.{Dataset, Expr, Column, ColumnType, Schema, DataSource, InMemorySource}
   export net.ghoula.strongbow.MaterializedDataset
   export net.ghoula.strongbow.{Interpreter, DatasetInterpreter, ExprInterpreter}
   export net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}

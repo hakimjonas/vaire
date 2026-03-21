@@ -97,6 +97,24 @@ MaterializedDataset[T] (Vector[Column[?]] + Schema[T]).
 **SparkInterpreter** — Apache Spark. Pattern matches Dataset cases, builds
 Spark DataFrame plan. Expr cases translate to native Spark SQL functions
 via ExprToColumn. Everything pushes to Catalyst — no UDFs, no RDDs.
+`toDataFrame` returns the DataFrame without collecting for lazy Spark
+operations (count, write, temp views).
+
+### 4a. DataSource Abstraction
+
+Dataset.Root holds a `DataSource` — an open trait that abstracts
+physical storage from the logical plan.
+
+**InMemorySource** — Wraps `Vector[Column[?]]`. Default for
+`Dataset.fromColumns`. Both interpreters support it.
+
+**SparkSource** — Wraps a Spark `DataFrame`. Lives in strongbow-spark.
+`SparkInterpreter` uses the DataFrame directly — zero conversion
+overhead. Enables end-to-end Spark pipelines (read Parquet →
+transformations → write Parquet) without driver materialization.
+
+The trait is open so future backends (Arrow, Delta, Iceberg) can
+provide implementations without modifying core.
 
 ### 5. Macro System
 

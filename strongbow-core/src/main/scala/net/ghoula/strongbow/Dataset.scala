@@ -12,7 +12,7 @@ import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
   *   The row type of this dataset
   */
 enum Dataset[T] {
-  case Root[T](columns: Vector[Column[?]], schema: Schema[T]) extends Dataset[T]
+  case Root[T](source: DataSource, schema: Schema[T]) extends Dataset[T]
   case Filter[T](parent: Dataset[T], predicate: Expr[T, Boolean]) extends Dataset[T]
   case Map[A, B](parent: Dataset[A], func: A => B, schema: Schema[B]) extends Dataset[B]
   case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B], schema: Schema[B]) extends Dataset[B]
@@ -146,7 +146,7 @@ object Dataset {
 
     val errors = validations.collect { case Left(e) => e }.flatten
     if (errors.isEmpty) {
-      Right(Root(cols, schema))
+      Right(Root(InMemorySource(cols), schema))
     } else {
       Left(NonEmptyList.fromListUnsafe(errors))
     }
@@ -154,7 +154,7 @@ object Dataset {
 
   /** Unsafe constructor for internal use when validation already done. */
   private[strongbow] inline def unsafeRoot[T](cols: Vector[Column[?]], schema: Schema[T]): Dataset[T] = {
-    Root(cols, schema)
+    Root(InMemorySource(cols), schema)
   }
 
   extension [T](ds: Dataset[T]) {

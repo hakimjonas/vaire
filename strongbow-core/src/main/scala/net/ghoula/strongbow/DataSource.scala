@@ -1,0 +1,11 @@
+package net.ghoula.strongbow
+
+/** Capability trait representing a physical data source.
+  *
+  * Interpreters pattern match on concrete implementations to access data in their native format.
+  * The trait is open — backend modules extend it without modifying core.
+  */
+trait DataSource
+
+/** In-memory columnar storage. The default source for Dataset.fromColumns. */
+case class InMemorySource(columns: Vector[Column[?]]) extends DataSource

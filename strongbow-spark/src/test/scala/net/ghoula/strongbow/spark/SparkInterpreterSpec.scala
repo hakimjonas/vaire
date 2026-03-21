@@ -450,10 +450,14 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     val structType = StructType(Array(StructField("value", IntegerType, nullable = false)))
     val nativeDf = spark.createDataFrame(rows, structType)
 
-    val sparkDs = SparkDatasets.fromDataFrame(nativeDf, Schema.intSchema)
+    val sparkDs = SparkDatasets
+      .fromDataFrame(nativeDf, Schema.intSchema)
       .filter(Expr.Gt(Expr.Cell("value", ColumnIndex(0)), Expr.Const(25), summon[Ordering[Int]]))
 
-    val inMemDs = Dataset.fromColumns(Vector(Column.int(data)), Schema.intSchema).toOption.get
+    val inMemDs = Dataset
+      .fromColumns(Vector(Column.int(data)), Schema.intSchema)
+      .toOption
+      .get
       .filter(Expr.Gt(Expr.Cell("value", ColumnIndex(0)), Expr.Const(25), summon[Ordering[Int]]))
 
     val sparkCount = sparkInterpreter.toDataFrame(sparkDs).toOption.get.count()
@@ -462,7 +466,12 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
   }
 
   it should "work with groupByAgg" in {
-    import org.apache.spark.sql.types.{DoubleType => SparkDoubleType, StringType => SparkStringType, StructField, StructType}
+    import org.apache.spark.sql.types.{
+      DoubleType => SparkDoubleType,
+      StringType => SparkStringType,
+      StructField,
+      StructType
+    }
     import org.apache.spark.sql.Row
 
     case class Sale(region: String, amount: Double)
@@ -471,12 +480,16 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     given resultSchema: Schema[Result] = Schema.derived
 
     val rows = java.util.Arrays.asList(
-      Row("East", 10.0), Row("West", 20.0), Row("East", 30.0)
+      Row("East", 10.0),
+      Row("West", 20.0),
+      Row("East", 30.0)
     )
-    val structType = StructType(Array(
-      StructField("region_value", SparkStringType, nullable = false),
-      StructField("amount_value", SparkDoubleType, nullable = false)
-    ))
+    val structType = StructType(
+      Array(
+        StructField("region_value", SparkStringType, nullable = false),
+        StructField("amount_value", SparkDoubleType, nullable = false)
+      )
+    )
     val nativeDf = spark.createDataFrame(rows, structType)
 
     val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
@@ -484,7 +497,8 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     val keys = Vector(KeySpec[Sale, Any]("region", regionCell, ColumnType.StringType))
     val aggs = Vector(AggSpec("total", Expr.SumDouble(amountCell), ColumnType.DoubleType))
 
-    val ds = SparkDatasets.fromDataFrame[Sale](nativeDf, saleSchema)
+    val ds = SparkDatasets
+      .fromDataFrame[Sale](nativeDf, saleSchema)
       .groupByAgg[Result](keys, aggs)
 
     val df = sparkInterpreter.toDataFrame(ds).toOption.get

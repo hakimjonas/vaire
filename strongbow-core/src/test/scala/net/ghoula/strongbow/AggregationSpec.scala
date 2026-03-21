@@ -28,14 +28,14 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     val sumExpr = Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
     val result = ExprInterpreter.evalAggregation(sumExpr, columns)
 
-    result shouldBe Right(15)
+    result shouldBe Right(15L)
   }
 
   it should "return 0 for empty dataset" in {
     val sumExpr = Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0)))
     val result = ExprInterpreter.evalAggregation(sumExpr, Vector.empty)
 
-    result shouldBe Right(0)
+    result shouldBe Right(0L)
   }
 
   "SumDouble" should "compute total of doubles" in {
@@ -171,7 +171,7 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
     )
 
     countResult shouldBe Right(3L)
-    sumResult shouldBe Right(60)
+    sumResult shouldBe Right(60L)
     maxResult shouldBe Right(Some(30))
   }
 
@@ -252,7 +252,7 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
   }
 
   "Dataset.aggregate" should "compute global aggregations without grouping keys" in {
-    case class Stats(totalCount: Long, totalSum: Int)
+    case class Stats(totalCount: Long, totalSum: Long)
     given Schema[Stats] = Schema.derived
 
     val intColumn = Column.IntColumn(Array(10, 20, 30, 40, 50), nulls = scala.collection.immutable.BitSet.empty)
@@ -263,7 +263,7 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
       .aggregate[Stats](
         Vector(
           AggSpec("totalCount", Expr.Count[Int](), ColumnType.LongType),
-          AggSpec("totalSum", Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0))), ColumnType.IntType)
+          AggSpec("totalSum", Expr.Sum(Expr.Cell[Int, Int]("value", ColumnIndex(0))), ColumnType.LongType)
         )
       )
       .collect
@@ -271,7 +271,7 @@ class AggregationSpec extends AnyFlatSpec with Matchers {
       .get
 
     result should have length 1
-    result.head shouldBe Stats(5L, 150)
+    result.head shouldBe Stats(5L, 150L)
   }
 
   "PercentileApprox" should "compute approximate percentile" in {

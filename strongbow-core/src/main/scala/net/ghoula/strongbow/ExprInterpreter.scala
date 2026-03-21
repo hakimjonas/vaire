@@ -56,9 +56,8 @@ object ExprInterpreter {
         c.exprs.headOption.map(e => inferExprColumnType(e, columns)).getOrElse(ColumnType.AnyType)
       case w: Expr.When[_, _] => inferExprColumnType(w.thenExpr, columns)
       case g: Expr.GetOrElse[_, _] => inferExprColumnType(g.expr, columns)
-      case _: Expr.Sum[_] => ColumnType.IntType
       case _: Expr.SumDouble[_] | _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] => ColumnType.DoubleType
-      case _: Expr.SumLong[_] | _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
+      case _: Expr.Sum[_] | _: Expr.SumLong[_] | _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
         ColumnType.LongType
       case _: Expr.Max[_, _] | _: Expr.Min[_, _] | _: Expr.First[_, _] => ColumnType.AnyType
       case _: Expr.Collect[_, _] | _: Expr.Option2Iterable[_, _] => ColumnType.AnyType
@@ -1706,7 +1705,7 @@ object ExprInterpreter {
     if (columns.isEmpty || columns.head.length == 0) {
       (expr: @unchecked) match {
         case _: Expr.Count[Row] => Right(0L)
-        case _: Expr.Sum[Row] => Right(0)
+        case _: Expr.Sum[Row] => Right(0L)
         case _: Expr.SumDouble[Row] => Right(0.0)
         case _: Expr.SumLong[Row] => Right(0L)
         case _: Expr.Avg[Row] => Right(0.0)
@@ -1748,8 +1747,8 @@ object ExprInterpreter {
         case sum: Expr.Sum[Row] =>
           evalColumn(sum.expr, columns, ColumnType.IntType).map {
             case Column.IntColumn(data, nulls) =>
-              (0 until data.length).foldLeft(0)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
-            case _ => 0
+              (0 until data.length).foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+            case _ => 0L
           }
 
         case sumD: Expr.SumDouble[Row] =>

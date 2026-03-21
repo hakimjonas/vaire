@@ -21,7 +21,7 @@ object AggBuilders {
 
   inline def sum[T](inline f: T => Int)(using m: Mirror.ProductOf[T]): AggSpec[T] = {
     val (expr, _) = ExprMacro.column(f)
-    AggSpec("sum", Expr.Sum(expr), ColumnType.IntType)
+    AggSpec("sum", Expr.Sum(expr), ColumnType.LongType)
   }
 
   inline def sumLong[T](inline f: T => Long)(using m: Mirror.ProductOf[T]): AggSpec[T] = {

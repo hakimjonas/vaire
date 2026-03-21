@@ -331,7 +331,7 @@ object ExprToColumn {
         convert(cts.expr).map { case (sparkCol, _) => (sparkCol.cast("string"), ColumnType.StringType) }
 
       case s: Expr.Sum[Row] =>
-        convert(s.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.IntType) }
+        convert(s.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.LongType) }
 
       case sd: Expr.SumDouble[Row] =>
         convert(sd.expr).map { case (sparkCol, _) => (sum(sparkCol), ColumnType.DoubleType) }

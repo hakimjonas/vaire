@@ -93,7 +93,7 @@ enum Expr[Row, +A] {
   case IsDefined[Row, A](expr: Expr[Row, Option[A]]) extends Expr[Row, Boolean]
   case GetOrElse[Row, A](expr: Expr[Row, Option[A]], default: A) extends Expr[Row, A]
 
-  case Sum[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case Sum[Row](expr: Expr[Row, Int]) extends Expr[Row, Long]
   case SumDouble[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
   case SumLong[Row](expr: Expr[Row, Long]) extends Expr[Row, Long]
   case Count[Row]() extends Expr[Row, Long]
@@ -603,11 +603,11 @@ object Expr {
       case _: Expr.Cell[_, _] => None
       case _: Expr.Const[_, _] => None
       case n: Expr.Named[_, _] => n.expr.outputType
-      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Sum[_] | _: Expr.Mod[_] |
-          _: Expr.Abs[_] | _: Expr.Negate[_] =>
+      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Mod[_] | _: Expr.Abs[_] |
+          _: Expr.Negate[_] =>
         Some(ColumnType.IntType)
       case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] | _: Expr.SumLong[_] |
-          _: Expr.ModLong[_] | _: Expr.AbsLong[_] | _: Expr.NegateLong[_] | _: Expr.CastToLong[_] =>
+          _: Expr.Sum[_] | _: Expr.ModLong[_] | _: Expr.AbsLong[_] | _: Expr.NegateLong[_] | _: Expr.CastToLong[_] =>
         Some(ColumnType.LongType)
       case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] |
           _: Expr.SumDouble[_] | _: Expr.AbsDouble[_] | _: Expr.NegateDouble[_] | _: Expr.Round[_] | _: Expr.Floor[_] |

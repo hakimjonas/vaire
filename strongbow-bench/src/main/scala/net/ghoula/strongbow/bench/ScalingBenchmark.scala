@@ -142,7 +142,7 @@ object ScalingBenchmark {
     val p95 = sorted((runs * 0.95).toInt)
 
     // Memory and GC measurement
-    val threadId = Thread.currentThread().getId
+    val threadId = Thread.currentThread().threadId()
     System.gc()
     System.gc()
     Thread.sleep(100)
@@ -223,13 +223,14 @@ object ScalingBenchmark {
     print("  GroupBy... ")
     given schemaStr: Schema[String] = Schema.stringSchema
     given schemaInt: Schema[Int] = Schema.intSchema
-    given schemaStrInt: Schema[(String, Int)] = Schema.tuple2Schema[String, Int]
+    given schemaLong: Schema[Long] = Schema.longSchema
+    given schemaStrLong: Schema[(String, Long)] = Schema.tuple2Schema[String, Long]
     val groupByResult = benchmarkOperation(scale, rows, "GroupBy", 20, 50) {
       val keyCell: Expr[(String, Int), Any] = Expr.Cell("key", ColumnIndex(0))
       val valCell: Expr[(String, Int), Int] = Expr.Cell("value", ColumnIndex(1))
       val aggKeys = Vector(KeySpec[(String, Int), Any]("key", keyCell, ColumnType.StringType))
-      val aggs = Vector(AggSpec("total", Expr.Sum(valCell), ColumnType.IntType))
-      val grouped = dataset.groupByAgg[(String, Int)](aggKeys, aggs)
+      val aggs = Vector(AggSpec("total", Expr.Sum(valCell), ColumnType.LongType))
+      val grouped = dataset.groupByAgg[(String, Long)](aggKeys, aggs)
       val materialized = DatasetInterpreter
         .execute(grouped)
         .getOrElse(

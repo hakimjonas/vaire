@@ -134,7 +134,7 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
       cnt: Long,
       max1: Double,
       min1: Double,
-      sumInt: Int
+      sumInt: Long
     )
     given Schema[Agg8Result] = Schema.derived
 
@@ -155,7 +155,7 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
       AggSpec("cnt", Expr.Count[Row8](), ColumnType.LongType),
       AggSpec("max1", Expr.SumDouble(Expr.Cell[Row8, Double]("v1", ColumnIndex(1))), ColumnType.DoubleType),
       AggSpec("min1", Expr.SumDouble(Expr.Cell[Row8, Double]("v2", ColumnIndex(2))), ColumnType.DoubleType),
-      AggSpec("sumInt", Expr.Sum(Expr.Cell[Row8, Int]("v3", ColumnIndex(3))), ColumnType.IntType)
+      AggSpec("sumInt", Expr.Sum(Expr.Cell[Row8, Int]("v3", ColumnIndex(3))), ColumnType.LongType)
     )
 
     val grouped = ds.groupByAgg[Agg8Result](keys, aggs)
@@ -165,7 +165,7 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
     val groupA = result.find(_.key == "A").get
     groupA.sum1 shouldBe 70.0 // 10+20+40
     groupA.cnt shouldBe 3L
-    groupA.sumInt shouldBe 7 // 1+2+4
+    groupA.sumInt shouldBe 7L // 1+2+4
   }
 
   // --- AggBuilder ergonomic tests ---
@@ -207,7 +207,7 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
 
     val sales = makeSales
 
-    case class RegionSum(region: String, totalQty: Int)
+    case class RegionSum(region: String, totalQty: Long)
     given Schema[RegionSum] = Schema.derived
 
     val keys = Vector(
@@ -222,6 +222,6 @@ class GroupByAggSpec extends AnyFlatSpec with Matchers {
 
     result.length shouldBe 2
     val east = result.find(_.region == "East").get
-    east.totalQty shouldBe 55 // 10+15+30
+    east.totalQty shouldBe 55L // 10+15+30
   }
 }

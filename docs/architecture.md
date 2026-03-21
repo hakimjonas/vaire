@@ -116,3 +116,15 @@ Scala 3 AST nodes (Apply, Select, Block), and emits typed Expr values.
 ```
 
 Scala 3.8.2 on JDK 25 (core) / JDK 21 (Spark module). ZGC for sbt and tests.
+
+### 6. Aggregation Type Safety
+
+Aggregation return types reflect mathematical reality:
+
+- **Sum(Expr[Row, Int])** returns **Long** — a sum of ints can exceed Int.MaxValue
+- **SumLong(Expr[Row, Long])** returns **Long**
+- **SumDouble(Expr[Row, Double])** returns **Double**
+- **Count** returns **Long**
+
+The type tells the truth about what the aggregation produces. Both the
+columnar interpreter and the Spark bridge produce the same types.

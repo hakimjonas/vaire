@@ -30,13 +30,13 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   }
   import org.apache.spark.sql.expressions.Window
 
-  private val N = 5_000_000
-  private val JoinN = 1_000_000
-  private val MultiN = 1_000_000
-  private val WindowN = 500_000
+  private val N = 1_000_000
+  private val JoinN = 500_000
+  private val MultiN = 500_000
+  private val WindowN = 200_000
   private val NumGroups = 1_000
-  private val Warmup = 5
-  private val Measured = 10
+  private val Warmup = 3
+  private val Measured = 5
 
   private val valueExpr: Expr[Int, Int] = Expr.Cell("value", ColumnIndex(0))
 
@@ -143,10 +143,10 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 1: Filter 5M rows
+  // Benchmark 1: Filter 1M rows
   // ---------------------------------------------------------------------------
 
-  "Filter overhead" should "be measured for 5M rows" in {
+  "Filter overhead" should "be measured for 1M rows" in {
     val threshold = (N * 0.9).toInt
 
     val sbTimings = (0 until Warmup + Measured).map { _ =>
@@ -173,15 +173,15 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("Filter 5M rows (top 10%)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("Filter 1M rows (top 10%)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 2: Distinct on 5M rows
+  // Benchmark 2: Distinct on 1M rows
   // ---------------------------------------------------------------------------
 
-  "Distinct overhead" should "be measured for 5M rows" in {
+  "Distinct overhead" should "be measured for 1M rows" in {
     val sbTimings = (0 until Warmup + Measured).map { _ =>
       val t0 = System.nanoTime()
       val ds = intDataset(halfDupeData).distinct
@@ -204,15 +204,15 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("Distinct 5M rows (50% dupes)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("Distinct 1M rows (50% dupes)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 3: JoinOn 1M x 1M
+  // Benchmark 3: JoinOn 500K x 500K
   // ---------------------------------------------------------------------------
 
-  "JoinOn overhead" should "be measured for 1M x 1M" in {
+  "JoinOn overhead" should "be measured for 500K x 500K" in {
     given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
 
     val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
@@ -242,15 +242,15 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("JoinOn 1M x 1M (50% overlap)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("JoinOn 500K x 500K (50% overlap)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 4: SelectExprs arithmetic on 5M
+  // Benchmark 4: SelectExprs arithmetic on 1M
   // ---------------------------------------------------------------------------
 
-  "SelectExprs overhead" should "be measured for 5M rows" in {
+  "SelectExprs overhead" should "be measured for 1M rows" in {
     val doubled = Expr
       .Add(
         Expr.Mul(valueExpr, Expr.Const(2)),
@@ -280,15 +280,15 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("SelectExprs value*2+1 on 5M rows", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("SelectExprs value*2+1 on 1M rows", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 5: Intersect 2.5M x 2.5M
+  // Benchmark 5: Intersect 500K x 500K
   // ---------------------------------------------------------------------------
 
-  "Intersect overhead" should "be measured for 2.5M x 2.5M" in {
+  "Intersect overhead" should "be measured for 500K x 500K" in {
     val sbTimings = (0 until Warmup + Measured).map { _ =>
       val t0 = System.nanoTime()
       val ds = intDataset(intersectData1).intersect(intDataset(intersectData2))
@@ -312,7 +312,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("Intersect 2.5M x 2.5M", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("Intersect 500K x 500K", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
@@ -352,15 +352,15 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("End-to-end: filter -> join (1M x 1M)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("End-to-end: filter -> join (500K x 500K)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 7: GroupByAgg (1M rows, 1K groups)
+  // Benchmark 7: GroupByAgg (500K rows, 1K groups)
   // ---------------------------------------------------------------------------
 
-  "GroupByAgg overhead" should "be measured for 1M rows with 1K groups" in {
+  "GroupByAgg overhead" should "be measured for 500K rows with 1K groups" in {
     val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
     val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
 
@@ -392,15 +392,15 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("GroupByAgg 1M rows (1K groups)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("GroupByAgg 500K rows (1K groups)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
   // ---------------------------------------------------------------------------
-  // Benchmark 8: SortByExprs (1M rows, 2-column sort)
+  // Benchmark 8: SortByExprs (500K rows, 2-column sort)
   // ---------------------------------------------------------------------------
 
-  "SortByExprs overhead" should "be measured for 1M rows with 2-column sort" in {
+  "SortByExprs overhead" should "be measured for 500K rows with 2-column sort" in {
     val quantityCell: Expr[BenchRecord, Int] = Expr.Cell("quantity_value", ColumnIndex(2))
     val idCell: Expr[BenchRecord, Int] = Expr.Cell("id_value", ColumnIndex(3))
 
@@ -431,7 +431,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("SortByExprs 1M rows (2-column sort)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("SortByExprs 500K rows (2-column sort)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 
@@ -439,7 +439,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 9: WithWindow (500K rows, ROW_NUMBER)
   // ---------------------------------------------------------------------------
 
-  "WithWindow overhead" should "be measured for 500K rows with ROW_NUMBER" in {
+  "WithWindow overhead" should "be measured for 200K rows with ROW_NUMBER" in {
     val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
     val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
 
@@ -476,7 +476,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
     }.drop(Warmup)
 
-    formatResult("WithWindow 500K rows (ROW_NUMBER, 1K groups)", medianOf(sbTimings), medianOf(nativeTimings))
+    formatResult("WithWindow 200K rows (ROW_NUMBER, 1K groups)", medianOf(sbTimings), medianOf(nativeTimings))
     sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
   }
 }

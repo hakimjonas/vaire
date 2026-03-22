@@ -30,8 +30,8 @@ lazy val testScalacOptions = Seq(
 
 // Dependencies
 val valarVersion = "0.1.0-SNAPSHOT"
-val saratiVersion = "0.1.0+1-2ddf1386"
-val rumilVersion = "0.2.0+2-281247c0"
+val saratiVersion = "0.1.0+2-c539575a"
+val rumilVersion = "0.2.0+4-6ac28897"
 val eruVersion = "0.1.0-SNAPSHOT"
 val sparkVersion = "4.1.1"
 

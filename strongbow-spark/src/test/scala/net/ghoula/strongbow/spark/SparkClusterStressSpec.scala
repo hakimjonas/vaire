@@ -8,14 +8,14 @@ import net.ghoula.strongbow.types.ColumnIndex
 
 /** Stress tests targeting distributed Spark execution.
   *
-  * These tests use operations that execute natively on Spark (Expr-based filter,
-  * distinct, intersect, except, joinOn, sortByExpr, selectExprs).
+  * These tests use operations that execute natively on Spark (Expr-based filter, distinct,
+  * intersect, except, joinOn, sortByExpr, selectExprs).
   *
-  * Data arrays are allocated once and reused. Verification uses count() or
-  * sampling rather than collecting entire datasets to the driver.
+  * Data arrays are allocated once and reused. Verification uses count() or sampling rather than
+  * collecting entire datasets to the driver.
   *
-  * For real cluster testing (`-Dspark.test.master=spark://...`), increase N
-  * via system property `-Dstress.rows=5000000`.
+  * For real cluster testing (`-Dspark.test.master=spark://...`), increase N via system property
+  * `-Dstress.rows=5000000`.
   */
 class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -107,8 +107,11 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
     val rightKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
 
     val ds = intDataset(joinData1).joinOn(
-      intDataset(joinData2), leftKey, rightKey,
-      ColumnType.IntType, ColumnType.IntType
+      intDataset(joinData2),
+      leftKey,
+      rightKey,
+      ColumnType.IntType,
+      ColumnType.IntType
     )
 
     val df = sparkInterpreter.toDataFrame(ds).toOption.get
@@ -136,7 +139,12 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
 
     val df = sparkInterpreter.toDataFrame(ds).toOption.get
     val count = df.count()
-    val expectedDistinct = Half + quarter - threshold - 1
+    // filtered1: (threshold .. Half-1] → quarter values
+    // filtered2: (threshold+quarter .. Third+Half-1] → Third+Half - (threshold+quarter) - 1 values
+    // These ranges are disjoint so distinct = sum of both
+    val filtered1Count = Half - threshold - 1
+    val filtered2Count = (Third + Half) - (threshold + quarter) - 1
+    val expectedDistinct = filtered1Count + filtered2Count
     count shouldBe expectedDistinct
   }
 

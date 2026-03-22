@@ -10,11 +10,11 @@ import net.ghoula.strongbow.types.ColumnIndex
 
 /** Overhead benchmark: strongbow Dataset plan vs native Spark for identical operations.
   *
-  * Measures three phases separately: (a) DataFrame creation, (b) operation execution,
-  * (c) materialization. Reports strongbow time, native time, and overhead ratio.
+  * Measures three phases separately: (a) DataFrame creation, (b) operation execution, (c)
+  * materialization. Reports strongbow time, native time, and overhead ratio.
   *
-  * Uses count() instead of collect() to avoid OOM on large datasets while still
-  * triggering full Spark execution. Data arrays allocated once, reused across iterations.
+  * Uses count() instead of collect() to avoid OOM on large datasets while still triggering full
+  * Spark execution. Data arrays allocated once, reused across iterations.
   *
   * Runs 5 warmup + 10 measured iterations per operation.
   */
@@ -220,7 +220,8 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
 
     val sbTimings = (0 until Warmup + Measured).map { _ =>
       val t0 = System.nanoTime()
-      val ds = intDataset(joinData1).joinOn(intDataset(joinData2), leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
+      val ds =
+        intDataset(joinData1).joinOn(intDataset(joinData2), leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
       val t1 = System.nanoTime()
       val df = sparkInterpreter.toDataFrame(ds).toOption.get
       val t2 = System.nanoTime()

@@ -107,7 +107,7 @@ lazy val spark = project
       scalaLib213 +: cp
     },
     Test / javaOptions ++= Seq(
-      "-Xmx2G",
+      "-Xmx4G",
       "-Xss4M",
       "-XX:+UseZGC",
       "--add-opens=java.base/java.lang=ALL-UNNAMED",

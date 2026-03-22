@@ -109,6 +109,7 @@ lazy val spark = project
     Test / javaOptions ++= Seq(
       "-Xmx2G",
       "-Xss4M",
+      "-XX:+UseZGC",
       "--add-opens=java.base/java.lang=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",

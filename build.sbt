@@ -109,6 +109,7 @@ lazy val spark = project
     Test / javaOptions ++= Seq(
       "-Xmx6G",
       "-Xss4M",
+      "-XX:ParallelGCThreads=2", // Workaround for JDK-8351900: G1 SIGSEGV in work-stealing queue
       "--add-opens=java.base/java.lang=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",

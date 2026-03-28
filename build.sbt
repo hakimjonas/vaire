@@ -107,9 +107,9 @@ lazy val spark = project
       scalaLib213 +: cp
     },
     Test / javaOptions ++= Seq(
-      "-Xmx6G",
+      "-Xmx4G",
       "-Xss4M",
-      "-XX:ParallelGCThreads=2", // Workaround for JDK-8351900: G1 SIGSEGV in work-stealing queue
+      "-XX:+UseZGC",
       "--add-opens=java.base/java.lang=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
       "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",

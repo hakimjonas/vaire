@@ -178,6 +178,7 @@ object ExprMacro {
       )
     }
 
+    @scala.annotation.tailrec
     def resolveArg(arg: Term): Term = arg match {
       case NamedArg(_, value) => resolveArg(value)
       case Ident(ref) => valBindings.getOrElse(ref, arg)
@@ -380,6 +381,7 @@ object ExprMacro {
     }
   }
 
+  @scala.annotation.tailrec
   private def unwrapTerm(using q: Quotes)(term: q.reflect.Term): q.reflect.Term = {
     import q.reflect.*
     term match {

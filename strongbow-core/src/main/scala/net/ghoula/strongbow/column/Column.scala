@@ -55,20 +55,21 @@ enum Column[+A] {
   /** Untyped single-value extraction for interop boundaries.
     *
     * Returns Any because Column[+A] in a heterogeneous Vector[Column[?]] erases the type parameter.
-    * For typed access, pattern match the Column variant directly to get the typed Array. Returns
+    * For typed access, we pattern match the Column variant directly to get the typed Array. Returns
     * null for SQL NULL rows (BitSet is authoritative).
     */
-  inline def getValue(index: Int): Any | Null = this match {
-    case IntColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case LongColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case DoubleColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case StringColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case BooleanColumn(data, nulls) =>
-      if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
-    case DateColumn(data, nulls) =>
-      if (nulls.contains(index)) null // scalafix:ok DisableSyntax.null
-      else types.Date.ofEpochDay(data(index).toLong)
-    case AnyColumn(data, nulls) => if (nulls.contains(index)) null else data(index) // scalafix:ok DisableSyntax.null
+  inline def getValue(index: Int): Any | Null = { // scalafix:ok DisableSyntax.null
+    if (nullSet.contains(index)) null // scalafix:ok DisableSyntax.null
+    else
+      this match {
+        case IntColumn(data, _) => data(index)
+        case LongColumn(data, _) => data(index)
+        case DoubleColumn(data, _) => data(index)
+        case StringColumn(data, _) => data(index)
+        case BooleanColumn(data, _) => data(index)
+        case DateColumn(data, _) => types.Date.ofEpochDay(data(index).toLong)
+        case AnyColumn(data, _) => data(index)
+      }
   }
 
   /** Typed prefix slicing — takes the first n elements without boxing.
@@ -81,23 +82,18 @@ enum Column[+A] {
     */
   def take(n: Int): Column[A] = {
     val len = Math.min(n, length)
+    val trimmedNulls = nullSet.filter(_ < len)
     this match {
-      case IntColumn(data, nulls) =>
-        IntColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
-      case LongColumn(data, nulls) =>
-        LongColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
-      case DoubleColumn(data, nulls) =>
-        DoubleColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
-      case StringColumn(data, nulls) =>
-        StringColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
-      case BooleanColumn(data, nulls) =>
-        BooleanColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
-      case DateColumn(data, nulls) =>
-        DateColumn(java.util.Arrays.copyOfRange(data, 0, len), nulls.filter(_ < len))
-      case AnyColumn(data, nulls) =>
+      case IntColumn(data, _) => IntColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case LongColumn(data, _) => LongColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case DoubleColumn(data, _) => DoubleColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case StringColumn(data, _) => StringColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case BooleanColumn(data, _) => BooleanColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case DateColumn(data, _) => DateColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case AnyColumn(data, _) =>
         val arr = new Array[Any | Null](len)
         System.arraycopy(data, 0, arr, 0, len)
-        AnyColumn(arr, nulls.filter(_ < len))
+        AnyColumn(arr, trimmedNulls)
     }
   }
 
@@ -114,62 +110,29 @@ enum Column[+A] {
     } else {
       val leftLen = this.length
       val rightLen = other.length
-      val rightNulls = other match {
-        case IntColumn(_, n) => n
-        case LongColumn(_, n) => n
-        case DoubleColumn(_, n) => n
-        case StringColumn(_, n) => n
-        case BooleanColumn(_, n) => n
-        case DateColumn(_, n) => n
-        case AnyColumn(_, n) => n
-      }
-      val leftNulls = this match {
-        case IntColumn(_, n) => n
-        case LongColumn(_, n) => n
-        case DoubleColumn(_, n) => n
-        case StringColumn(_, n) => n
-        case BooleanColumn(_, n) => n
-        case DateColumn(_, n) => n
-        case AnyColumn(_, n) => n
-      }
+      val rightNulls = other.nullSet
+      val leftNulls = this.nullSet
       val combinedNulls = leftNulls | rightNulls.map(_ + leftLen)
 
+      def concatArrays[T: scala.reflect.ClassTag](
+        l: Array[T],
+        r: Array[T],
+        wrap: (Array[T], BitSet) => Column[A]
+      ): Either[ExecutionError, Column[A]] = {
+        val arr = new Array[T](leftLen + rightLen)
+        System.arraycopy(l, 0, arr, 0, leftLen)
+        System.arraycopy(r, 0, arr, leftLen, rightLen)
+        Right(wrap(arr, combinedNulls))
+      }
+
       (this, other) match {
-        case (IntColumn(l, _), IntColumn(r, _)) =>
-          val arr = new Array[Int](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(IntColumn(arr, combinedNulls))
-        case (LongColumn(l, _), LongColumn(r, _)) =>
-          val arr = new Array[Long](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(LongColumn(arr, combinedNulls))
-        case (DoubleColumn(l, _), DoubleColumn(r, _)) =>
-          val arr = new Array[Double](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(DoubleColumn(arr, combinedNulls))
-        case (StringColumn(l, _), StringColumn(r, _)) =>
-          val arr = new Array[String | Null](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(StringColumn(arr, combinedNulls))
-        case (BooleanColumn(l, _), BooleanColumn(r, _)) =>
-          val arr = new Array[Boolean](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(BooleanColumn(arr, combinedNulls))
-        case (DateColumn(l, _), DateColumn(r, _)) =>
-          val arr = new Array[Int](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(DateColumn(arr, combinedNulls))
-        case (AnyColumn(l, _), AnyColumn(r, _)) =>
-          val arr = new Array[Any | Null](leftLen + rightLen)
-          System.arraycopy(l, 0, arr, 0, leftLen)
-          System.arraycopy(r, 0, arr, leftLen, rightLen)
-          Right(AnyColumn(arr, combinedNulls))
+        case (IntColumn(l, _), IntColumn(r, _)) => concatArrays(l, r, IntColumn(_, _))
+        case (LongColumn(l, _), LongColumn(r, _)) => concatArrays(l, r, LongColumn(_, _))
+        case (DoubleColumn(l, _), DoubleColumn(r, _)) => concatArrays(l, r, DoubleColumn(_, _))
+        case (StringColumn(l, _), StringColumn(r, _)) => concatArrays(l, r, StringColumn(_, _))
+        case (BooleanColumn(l, _), BooleanColumn(r, _)) => concatArrays(l, r, BooleanColumn(_, _))
+        case (DateColumn(l, _), DateColumn(r, _)) => concatArrays(l, r, DateColumn(_, _))
+        case (AnyColumn(l, _), AnyColumn(r, _)) => concatArrays(l, r, AnyColumn(_, _))
         case _ =>
           Left(ExecutionError.TypeMismatch(this.columnType.toString, other.columnType.toString, "Column.concat"))
       }
@@ -288,112 +251,55 @@ object Column {
     *   4. The null values never escape to safe code
     *
     * Uses single-pass foldLeft with VectorBuilder to avoid double traversal and short-circuits on
-    * first error.
+    * the first error.
     */
   def fromValues(values: Vector[Any], columnType: ColumnType): Either[ExecutionError, Column[?]] = {
     val nullIndices = values.zipWithIndex.collect {
       case (v, idx) if Option(v).isEmpty => idx
     }.to(BitSet)
 
+    def buildColumn[T: scala.reflect.ClassTag](
+      typeName: String,
+      defaultVal: T,
+      cast: PartialFunction[Any, T],
+      wrap: (Array[T], BitSet) => Column[?]
+    ): Either[ExecutionError, Column[?]] = {
+      val arr = new Array[T](values.length)
+      val error = values.zipWithIndex.foldLeft(Option.empty[ExecutionError]) {
+        case (err @ Some(_), _) => err
+        case (None, (v, idx)) =>
+          Option(v) match {
+            case None => arr(idx) = defaultVal; None
+            case Some(x) if cast.isDefinedAt(x) => arr(idx) = cast(x); None
+            case Some(x) => Some(ExecutionError.TypeMismatch(typeName, x.getClass.getSimpleName, "Column.fromValues"))
+          }
+      }
+      error.toLeft(wrap(arr, nullIndices))
+    }
+
     columnType match {
       case ColumnType.IntType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Int]]](
-          Right(new scala.collection.immutable.VectorBuilder[Int]())
-        ) {
-          case (Left(err), _) => Left(err)
-          case (Right(builder), v) =>
-            Option(v) match {
-              case None => Right(builder += 0)
-              case Some(i: Int) => Right(builder += i)
-              case Some(other) =>
-                Left(ExecutionError.TypeMismatch("Int", other.getClass.getSimpleName, "Column.fromValues"))
-            }
-        }
-
-        result.map(builder => IntColumn(builder.result().toArray, nullIndices))
-
+        buildColumn[Int]("Int", 0, { case i: Int => i }, IntColumn(_, _))
       case ColumnType.LongType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Long]]](
-          Right(new scala.collection.immutable.VectorBuilder[Long]())
-        ) {
-          case (Left(err), _) => Left(err)
-          case (Right(builder), v) =>
-            Option(v) match {
-              case None => Right(builder += 0L)
-              case Some(l: Long) => Right(builder += l)
-              case Some(other) =>
-                Left(ExecutionError.TypeMismatch("Long", other.getClass.getSimpleName, "Column.fromValues"))
-            }
-        }
-
-        result.map(builder => LongColumn(builder.result().toArray, nullIndices))
-
+        buildColumn[Long]("Long", 0L, { case l: Long => l }, LongColumn(_, _))
       case ColumnType.DoubleType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Double]]](
-          Right(new scala.collection.immutable.VectorBuilder[Double]())
-        ) {
-          case (Left(err), _) => Left(err)
-          case (Right(builder), v) =>
-            Option(v) match {
-              case None => Right(builder += 0.0)
-              case Some(d: Double) => Right(builder += d)
-              case Some(other) =>
-                Left(ExecutionError.TypeMismatch("Double", other.getClass.getSimpleName, "Column.fromValues"))
-            }
-        }
-
-        result.map(builder => DoubleColumn(builder.result().toArray, nullIndices))
-
+        buildColumn[Double]("Double", 0.0, { case d: Double => d }, DoubleColumn(_, _))
       case ColumnType.StringType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[String | Null]]](
-          Right(new scala.collection.immutable.VectorBuilder[String | Null]())
-        ) {
-          case (Left(err), _) => Left(err)
-          case (Right(builder), v) =>
-            Option(v) match {
-              case None =>
-                Right(builder += null) // scalafix:ok DisableSyntax.null
-              case Some(s: String) => Right(builder += s)
-              case Some(other) =>
-                Left(ExecutionError.TypeMismatch("String", other.getClass.getSimpleName, "Column.fromValues"))
-            }
-        }
-
-        result.map(builder => StringColumn(builder.result().toArray, nullIndices))
-
+        buildColumn[String | Null](
+          "String",
+          null,
+          { case s: String => s },
+          StringColumn(_, _)
+        ) // scalafix:ok DisableSyntax.null
       case ColumnType.BooleanType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Boolean]]](
-          Right(new scala.collection.immutable.VectorBuilder[Boolean]())
-        ) {
-          case (Left(err), _) => Left(err)
-          case (Right(builder), v) =>
-            Option(v) match {
-              case None => Right(builder += false)
-              case Some(b: Boolean) => Right(builder += b)
-              case Some(other) =>
-                Left(ExecutionError.TypeMismatch("Boolean", other.getClass.getSimpleName, "Column.fromValues"))
-            }
-        }
-
-        result.map(builder => BooleanColumn(builder.result().toArray, nullIndices))
-
+        buildColumn[Boolean]("Boolean", false, { case b: Boolean => b }, BooleanColumn(_, _))
       case ColumnType.DateType =>
-        val result = values.foldLeft[Either[ExecutionError, scala.collection.immutable.VectorBuilder[Int]]](
-          Right(new scala.collection.immutable.VectorBuilder[Int]())
-        ) {
-          case (Left(err), _) => Left(err)
-          case (Right(builder), v) =>
-            Option(v) match {
-              case None => Right(builder += 0)
-              case Some(d: java.time.LocalDate) => Right(builder += d.toEpochDay.toInt)
-              case Some(i: Int) => Right(builder += i)
-              case Some(other) =>
-                Left(ExecutionError.TypeMismatch("LocalDate", other.getClass.getSimpleName, "Column.fromValues"))
-            }
-        }
-
-        result.map(builder => DateColumn(builder.result().toArray, nullIndices))
-
+        buildColumn[Int](
+          "LocalDate",
+          0,
+          { case d: java.time.LocalDate => d.toEpochDay.toInt; case i: Int => i },
+          DateColumn(_, _)
+        )
       case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         Right(AnyColumn(values.toArray, nullIndices))
     }

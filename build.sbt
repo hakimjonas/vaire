@@ -109,6 +109,19 @@ lazy val spark = project
       )
       scalaLib213 +: cp
     },
+    assembly / assemblyJarName := "strongbow-spark-bench.jar",
+    assembly / mainClass := Some("net.ghoula.strongbow.spark.BenchRunner"),
+    assembly / fullClasspath := (Test / fullClasspath).value,
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
+      case PathList("META-INF", x, _*) if x.endsWith(".SF") || x.endsWith(".DSA") || x.endsWith(".RSA") =>
+        MergeStrategy.discard
+      case PathList("META-INF", "services", _*) => MergeStrategy.concat
+      case PathList("META-INF", _*) => MergeStrategy.first
+      case "module-info.class" => MergeStrategy.discard
+      case x if x.endsWith(".class") => MergeStrategy.first
+      case _ => MergeStrategy.first
+    },
     Test / javaOptions ++= Seq(
       "-Xmx4G",
       "-Xss4M",

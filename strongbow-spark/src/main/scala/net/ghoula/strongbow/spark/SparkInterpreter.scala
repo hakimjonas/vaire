@@ -501,14 +501,6 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     }
   }
 
-  private def renameCols(df: DataFrame, schema: Schema[?]): DataFrame = {
-    val outputColNames = schema.columnNames
-    val currentColNames = df.columns.toVector
-    currentColNames.zip(outputColNames).foldLeft(df) { case (acc, (current, target)) =>
-      if (current != target) acc.withColumnRenamed(current, target) else acc
-    }
-  }
-
   private def convertToSparkCols[Row](
     specs: Vector[Expr[Row, ?]],
     context: String
@@ -544,7 +536,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       aggCols <- convertNamedExprsToSparkCols(aggSpecs.map(s => (s.expr, s.name)), "Agg expr conversion failed")
     } yield {
       val aggDf = parent.df.groupBy(keyCols*).agg(aggCols.head, aggCols.tail*)
-      SparkPlan(renameCols(aggDf, schema), schema)
+      SparkPlan(aggDf, schema)
     }
   }
 
@@ -555,7 +547,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
   ): Either[ExecutionError, SparkPlan[T]] = {
     convertNamedExprsToSparkCols(aggSpecs.map(s => (s.expr, s.name)), "Agg expr conversion failed").map { aggCols =>
       val aggDf = parent.df.agg(aggCols.head, aggCols.tail*)
-      SparkPlan(renameCols(aggDf, schema), schema)
+      SparkPlan(aggDf, schema)
     }
   }
 

@@ -20,14 +20,14 @@ import net.ghoula.strongbow.prelude.*
   *
   * Tests distributed equi-join + filter + CASE WHEN + LIKE + SumDouble.
   */
-class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
+class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  import TpchData.{LineItem, Part, lineItemSchema, partSchema}
+  import E2eTestData.{LineItem, Part, lineItemSchema, partSchema}
 
   "TPC-H Q14" should "produce identical results via strongbow and native Spark" in {
-    val items = TpchData.generateLineItems(100_000)
+    val items = E2eTestData.generateLineItems(100_000)
     val partCount = 200_000
-    val parts = TpchData.generateParts(partCount)
+    val parts = E2eTestData.generateParts(partCount)
 
     // --- Reference: compute in Scala ---
     val partMap = parts.map(p => p.p_partkey -> p).toMap
@@ -52,8 +52,8 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
     // Right (Part): _2_p_partkey_value(16) .. _2_p_comment_value(24)      (9 columns)
     given Schema[(LineItem, Part)] = Schema.tuple2Schema[LineItem, Part]
 
-    val liDs = TpchData.lineItemDataset(items)
-    val partDs = TpchData.partDataset(parts)
+    val liDs = E2eTestData.lineItemDataset(items)
+    val partDs = E2eTestData.partDataset(parts)
 
     val liPartkey: Expr[LineItem, Long] = Expr.Cell("l_partkey_value", ColumnIndex(1))
     val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey_value", ColumnIndex(0))
@@ -230,13 +230,13 @@ class TpchQ14Spec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   it should "correctly filter with LIKE in the CASE WHEN" in {
     // Small test: verify Like works in the join+filter+when pipeline
-    val items = TpchData.generateLineItems(1_000)
-    val parts = TpchData.generateParts(200_000)
+    val items = E2eTestData.generateLineItems(1_000)
+    val parts = E2eTestData.generateParts(200_000)
 
     given Schema[(LineItem, Part)] = Schema.tuple2Schema[LineItem, Part]
 
-    val liDs = TpchData.lineItemDataset(items)
-    val partDs = TpchData.partDataset(parts)
+    val liDs = E2eTestData.lineItemDataset(items)
+    val partDs = E2eTestData.partDataset(parts)
 
     val liPartkey: Expr[LineItem, Long] = Expr.Cell("l_partkey_value", ColumnIndex(1))
     val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey_value", ColumnIndex(0))

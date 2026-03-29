@@ -8,7 +8,7 @@ import net.ghoula.strongbow.prelude.*
   * seeded PRNG for reproducibility. Field types follow TPC-H but use Double for DECIMAL (strongbow
   * has no BigDecimal) and String for DATE (ISO-8601 format).
   */
-object TpchData {
+object E2eTestData {
 
   // --- LineItem ---
 

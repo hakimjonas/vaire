@@ -20,9 +20,9 @@ import net.ghoula.strongbow.prelude.*
   * This is the simplest TPC-H query — filter + single aggregate. After adding SumDouble to Expr,
   * this is fully expressible in strongbow using distributed Expr-based operations.
   */
-class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
+class E2eRevenueQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  import TpchData.LineItem
+  import E2eTestData.LineItem
 
   // Column indices for LineItem (16-field case class, each primitive → 1 column)
   private val shipdate: Expr[LineItem, String] = Expr.Cell("l_shipdate_value", ColumnIndex(10))
@@ -31,8 +31,8 @@ class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
   private val extendedprice: Expr[LineItem, Double] = Expr.Cell("l_extendedprice_value", ColumnIndex(5))
 
   "TPC-H Q6" should "produce identical results via strongbow and native Spark" in {
-    val items = TpchData.generateLineItems(100_000)
-    val ds = TpchData.lineItemDataset(items)
+    val items = E2eTestData.generateLineItems(100_000)
+    val ds = E2eTestData.lineItemDataset(items)
 
     // --- Reference: compute in Scala ---
     val scalaRevenue = items
@@ -143,8 +143,8 @@ class TpchQ6Spec extends AnyFlatSpec with Matchers with SparkTestBase {
   }
 
   it should "show identical Spark physical plans" in {
-    val items = TpchData.generateLineItems(1_000)
-    val ds = TpchData.lineItemDataset(items)
+    val items = E2eTestData.generateLineItems(1_000)
+    val ds = E2eTestData.lineItemDataset(items)
 
     val predicate =
       (shipdate >= Expr.lit[LineItem, String]("1994-01-01")) &&

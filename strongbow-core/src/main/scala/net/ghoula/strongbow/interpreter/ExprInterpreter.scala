@@ -549,37 +549,24 @@ object ExprInterpreter {
             lowerCol <- evalColumn(btw.lower, columns, innerType)
             upperCol <- evalColumn(btw.upper, columns, innerType)
             result <- {
+              def between[T](vd: Array[T], vn: BitSet, ld: Array[T], ln: BitSet, ud: Array[T], un: BitSet)(
+                gte: (T, T) => Boolean,
+                lte: (T, T) => Boolean
+              ): Either[ExecutionError, Column[?]] = {
+                val combined = vn | ln | un
+                Right(Column.boolean(
+                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else gte(vd(i), ld(i)) && lte(vd(i), ud(i))),
+                  combined
+                ))
+              }
+
               (exprCol, lowerCol, upperCol) match {
                 case (Column.IntColumn(vd, vn), Column.IntColumn(ld, ln), Column.IntColumn(ud, un)) =>
-                  val combined = vn | ln | un
-                  Right(
-                    Column.boolean(
-                      Array.tabulate(rowCount)(i =>
-                        if (combined.contains(i)) false else vd(i) >= ld(i) && vd(i) <= ud(i)
-                      ),
-                      combined
-                    )
-                  )
+                  between(vd, vn, ld, ln, ud, un)(_ >= _, _ <= _)
                 case (Column.LongColumn(vd, vn), Column.LongColumn(ld, ln), Column.LongColumn(ud, un)) =>
-                  val combined = vn | ln | un
-                  Right(
-                    Column.boolean(
-                      Array.tabulate(rowCount)(i =>
-                        if (combined.contains(i)) false else vd(i) >= ld(i) && vd(i) <= ud(i)
-                      ),
-                      combined
-                    )
-                  )
+                  between(vd, vn, ld, ln, ud, un)(_ >= _, _ <= _)
                 case (Column.DoubleColumn(vd, vn), Column.DoubleColumn(ld, ln), Column.DoubleColumn(ud, un)) =>
-                  val combined = vn | ln | un
-                  Right(
-                    Column.boolean(
-                      Array.tabulate(rowCount)(i =>
-                        if (combined.contains(i)) false else vd(i) >= ld(i) && vd(i) <= ud(i)
-                      ),
-                      combined
-                    )
-                  )
+                  between(vd, vn, ld, ln, ud, un)(_ >= _, _ <= _)
                 case _ =>
                   Left(ExecutionError.UnsupportedOperation("Between not supported for untyped columns"))
               }

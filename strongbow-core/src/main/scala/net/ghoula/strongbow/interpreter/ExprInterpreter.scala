@@ -1635,9 +1635,7 @@ object ExprInterpreter {
         case avg: Expr.Avg[Row] =>
           evalColumn(avg.expr, columns, ColumnType.DoubleType).map {
             case Column.DoubleColumn(data, nulls) =>
-              val (total, count) = data.indices.foldLeft((0.0, 0)) { case ((sum, cnt), i) =>
-                if (nulls.contains(i)) (sum, cnt) else (sum + data(i), cnt + 1)
-              }
+              val (total, count) = sumAndCount(data, nulls)
               if (count == 0) 0.0 else total / count
             case _ => 0.0
           }

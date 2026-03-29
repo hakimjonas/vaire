@@ -1,9 +1,12 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.internal
 
 import scala.deriving.Mirror
 import scala.quoted.{Expr as QExpr, *}
 
-import net.ghoula.strongbow.Expr as SExpr
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.ColumnType
+import net.ghoula.strongbow.dataset.Dataset
+import net.ghoula.strongbow.expr.Expr as SExpr
 import net.ghoula.strongbow.types.ColumnIndex
 
 object ExprMacro {

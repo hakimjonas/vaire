@@ -3,10 +3,7 @@ package net.ghoula.strongbow.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{Column, ColumnType, Dataset, Expr, Schema}
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
-import net.ghoula.strongbow.WindowSpec
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** Overhead benchmark: strongbow Dataset plan vs native Spark for identical operations.
   *

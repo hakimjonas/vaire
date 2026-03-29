@@ -1,8 +1,9 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.column
 
 import scala.collection.immutable.BitSet
 
 import net.ghoula.strongbow.errors.ExecutionError
+import net.ghoula.strongbow.types
 import net.ghoula.strongbow.types.RowIndex
 
 /** Specialized columnar storage avoiding boxing.

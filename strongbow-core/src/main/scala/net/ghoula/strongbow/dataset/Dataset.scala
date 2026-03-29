@@ -1,7 +1,10 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.dataset
 
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.{Column, ColumnType}
 import net.ghoula.strongbow.errors.{NonEmptyList, SchemaError}
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
+import net.ghoula.strongbow.expr.Expr
+import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Immutable description of dataset transformations.
   *

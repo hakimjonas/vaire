@@ -1,6 +1,4 @@
-package net.ghoula.strongbow
-
-import net.ghoula.strongbow.specs.{KeySpec, SortSpec}
+package net.ghoula.strongbow.params
 
 /** Specification for window function partitioning and ordering.
   *

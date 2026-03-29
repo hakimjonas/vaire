@@ -4,7 +4,9 @@ import scala.collection.immutable.BitSet
 
 import org.apache.spark.sql.Row
 
-import net.ghoula.strongbow.{Column, ColumnType, MaterializedDataset, Schema}
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.{Column, ColumnType}
+import net.ghoula.strongbow.dataset.MaterializedDataset
 import net.ghoula.strongbow.errors.{DecodeError, ExecutionError}
 
 /** Type bridge between Strongbow values and Spark Rows using Schema[T]. */

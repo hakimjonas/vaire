@@ -1,11 +1,13 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.interpreter
 
 import net.ghoula.sarati.ast.json.JsonValue
 import parsers.json.{formatJson, parseJson}
 
 import scala.collection.immutable.BitSet
 
+import net.ghoula.strongbow.column.{Column, ColumnType}
 import net.ghoula.strongbow.errors.ExecutionError
+import net.ghoula.strongbow.expr.Expr
 import net.ghoula.strongbow.types.{Date, RowIndex}
 
 /** Zero-cast expression interpreter using typed columnar storage.

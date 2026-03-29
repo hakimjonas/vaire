@@ -1,7 +1,8 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.expr
 
 import scala.annotation.targetName
 
+import net.ghoula.strongbow.column.ColumnType
 import net.ghoula.strongbow.types.{ColumnIndex, Date}
 
 /** Type-safe expression language for dataset operations.

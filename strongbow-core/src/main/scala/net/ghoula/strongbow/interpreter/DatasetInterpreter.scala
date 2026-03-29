@@ -1,7 +1,12 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.interpreter
 
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.{Column, ColumnType}
+import net.ghoula.strongbow.dataset.{Dataset, InMemorySource, MaterializedDataset}
 import net.ghoula.strongbow.errors.ExecutionError
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
+import net.ghoula.strongbow.expr.Expr
+import net.ghoula.strongbow.internal.JoinOps
+import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Main interpreter for Dataset execution.
   *
@@ -18,7 +23,7 @@ object DatasetInterpreter extends Interpreter {
           case InMemorySource(columns) => Right(MaterializedDataset(columns, root.schema))
           case other =>
             Left(
-              errors.ExecutionError.UnsupportedOperation(
+              ExecutionError.UnsupportedOperation(
                 s"DatasetInterpreter does not support ${other.getClass.getSimpleName}"
               )
             )

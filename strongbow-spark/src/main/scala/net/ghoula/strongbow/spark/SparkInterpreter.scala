@@ -2,19 +2,14 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.{DataFrame, SparkSession}
 
-import net.ghoula.strongbow.{
-  Column,
-  ColumnType,
-  Dataset,
-  Expr,
-  ExprInterpreter,
-  Interpreter,
-  JoinOps,
-  MaterializedDataset,
-  Schema
-}
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.{Column, ColumnType}
+import net.ghoula.strongbow.dataset.{Dataset, InMemorySource, MaterializedDataset}
 import net.ghoula.strongbow.errors.ExecutionError
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
+import net.ghoula.strongbow.expr.Expr
+import net.ghoula.strongbow.internal.JoinOps
+import net.ghoula.strongbow.interpreter.{ExprInterpreter, Interpreter}
+import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Spark-based interpreter for Strongbow Dataset plans.
   *
@@ -49,7 +44,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         root.source match {
           case SparkSource(df) =>
             Right(SparkPlan(df, root.schema))
-          case net.ghoula.strongbow.InMemorySource(columns) =>
+          case InMemorySource(columns) =>
             val df = DataFrameBuilder.fromColumns(spark, columns, root.schema)
             Right(SparkPlan(df, root.schema))
           case other =>
@@ -478,7 +473,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
   }
 
   private def convertExprs(
-    exprs: Vector[(String, Expr[?, Any], net.ghoula.strongbow.ColumnType)]
+    exprs: Vector[(String, Expr[?, Any], ColumnType)]
   ): Either[ExecutionError, Vector[org.apache.spark.sql.Column]] = {
     exprs.foldLeft[Either[ExecutionError, Vector[org.apache.spark.sql.Column]]](Right(Vector.empty)) {
       case (acc, (name, expr, _)) =>
@@ -575,7 +570,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
   private def applyWithWindow[In, T](
     parent: SparkPlan[In],
     windowExprs: Vector[WindowExprSpec[In]],
-    windowSpec: net.ghoula.strongbow.WindowSpec[In],
+    windowSpec: WindowSpec[In],
     schema: Schema[T]
   ): Either[ExecutionError, SparkPlan[T]] = {
     import org.apache.spark.sql.expressions.Window

@@ -5,9 +5,7 @@ import org.apache.spark.sql.{functions => F}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{ColumnType, Dataset, Expr, Schema}
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 import scala.util.Random
 
@@ -60,10 +58,12 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
     val javaRows = java.util.Arrays.asList(
       Array.tabulate(rows)(i => Row(s"group${r.nextInt(groups)}", r.nextInt(1000)))*
     )
-    val structType = StructType(Array(
-      StructField("key_value", SparkStringType, nullable = false),
-      StructField("value_value", IntegerType, nullable = false)
-    ))
+    val structType = StructType(
+      Array(
+        StructField("key_value", SparkStringType, nullable = false),
+        StructField("value_value", IntegerType, nullable = false)
+      )
+    )
     val df = spark.createDataFrame(javaRows, structType).cache()
     df.count()
     df
@@ -106,7 +106,9 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
     info(f"\n${"=" * 85}")
     info(f"$label rows, $NumGroups groups (Spark 4.1.1)")
     info(f"${"=" * 85}")
-    info(f"${"Operation"}%-16s  ${"Plan(SB)"}%10s ${"Plan(Nat)"}%10s ${"Exec(SB)"}%10s ${"Exec(Nat)"}%10s ${"Overhead"}%10s")
+    info(
+      f"${"Operation"}%-16s  ${"Plan(SB)"}%10s ${"Plan(Nat)"}%10s ${"Exec(SB)"}%10s ${"Exec(Nat)"}%10s ${"Overhead"}%10s"
+    )
     info("-" * 85)
   }
 

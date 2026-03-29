@@ -3,8 +3,7 @@ package net.ghoula.strongbow.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{Column, Dataset, DatasetInterpreter, Expr, Schema}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** End-to-end workflow tests: chained operations with parity checks. */
 class SparkWorkflowSpec extends AnyFlatSpec with Matchers with SparkTestBase {
@@ -56,9 +55,7 @@ class SparkWorkflowSpec extends AnyFlatSpec with Matchers with SparkTestBase {
   }
 
   "using SparkInterpreter via DatasetActions" should "work with given" in {
-    import net.ghoula.strongbow.DatasetActions.*
-
-    given net.ghoula.strongbow.Interpreter = sparkInterpreter
+    given Interpreter = sparkInterpreter
 
     val col = Column.int(Array(1, 2, 3))
     val ds = Dataset.fromColumns(Vector(col), Schema.intSchema).toOption.get

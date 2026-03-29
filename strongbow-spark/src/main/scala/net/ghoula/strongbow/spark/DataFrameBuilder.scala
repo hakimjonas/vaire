@@ -2,7 +2,9 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
-import net.ghoula.strongbow.{Column => SBColumn, MaterializedDataset, Schema}
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.{Column => SBColumn}
+import net.ghoula.strongbow.dataset.MaterializedDataset
 
 /** Helper to create Spark DataFrames from Strongbow's columnar storage. */
 object DataFrameBuilder {

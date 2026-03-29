@@ -1,6 +1,6 @@
 package net.ghoula.strongbow.errors
 
-import net.ghoula.strongbow.ColumnType
+import net.ghoula.strongbow.column.ColumnType
 
 /** Errors that occur during schema validation.
   *

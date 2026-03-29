@@ -3,8 +3,7 @@ package net.ghoula.strongbow.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{ColumnType, Expr, Schema}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** TPC-H Q6 proof-of-concept: strongbow Dataset plan vs native Spark SQL.
   *

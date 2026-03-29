@@ -2,8 +2,10 @@ package net.ghoula.strongbow.agg
 
 import scala.deriving.Mirror
 
-import net.ghoula.strongbow.specs.AggSpec
-import net.ghoula.strongbow.{ColumnType, Expr, ExprMacro}
+import net.ghoula.strongbow.column.ColumnType
+import net.ghoula.strongbow.expr.Expr
+import net.ghoula.strongbow.internal.ExprMacro
+import net.ghoula.strongbow.params.AggSpec
 
 /** Ergonomic builder methods for creating AggSpec instances using field-access lambdas.
   *

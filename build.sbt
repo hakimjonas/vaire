@@ -24,20 +24,14 @@ lazy val sharedScalacOptions = Seq(
   "-Yexplicit-nulls"
 )
 
-lazy val testScalacOptions = Seq(
-  "-Wunused:imports"
-)
-
 // Dependencies
-val valarVersion = "0.1.0-SNAPSHOT"
 val saratiVersion = "0.1.0+2-c539575a"
 val rumilVersion = "0.2.0+4-6ac28897"
-val eruVersion = "0.1.0-SNAPSHOT"
 val sparkVersion = "4.1.1"
 
 lazy val root = project
   .in(file("."))
-  .aggregate(core, columnar, spark, bench)
+  .aggregate(core, spark)
   .settings(
     name := "strongbow",
     publish / skip := true
@@ -54,15 +48,6 @@ lazy val core = project
       "org.scalatest" %% "scalatest" % "3.2.19" % Test,
       "org.scalacheck" %% "scalacheck" % "1.18.1" % Test
     )
-  )
-
-lazy val columnar = project
-  .in(file("strongbow-columnar"))
-  .dependsOn(core)
-  .settings(
-    name := "strongbow-columnar",
-    scalacOptions ++= sharedScalacOptions
-    // No extra dependencies—just core
   )
 
 lazy val spark = project
@@ -143,42 +128,5 @@ lazy val spark = project
     }
   )
 
-// Optional integration modules (commented out until dependencies are published):
-//
-// lazy val validation = project
-//   .in(file("strongbow-validation"))
-//   .dependsOn(core)
-//   .settings(
-//     name := "strongbow-validation",
-//     scalacOptions ++= sharedScalacOptions,
-//     libraryDependencies ++= Seq(
-//       "net.ghoula" %% "valar-core" % valarVersion
-//     )
-//   )
-//
-// lazy val effects = project
-//   .in(file("strongbow-effects"))
-//   .dependsOn(core, columnar)
-//   .settings(
-//     name := "strongbow-effects",
-//     scalacOptions ++= sharedScalacOptions,
-//     libraryDependencies ++= Seq(
-//       "net.ghoula" %% "eru-core" % eruVersion
-//     )
-//   )
-
-lazy val bench = project
-  .in(file("strongbow-bench"))
-  .dependsOn(core, columnar)
-  .settings(
-    name := "strongbow-bench",
-    scalacOptions ++= testScalacOptions,
-    publish / skip := true,
-    fork := true,
-    javaOptions ++= Seq("-Xms8G", "-Xmx48G", "-Xss4M", "-XX:+UseZGC"),
-    // Benchmarks excluded from scalafix - performance code may use vars/unsafe patterns
-    scalafixOnCompile := false
-  )
-
 // Command aliases
-addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; columnar/scalafixAll; Test/compile")
+addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; Test/compile")

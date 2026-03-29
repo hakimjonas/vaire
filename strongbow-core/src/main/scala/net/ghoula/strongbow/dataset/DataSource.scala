@@ -1,4 +1,6 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.dataset
+
+import net.ghoula.strongbow.column.Column
 
 /** Capability trait representing a physical data source.
   *

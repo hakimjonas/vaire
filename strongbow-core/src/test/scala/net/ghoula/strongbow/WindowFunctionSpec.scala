@@ -3,7 +3,7 @@ package net.ghoula.strongbow
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.specs.{KeySpec, SortSpec, WindowExprSpec}
+import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
 
 class WindowFunctionSpec extends AnyFlatSpec with Matchers {

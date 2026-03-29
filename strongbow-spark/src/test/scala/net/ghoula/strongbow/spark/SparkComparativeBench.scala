@@ -8,9 +8,7 @@ import java.lang.management.ManagementFactory
 import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
-import net.ghoula.strongbow.{ColumnType, Dataset, Expr, Schema}
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** Head-to-head Spark benchmark matching dwh-core's SparkComparativeBenchmark.
   *

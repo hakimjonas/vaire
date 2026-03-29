@@ -10,7 +10,7 @@ import org.apache.spark.sql.types.{
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{ColumnType, Schema}
+import net.ghoula.strongbow.prelude.*
 
 class SchemaConverterSpec extends AnyFlatSpec with Matchers {
 

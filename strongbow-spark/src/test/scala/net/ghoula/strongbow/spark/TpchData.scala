@@ -1,6 +1,6 @@
 package net.ghoula.strongbow.spark
 
-import net.ghoula.strongbow.{Column, ColumnType, Dataset, Schema}
+import net.ghoula.strongbow.prelude.*
 
 /** Synthetic TPC-H data generators for proof-of-concept queries.
   *

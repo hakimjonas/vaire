@@ -5,6 +5,8 @@ import org.scalatest.matchers.should.Matchers
 
 import scala.compiletime.testing.{typeCheckErrors, typeChecks}
 
+import net.ghoula.strongbow.prelude.*
+
 /** Proves that GADT refinement is preserved when using ? wildcards in pattern matches.
   *
   * Uses scala.compiletime.testing to verify at compile time that:

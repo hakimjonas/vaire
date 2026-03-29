@@ -1,6 +1,8 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.dataset
 
-import net.ghoula.strongbow.errors.ExecutionError
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.Column
+import net.ghoula.strongbow.errors.{DecodeError, ExecutionError}
 
 /** Result of executing a Dataset plan.
   *
@@ -30,7 +32,7 @@ final case class MaterializedDataset[T](
   def column(idx: Int): Column[?] = columns(idx)
 
   /** Get all rows as a Vector. Decodes each row using the schema. */
-  def toVector: Vector[Either[errors.DecodeError, T]] = {
+  def toVector: Vector[Either[DecodeError, T]] = {
     (0 until rowCount).map { rowIdx =>
       val values = columns.map(_.getValue(rowIdx))
       schema.decode(values)
@@ -50,7 +52,7 @@ final case class MaterializedDataset[T](
   }
 
   /** Iterate over rows. */
-  def foreach(f: Either[errors.DecodeError, T] => Unit): Unit = {
+  def foreach(f: Either[DecodeError, T] => Unit): Unit = {
     (0 until rowCount).foreach { rowIdx =>
       val values = columns.map(_.getValue(rowIdx))
       f(schema.decode(values))

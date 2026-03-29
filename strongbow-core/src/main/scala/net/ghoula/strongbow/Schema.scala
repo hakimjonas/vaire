@@ -3,6 +3,7 @@ package net.ghoula.strongbow
 import scala.deriving.Mirror
 import scala.quoted.{Expr, Quotes, Type}
 
+import net.ghoula.strongbow.column.ColumnType
 import net.ghoula.strongbow.errors.DecodeError
 
 /** Type-level schema representation.

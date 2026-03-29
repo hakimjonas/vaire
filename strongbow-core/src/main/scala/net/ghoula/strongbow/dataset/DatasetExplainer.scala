@@ -1,4 +1,4 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.dataset
 
 /** Formats Dataset AST as human-readable string. */
 object DatasetExplainer {

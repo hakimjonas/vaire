@@ -14,7 +14,8 @@ import org.apache.spark.sql.types.{
   StructType
 }
 
-import net.ghoula.strongbow.{ColumnType, Schema}
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.ColumnType
 
 /** Bidirectional conversion between Strongbow Schema/ColumnType and Spark StructType/DataType. */
 object SchemaConverter {

@@ -2,7 +2,8 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.DataFrame
 
-import net.ghoula.strongbow.{Dataset, Schema}
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.dataset.Dataset
 
 /** Factory methods for creating Strongbow Datasets backed by Spark DataFrames.
   *

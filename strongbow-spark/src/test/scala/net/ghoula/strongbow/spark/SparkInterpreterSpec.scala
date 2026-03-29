@@ -3,9 +3,7 @@ package net.ghoula.strongbow.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{Column, ColumnType, Dataset, DatasetInterpreter, Expr, Schema}
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** Parity tests: every Dataset operation should produce the same result via SparkInterpreter as via
   * DatasetInterpreter (in-memory columnar).
@@ -404,7 +402,6 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     val amountCol = Column.double(Array(10.0, 20.0, 30.0))
     val ds = Dataset.fromColumns(Vector(regionCol, amountCol), saleSchema).toOption.get
 
-    import net.ghoula.strongbow.specs.{AggSpec, KeySpec}
     val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
     val amountCell: Expr[Sale, Double] = Expr.Cell("amount_value", ColumnIndex(1))
     val keys = Vector(KeySpec[Sale, Any]("region", regionCell, ColumnType.StringType))

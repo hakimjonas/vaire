@@ -13,15 +13,24 @@ package net.ghoula.strongbow
   *   }}}
   */
 object prelude {
-  export net.ghoula.strongbow.{Dataset, Expr, Column, ColumnType, Schema, DataSource, InMemorySource}
-  export net.ghoula.strongbow.MaterializedDataset
-  export net.ghoula.strongbow.{Interpreter, DatasetInterpreter, ExprInterpreter}
+  export net.ghoula.strongbow.column.{Column, ColumnType}
+  export net.ghoula.strongbow.dataset.{
+    Dataset,
+    DatasetActions,
+    DatasetExplainer,
+    DataSource,
+    InMemorySource,
+    MaterializedDataset
+  }
+  export net.ghoula.strongbow.dataset.DatasetActions.*
+  export net.ghoula.strongbow.expr.Expr
+  export net.ghoula.strongbow.interpreter.{DatasetInterpreter, ExprInterpreter, Interpreter}
+  export net.ghoula.strongbow.Schema
   export net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
   export net.ghoula.strongbow.errors.{SchemaError, DecodeError, ExecutionError, NonEmptyList}
-  export net.ghoula.strongbow.DatasetActions.*
-  export net.ghoula.strongbow.specs.{SortSpec, KeySpec, AggSpec, WindowExprSpec}
-  export net.ghoula.strongbow.DatasetExplainer
-  export net.ghoula.strongbow.ExprMacro
+  export net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
+  export net.ghoula.strongbow.internal.ExprMacro
+  export net.ghoula.strongbow.internal.{where, sortByColumn, withFields, project}
   export net.ghoula.strongbow.agg.AggBuilders as agg
   export net.ghoula.strongbow.agg.as
 }

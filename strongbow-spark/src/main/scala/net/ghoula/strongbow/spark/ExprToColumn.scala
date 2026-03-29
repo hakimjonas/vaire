@@ -3,8 +3,9 @@ package net.ghoula.strongbow.spark
 import org.apache.spark.sql.{Column => SparkColumn}
 import org.apache.spark.sql.functions.{when => sparkWhen, *}
 
-import net.ghoula.strongbow.{ColumnType, Expr}
+import net.ghoula.strongbow.column.ColumnType
 import net.ghoula.strongbow.errors.ExecutionError
+import net.ghoula.strongbow.expr.Expr
 
 /** Translates Strongbow Expr cases to Spark SQL Column expressions.
   *

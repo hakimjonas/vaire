@@ -1,4 +1,4 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.internal
 
 private[strongbow] object JoinOps {
 

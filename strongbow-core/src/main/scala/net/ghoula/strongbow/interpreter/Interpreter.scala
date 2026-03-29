@@ -1,5 +1,6 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.interpreter
 
+import net.ghoula.strongbow.dataset.{Dataset, MaterializedDataset}
 import net.ghoula.strongbow.errors.ExecutionError
 
 /** Shared contract for dataset execution backends.

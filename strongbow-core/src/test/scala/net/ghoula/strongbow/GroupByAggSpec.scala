@@ -3,7 +3,7 @@ package net.ghoula.strongbow
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec}
+import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
 
 class GroupByAggSpec extends AnyFlatSpec with Matchers {

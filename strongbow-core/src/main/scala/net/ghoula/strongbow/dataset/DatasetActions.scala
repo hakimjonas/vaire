@@ -1,6 +1,7 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.dataset
 
 import net.ghoula.strongbow.errors.ExecutionError
+import net.ghoula.strongbow.interpreter.{DatasetInterpreter, Interpreter}
 
 /** Action methods that materialize Dataset results.
   *

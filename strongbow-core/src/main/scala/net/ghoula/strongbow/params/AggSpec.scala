@@ -1,6 +1,7 @@
-package net.ghoula.strongbow.specs
+package net.ghoula.strongbow.params
 
-import net.ghoula.strongbow.{ColumnType, Expr}
+import net.ghoula.strongbow.column.ColumnType
+import net.ghoula.strongbow.expr.Expr
 
 /** Typed aggregation specification for GROUP BY aggregations. */
 sealed trait AggSpec[T] {

@@ -1,4 +1,4 @@
-package net.ghoula.strongbow
+package net.ghoula.strongbow.column
 
 /** Column type enumeration for schema tracking.
   *

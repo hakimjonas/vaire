@@ -1697,76 +1697,23 @@ object ExprInterpreter {
           }
 
         case corr: Expr.Corr[Row] =>
-          for {
-            leftCol <- evalColumn(corr.left, columns, ColumnType.DoubleType)
-            rightCol <- evalColumn(corr.right, columns, ColumnType.DoubleType)
-          } yield {
-            (leftCol, rightCol) match {
-              case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
-                val combinedNulls = xNulls | yNulls
-                val (xSum, n) = sumAndCount(xData, combinedNulls)
-                val (ySum, _) = sumAndCount(yData, combinedNulls)
-                if (n <= 1) 0.0
-                else {
-                  val xMean = xSum / n
-                  val yMean = ySum / n
-                  val (cov, xVar, yVar) = xData.indices.foldLeft((0.0, 0.0, 0.0)) { case ((c, xv, yv), i) =>
-                    if (combinedNulls.contains(i)) (c, xv, yv)
-                    else {
-                      val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
-                    }
-                  }
-                  val denom = math.sqrt(xVar * yVar)
-                  if (denom == 0.0) 0.0 else cov / denom
-                }
-              case _ => 0.0
+          bivariateStat(corr.left, corr.right, columns, minCount = 2) { (xData, yData, combinedNulls, xMean, yMean, _) =>
+            val (cov, xVar, yVar) = xData.indices.filterNot(combinedNulls.contains).foldLeft((0.0, 0.0, 0.0)) {
+              case ((c, xv, yv), i) =>
+                val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
             }
+            val denom = math.sqrt(xVar * yVar)
+            if (denom == 0.0) 0.0 else cov / denom
           }
 
         case cs: Expr.CovarSamp[Row] =>
-          for {
-            leftCol <- evalColumn(cs.left, columns, ColumnType.DoubleType)
-            rightCol <- evalColumn(cs.right, columns, ColumnType.DoubleType)
-          } yield {
-            (leftCol, rightCol) match {
-              case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
-                val combinedNulls = xNulls | yNulls
-                val (xSum, n) = sumAndCount(xData, combinedNulls)
-                val (ySum, _) = sumAndCount(yData, combinedNulls)
-                if (n <= 1) 0.0
-                else {
-                  val xMean = xSum / n
-                  val yMean = ySum / n
-                  val cov = xData.indices.foldLeft(0.0) { (acc, i) =>
-                    if (combinedNulls.contains(i)) acc else acc + (xData(i) - xMean) * (yData(i) - yMean)
-                  }
-                  cov / (n - 1)
-                }
-              case _ => 0.0
-            }
+          bivariateStat(cs.left, cs.right, columns, minCount = 2) { (xData, yData, combinedNulls, xMean, yMean, n) =>
+            computeCovariance(xData, yData, combinedNulls, xMean, yMean) / (n - 1)
           }
 
         case cp: Expr.CovarPop[Row] =>
-          for {
-            leftCol <- evalColumn(cp.left, columns, ColumnType.DoubleType)
-            rightCol <- evalColumn(cp.right, columns, ColumnType.DoubleType)
-          } yield {
-            (leftCol, rightCol) match {
-              case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
-                val combinedNulls = xNulls | yNulls
-                val (xSum, n) = sumAndCount(xData, combinedNulls)
-                val (ySum, _) = sumAndCount(yData, combinedNulls)
-                if (n == 0) 0.0
-                else {
-                  val xMean = xSum / n
-                  val yMean = ySum / n
-                  val cov = xData.indices.foldLeft(0.0) { (acc, i) =>
-                    if (combinedNulls.contains(i)) acc else acc + (xData(i) - xMean) * (yData(i) - yMean)
-                  }
-                  cov / n
-                }
-              case _ => 0.0
-            }
+          bivariateStat(cp.left, cp.right, columns, minCount = 1) { (xData, yData, combinedNulls, xMean, yMean, n) =>
+            computeCovariance(xData, yData, combinedNulls, xMean, yMean) / n
           }
 
         case med: Expr.Median[Row] =>
@@ -1915,6 +1862,36 @@ object ExprInterpreter {
   }
 
   /** Sum non-null values and count them in a single pass. */
+  private def computeCovariance(
+    xData: Array[Double],
+    yData: Array[Double],
+    nulls: BitSet,
+    xMean: Double,
+    yMean: Double
+  ): Double =
+    xData.indices.filterNot(nulls.contains).foldLeft(0.0) { (acc, i) =>
+      acc + (xData(i) - xMean) * (yData(i) - yMean)
+    }
+
+  private def bivariateStat[Row](
+    leftExpr: Expr[Row, Double],
+    rightExpr: Expr[Row, Double],
+    columns: Vector[Column[?]],
+    minCount: Int
+  )(f: (Array[Double], Array[Double], BitSet, Double, Double, Int) => Double): Either[ExecutionError, Double] =
+    for {
+      leftCol <- evalColumn(leftExpr, columns, ColumnType.DoubleType)
+      rightCol <- evalColumn(rightExpr, columns, ColumnType.DoubleType)
+    } yield (leftCol, rightCol) match {
+      case (Column.DoubleColumn(xData, xNulls), Column.DoubleColumn(yData, yNulls)) =>
+        val combinedNulls = xNulls | yNulls
+        val (xSum, n) = sumAndCount(xData, combinedNulls)
+        val (ySum, _) = sumAndCount(yData, combinedNulls)
+        if (n < minCount) 0.0
+        else f(xData, yData, combinedNulls, xSum / n, ySum / n, n)
+      case _ => 0.0
+    }
+
   private def computeVariance(data: Array[Double], nulls: BitSet): (Double, Int) =
     sumAndCount(data, nulls) match {
       case (_, 0) => (0.0, 0)

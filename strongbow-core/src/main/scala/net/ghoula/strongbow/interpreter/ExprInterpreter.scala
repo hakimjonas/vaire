@@ -308,7 +308,7 @@ object ExprInterpreter {
           } yield {
             (leftCol, rightCol) match {
               case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
-                Column.string(Array.tabulate(rowCount)(i => ld(i).nn + rd(i)), ln | rn)
+                Column.string(Array.tabulate(rowCount)(i => ld(i).nn.concat(rd(i))), ln | rn)
               case _ =>
                 Column.string(Array.empty[String | Null])
             }
@@ -1508,13 +1508,23 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => right(i) == 0)
+  private def vectorizedSafeBinOp[T: scala.reflect.ClassTag](
+    left: Array[T],
+    right: Array[T],
+    rowCount: Int,
+    isZero: T => Boolean,
+    op: (T, T) => T,
+    wrap: (Array[T], BitSet) => Column[?]
+  ): Either[ExecutionError, Column[?]] = {
+    val zeroIdx = (0 until rowCount).find(i => isZero(right(i)))
     zeroIdx match {
       case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(Column.int(Array.tabulate(rowCount)(i => left(i) / right(i))))
+      case None => Right(wrap(Array.tabulate(rowCount)(i => op(left(i), right(i))), BitSet.empty))
     }
   }
+
+  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
+    vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ / _, Column.int)
 
   private def vectorizedLongBinOp[Row](
     left: Expr[Row, Long],
@@ -1535,17 +1545,8 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedLongDiv(
-    left: Array[Long],
-    right: Array[Long],
-    rowCount: Int
-  ): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => right(i) == 0L)
-    zeroIdx match {
-      case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(Column.long(Array.tabulate(rowCount)(i => left(i) / right(i))))
-    }
-  }
+  private def vectorizedLongDiv(left: Array[Long], right: Array[Long], rowCount: Int): Either[ExecutionError, Column[?]] =
+    vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ / _, Column.long)
 
   private def vectorizedDoubleBinOp[Row](
     left: Expr[Row, Double],
@@ -1566,17 +1567,8 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedDoubleDiv(
-    left: Array[Double],
-    right: Array[Double],
-    rowCount: Int
-  ): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => right(i) == 0.0)
-    zeroIdx match {
-      case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(Column.double(Array.tabulate(rowCount)(i => left(i) / right(i))))
-    }
-  }
+  private def vectorizedDoubleDiv(left: Array[Double], right: Array[Double], rowCount: Int): Either[ExecutionError, Column[?]] =
+    vectorizedSafeBinOp(left, right, rowCount, _ == 0.0, _ / _, Column.double)
 
   private def typedComparison[Row, A](
     left: Expr[Row, A],
@@ -1635,29 +1627,11 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedIntMod(
-    left: Array[Int],
-    right: Array[Int],
-    rowCount: Int
-  ): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => right(i) == 0)
-    zeroIdx match {
-      case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(Column.int(Array.tabulate(rowCount)(i => left(i) % right(i))))
-    }
-  }
+  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
+    vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ % _, Column.int)
 
-  private def vectorizedLongMod(
-    left: Array[Long],
-    right: Array[Long],
-    rowCount: Int
-  ): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => right(i) == 0L)
-    zeroIdx match {
-      case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(Column.long(Array.tabulate(rowCount)(i => left(i) % right(i))))
-    }
-  }
+  private def vectorizedLongMod(left: Array[Long], right: Array[Long], rowCount: Int): Either[ExecutionError, Column[?]] =
+    vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ % _, Column.long)
 
   private def vectorizedDoubleUnaryOp[Row](
     expr: Expr[Row, Double],

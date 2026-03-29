@@ -60,24 +60,8 @@ final case class MaterializedDataset[T](
   }
 
   /** Map over decoded rows. */
-  def map[U](f: T => U)(using schemaU: Schema[U]): Either[ExecutionError, MaterializedDataset[U]] = {
-    val newRows = toVectorUnsafe.map(f)
-    val encodedRows = newRows.map(schemaU.encode)
-
-    val newColumnsOrError = if (encodedRows.isEmpty) {
-      Right(Vector.empty)
-    } else {
-      (0 until schemaU.columnCount).foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
-        (acc, colIdx) =>
-          acc.flatMap { cols =>
-            val values = encodedRows.map(_(colIdx))
-            Column.fromValues(values, schemaU.columnTypes(colIdx)).map(cols :+ _)
-          }
-      }
-    }
-
-    newColumnsOrError.map(cols => MaterializedDataset(cols, schemaU))
-  }
+  def map[U](f: T => U)(using schemaU: Schema[U]): Either[ExecutionError, MaterializedDataset[U]] =
+    MaterializedDataset.fromVector(toVectorUnsafe.map(f))
 
   /** Show first n rows for debugging. */
   def show(n: Int = 20): String = {

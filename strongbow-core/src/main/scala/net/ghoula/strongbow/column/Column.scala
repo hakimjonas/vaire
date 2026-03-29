@@ -8,8 +8,8 @@ import net.ghoula.strongbow.types.RowIndex
 
 /** Specialized columnar storage avoiding boxing.
   *
-  * Each column type uses primitive arrays where possible. Nullability tracked via BitSet for memory
-  * efficiency. The type parameter `A` tracks the logical element type via GADT refinement.
+  * Each column type uses primitive arrays where possible. Nullability is tracked via BitSet for
+  * memory efficiency. The type parameter `A` tracks the logical element type via GADT refinement.
   */
 enum Column[+A] {
   case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
@@ -40,15 +40,17 @@ enum Column[+A] {
     case AnyColumn(_, _) => ColumnType.AnyType
   }
 
-  inline def isNull(index: RowIndex): Boolean = this match {
-    case IntColumn(_, nulls) => nulls.contains(index.toInt)
-    case LongColumn(_, nulls) => nulls.contains(index.toInt)
-    case DoubleColumn(_, nulls) => nulls.contains(index.toInt)
-    case StringColumn(_, nulls) => nulls.contains(index.toInt)
-    case BooleanColumn(_, nulls) => nulls.contains(index.toInt)
-    case DateColumn(_, nulls) => nulls.contains(index.toInt)
-    case AnyColumn(_, nulls) => nulls.contains(index.toInt)
+  inline def nullSet: BitSet = this match {
+    case IntColumn(_, nulls) => nulls
+    case LongColumn(_, nulls) => nulls
+    case DoubleColumn(_, nulls) => nulls
+    case StringColumn(_, nulls) => nulls
+    case BooleanColumn(_, nulls) => nulls
+    case DateColumn(_, nulls) => nulls
+    case AnyColumn(_, nulls) => nulls
   }
+
+  inline def isNull(index: RowIndex): Boolean = nullSet.contains(index.toInt)
 
   /** Untyped single-value extraction for interop boundaries.
     *

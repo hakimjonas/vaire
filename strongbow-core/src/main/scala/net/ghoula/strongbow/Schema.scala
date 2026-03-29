@@ -27,22 +27,18 @@ trait Schema[T] {
 object Schema {
   def apply[T](using schema: Schema[T]): Schema[T] = schema
 
-  /** Simple schema for primitive types. */
+  private def decodeSingle[T](
+    typeName: String
+  )(dec: PartialFunction[Any, T])(values: Vector[Any]): Either[DecodeError, T] =
+    if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
+    else dec.lift(values.head).toRight(DecodeError.TypeMismatch(typeName, values.head.getClass.getSimpleName))
+
   given intSchema: Schema[Int] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")
     def columnTypes: Vector[ColumnType] = Vector(ColumnType.IntType)
     def encode(value: Int): Vector[Any] = Vector(value)
-    def decode(values: Vector[Any]): Either[DecodeError, Int] = {
-      if (values.length != 1) {
-        Left(DecodeError.WrongArity(1, values.length))
-      } else {
-        values.head match {
-          case i: Int => Right(i)
-          case other => Left(DecodeError.TypeMismatch("Int", other.getClass.getSimpleName))
-        }
-      }
-    }
+    def decode(values: Vector[Any]): Either[DecodeError, Int] = decodeSingle("Int") { case i: Int => i }(values)
   }
 
   given stringSchema: Schema[String] with {
@@ -50,16 +46,8 @@ object Schema {
     def columnNames: Vector[String] = Vector("value")
     def columnTypes: Vector[ColumnType] = Vector(ColumnType.StringType)
     def encode(value: String): Vector[Any] = Vector(value)
-    def decode(values: Vector[Any]): Either[DecodeError, String] = {
-      if (values.length != 1) {
-        Left(DecodeError.WrongArity(1, values.length))
-      } else {
-        values.head match {
-          case s: String => Right(s)
-          case other => Left(DecodeError.TypeMismatch("String", other.getClass.getSimpleName))
-        }
-      }
-    }
+    def decode(values: Vector[Any]): Either[DecodeError, String] =
+      decodeSingle("String") { case s: String => s }(values)
   }
 
   given longSchema: Schema[Long] with {
@@ -67,16 +55,7 @@ object Schema {
     def columnNames: Vector[String] = Vector("value")
     def columnTypes: Vector[ColumnType] = Vector(ColumnType.LongType)
     def encode(value: Long): Vector[Any] = Vector(value)
-    def decode(values: Vector[Any]): Either[DecodeError, Long] = {
-      if (values.length != 1) {
-        Left(DecodeError.WrongArity(1, values.length))
-      } else {
-        values.head match {
-          case l: Long => Right(l)
-          case other => Left(DecodeError.TypeMismatch("Long", other.getClass.getSimpleName))
-        }
-      }
-    }
+    def decode(values: Vector[Any]): Either[DecodeError, Long] = decodeSingle("Long") { case l: Long => l }(values)
   }
 
   given doubleSchema: Schema[Double] with {
@@ -84,16 +63,8 @@ object Schema {
     def columnNames: Vector[String] = Vector("value")
     def columnTypes: Vector[ColumnType] = Vector(ColumnType.DoubleType)
     def encode(value: Double): Vector[Any] = Vector(value)
-    def decode(values: Vector[Any]): Either[DecodeError, Double] = {
-      if (values.length != 1) {
-        Left(DecodeError.WrongArity(1, values.length))
-      } else {
-        values.head match {
-          case d: Double => Right(d)
-          case other => Left(DecodeError.TypeMismatch("Double", other.getClass.getSimpleName))
-        }
-      }
-    }
+    def decode(values: Vector[Any]): Either[DecodeError, Double] =
+      decodeSingle("Double") { case d: Double => d }(values)
   }
 
   given dateSchema: Schema[types.Date] with {
@@ -101,17 +72,10 @@ object Schema {
     def columnNames: Vector[String] = Vector("value")
     def columnTypes: Vector[ColumnType] = Vector(ColumnType.DateType)
     def encode(value: types.Date): Vector[Any] = Vector(value.toLocalDate)
-    def decode(values: Vector[Any]): Either[DecodeError, types.Date] = {
-      if (values.length != 1) {
-        Left(DecodeError.WrongArity(1, values.length))
-      } else {
-        values.head match {
-          case d: java.time.LocalDate => Right(types.Date.fromLocalDate(d))
-          case i: Int => Right(types.Date.ofEpochDay(i.toLong))
-          case other => Left(DecodeError.TypeMismatch("Date", other.getClass.getSimpleName))
-        }
-      }
-    }
+    def decode(values: Vector[Any]): Either[DecodeError, types.Date] = decodeSingle("Date") {
+      case d: java.time.LocalDate => types.Date.fromLocalDate(d)
+      case i: Int => types.Date.ofEpochDay(i.toLong)
+    }(values)
   }
 
   given booleanSchema: Schema[Boolean] with {
@@ -119,16 +83,8 @@ object Schema {
     def columnNames: Vector[String] = Vector("value")
     def columnTypes: Vector[ColumnType] = Vector(ColumnType.BooleanType)
     def encode(value: Boolean): Vector[Any] = Vector(value)
-    def decode(values: Vector[Any]): Either[DecodeError, Boolean] = {
-      if (values.length != 1) {
-        Left(DecodeError.WrongArity(1, values.length))
-      } else {
-        values.head match {
-          case b: Boolean => Right(b)
-          case other => Left(DecodeError.TypeMismatch("Boolean", other.getClass.getSimpleName))
-        }
-      }
-    }
+    def decode(values: Vector[Any]): Either[DecodeError, Boolean] =
+      decodeSingle("Boolean") { case b: Boolean => b }(values)
   }
 
   /** Generic tuple schema for pairs - enables automatic Schema[(A, B)] derivation */

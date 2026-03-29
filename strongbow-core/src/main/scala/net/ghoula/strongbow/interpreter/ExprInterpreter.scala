@@ -1613,22 +1613,19 @@ object ExprInterpreter {
 
         case sum: Expr.Sum[Row] =>
           evalColumn(sum.expr, columns, ColumnType.IntType).map {
-            case Column.IntColumn(data, nulls) =>
-              data.indices.foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+            case Column.IntColumn(data, nulls) => nullSafeFold(data, nulls, 0L)(_ + _)
             case _ => 0L
           }
 
         case sumD: Expr.SumDouble[Row] =>
           evalColumn(sumD.expr, columns, ColumnType.DoubleType).map {
-            case Column.DoubleColumn(data, nulls) =>
-              data.indices.foldLeft(0.0)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+            case Column.DoubleColumn(data, nulls) => nullSafeFold(data, nulls, 0.0)(_ + _)
             case _ => 0.0
           }
 
         case sumL: Expr.SumLong[Row] =>
           evalColumn(sumL.expr, columns, ColumnType.LongType).map {
-            case Column.LongColumn(data, nulls) =>
-              data.indices.foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+            case Column.LongColumn(data, nulls) => nullSafeFold(data, nulls, 0L)(_ + _)
             case _ => 0L
           }
 
@@ -1747,10 +1744,7 @@ object ExprInterpreter {
           }
 
         case first: Expr.First[Row, ?] =>
-          val colType = inferExprColumnType(first.expr, columns)
-          evalColumn(first.expr, columns, colType).map { col =>
-            (0 until rowCount).find(i => !col.isNull(RowIndex(i))).map(col.getValue)
-          }
+          firstNonNull(first.expr, columns, rowCount)
 
         case last: Expr.ExprLast[Row, ?] =>
           val colType = inferExprColumnType(last.expr, columns)
@@ -1759,10 +1753,7 @@ object ExprInterpreter {
           }
 
         case anyVal: Expr.AnyValue[Row, ?] =>
-          val colType = inferExprColumnType(anyVal.expr, columns)
-          evalColumn(anyVal.expr, columns, colType).map { col =>
-            (0 until rowCount).find(i => !col.isNull(RowIndex(i))).map(col.getValue)
-          }
+          firstNonNull(anyVal.expr, columns, rowCount)
 
         case mode: Expr.Mode[Row, ?] =>
           val colType = inferExprColumnType(mode.expr, columns)
@@ -1862,6 +1853,20 @@ object ExprInterpreter {
   }
 
   /** Sum non-null values and count them in a single pass. */
+  private def nullSafeFold[T, R](data: Array[T], nulls: BitSet, zero: R)(op: (R, T) => R): R =
+    data.indices.foldLeft(zero)((acc, i) => if (nulls.contains(i)) acc else op(acc, data(i)))
+
+  private def firstNonNull[Row](
+    expr: Expr[Row, ?],
+    columns: Vector[Column[?]],
+    rowCount: Int
+  ): Either[ExecutionError, Option[Any | Null]] = {
+    val colType = inferExprColumnType(expr, columns)
+    evalColumn(expr, columns, colType).map { col =>
+      (0 until rowCount).find(i => !col.isNull(RowIndex(i))).map(col.getValue)
+    }
+  }
+
   private def computeCovariance(
     xData: Array[Double],
     yData: Array[Double],

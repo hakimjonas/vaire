@@ -7,7 +7,7 @@ import org.scalatest.matchers.should.Matchers
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.{ColumnIndex, Date}
 
-class Phase2ExprSpec extends AnyFlatSpec with Matchers {
+class ExprMathDateSpec extends AnyFlatSpec with Matchers {
 
   private def eval[Row, A](
     expr: Expr[Row, A],

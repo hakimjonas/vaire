@@ -8,7 +8,7 @@ import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
 
-class Phase3ExprSpec extends AnyFlatSpec with Matchers {
+class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
 
   private def eval[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]], idx: Int): Either[ExecutionError, Any] = {
     val effectiveColumns =

@@ -10,7 +10,7 @@ import net.ghoula.strongbow.types.ColumnIndex
   *
   * Verifies the one-cast-at-boundary architecture works end-to-end.
   */
-class DatasetInterpreterSpec extends AnyFlatSpec with Matchers {
+class DatasetArchitectureSpec extends AnyFlatSpec with Matchers {
 
   "DatasetInterpreter" should "filter with typed columns using one-cast-at-boundary" in {
     // Create typed columns

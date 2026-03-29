@@ -7,7 +7,7 @@ import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
 
 /** Tests for new expression operations (>=, <=, !=, as, lit, when). */
-class NewExprSpec extends AnyFlatSpec with Matchers {
+class ExprCoreSpec extends AnyFlatSpec with Matchers {
 
   private def eval[Row, A](
     expr: Expr[Row, A],

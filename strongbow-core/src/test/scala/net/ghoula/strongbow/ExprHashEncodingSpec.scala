@@ -6,7 +6,7 @@ import org.scalatest.matchers.should.Matchers
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
 
-class Phase4ExprSpec extends AnyFlatSpec with Matchers {
+class ExprHashEncodingSpec extends AnyFlatSpec with Matchers {
 
   private def eval[Row, A](
     expr: Expr[Row, A],

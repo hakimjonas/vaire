@@ -7,7 +7,7 @@ import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.ColumnIndex
 
 /** Tests for Phase 1 Spark Parity expressions. */
-class Phase1ExprSpec extends AnyFlatSpec with Matchers {
+class ExprStringNullSpec extends AnyFlatSpec with Matchers {
 
   private def eval[Row, A](
     expr: Expr[Row, A],

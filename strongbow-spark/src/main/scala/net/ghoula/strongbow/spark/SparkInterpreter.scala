@@ -406,8 +406,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
       val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
 
-      val leftColNames = left.df.columns.map(c => col(s"_l.$c"))
-      val rightColNames = right.df.columns.map(c => col(s"_r.$c"))
+      val leftColNames = left.schema.columnNames.map(c => col(s"_l.$c")).toArray
+      val rightColNames = right.schema.columnNames.map(c => col(s"_r.$c")).toArray
 
       val selectedDf = joinType match {
         case "left_anti" | "left_semi" =>
@@ -459,17 +459,17 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
   private def applyZipWithUniqueId[A](parent: SparkPlan[A]): SparkPlan[(A, Long)] = {
     import org.apache.spark.sql.functions.monotonically_increasing_id
     val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
-    val colNames = parent.df.columns
+    val colCount = parent.schema.columnNames.length
     val uidDf = parent.df.withColumn("_uid", monotonically_increasing_id())
     val values = uidDf
       .collect()
       .iterator
       .map { row =>
         val original = RowConverter.fromRowUnsafe(
-          org.apache.spark.sql.Row.fromSeq(colNames.indices.map(row.get)),
+          org.apache.spark.sql.Row.fromSeq((0 until colCount).map(row.get)),
           parent.schema
         )
-        val uid = row.getLong(colNames.length)
+        val uid = row.getLong(colCount)
         (original, uid)
       }
       .toVector

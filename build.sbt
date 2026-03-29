@@ -70,8 +70,11 @@ lazy val spark = project
   .dependsOn(core)
   .settings(
     name := "strongbow-spark",
-    scalacOptions ++= sharedScalacOptions.filterNot(o => o == "-language:strictEquality" || o == "-Wunused:all"),
-    scalacOptions += "-Wunused:imports",
+    scalacOptions ++= sharedScalacOptions.filterNot(_ == "-language:strictEquality"),
+    Test / scalacOptions ~= (_.map {
+      case "-Wunused:all" => "-Wunused:imports"
+      case other => other
+    }),
     javacOptions := Seq("--release", "21"),
     libraryDependencies ++= Seq(
       ("org.apache.spark" %% "spark-sql" % sparkVersion % Provided)

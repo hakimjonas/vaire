@@ -11,9 +11,8 @@ import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec, WindowExprSpec}
 object DatasetInterpreter extends Interpreter {
 
   /** Execute a Dataset plan to produce a MaterializedDataset. */
-  @annotation.nowarn("msg=unused pattern variable")
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
-    (dataset: @unchecked) match {
+    dataset match {
       case root: Dataset.Root[T] =>
         root.source match {
           case InMemorySource(columns) => Right(MaterializedDataset(columns, root.schema))
@@ -29,25 +28,13 @@ object DatasetInterpreter extends Interpreter {
         execute(filt.parent).flatMap(parent => filter(parent, filt.predicate))
 
       case m: Dataset.Map[?, T] =>
-        execute(m.parent).flatMap { parent =>
-          val rows = parent.toVectorUnsafe
-          val mapped = rows.map(m.func)
-          MaterializedDataset.fromVector(mapped)(using m.schema)
-        }
+        execute(m.parent).flatMap(collectAndTransform(_, _.map(m.func), m.schema))
 
       case fm: Dataset.FlatMap[?, T] =>
-        execute(fm.parent).flatMap { parent =>
-          val rows = parent.toVectorUnsafe
-          val mapped = rows.flatMap(fm.func)
-          MaterializedDataset.fromVector(mapped)(using fm.schema)
-        }
+        execute(fm.parent).flatMap(collectAndTransform(_, _.flatMap(fm.func), fm.schema))
 
       case sel: Dataset.Select[?, T] =>
-        execute(sel.parent).flatMap { parent =>
-          val rows = parent.toVectorUnsafe
-          val projected = rows.map(sel.projection)
-          MaterializedDataset.fromVector(projected)(using sel.schema)
-        }
+        execute(sel.parent).flatMap(collectAndTransform(_, _.map(sel.projection), sel.schema))
 
       case selectExprs: Dataset.SelectExprs[_, T] =>
         execute(selectExprs.parent).flatMap { parent =>
@@ -61,95 +48,45 @@ object DatasetInterpreter extends Interpreter {
         execute(lim.parent).flatMap(parent => limit(parent, lim.n))
 
       case un: Dataset.Union[T] =>
-        for {
-          left <- execute(un.left)
-          right <- execute(un.right)
-          result <- union(left, right)
-        } yield result
+        executeJoin(un.left, un.right)(union)
 
       case inter: Dataset.Intersect[T] =>
-        for {
-          left <- execute(inter.left)
-          right <- execute(inter.right)
-          result <- intersectDatasets(left, right)
-        } yield result
+        executeJoin(inter.left, inter.right)(setFilter(_, _, include = true))
 
       case exc: Dataset.Except[T] =>
-        for {
-          left <- execute(exc.left)
-          right <- execute(exc.right)
-          result <- exceptDatasets(left, right)
-        } yield result
+        executeJoin(exc.left, exc.right)(setFilter(_, _, include = false))
 
-      case jn: Dataset.InnerJoin[a, b] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- innerJoinDatasets(left, right, jn.condition)
-        } yield result
+      case jn: Dataset.InnerJoin[?, ?] =>
+        executeJoin(jn.left, jn.right)(innerJoinDatasets(_, _, jn.condition))
 
-      case jn: Dataset.LeftJoin[a, b] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- leftJoinDatasets(left, right, jn.condition)
-        } yield result
+      case jn: Dataset.LeftJoin[?, ?] =>
+        executeJoin(jn.left, jn.right)(leftJoinDatasets(_, _, jn.condition))
 
-      case jn: Dataset.RightJoin[a, b] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- rightJoinDatasets(left, right, jn.condition)
-        } yield result
+      case jn: Dataset.RightJoin[?, ?] =>
+        executeJoin(jn.left, jn.right)(rightJoinDatasets(_, _, jn.condition))
 
-      case jn: Dataset.FullJoin[a, b] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- fullJoinDatasets(left, right, jn.condition)
-        } yield result
+      case jn: Dataset.FullJoin[?, ?] =>
+        executeJoin(jn.left, jn.right)(fullJoinDatasets(_, _, jn.condition))
 
-      case jn: Dataset.LeftAntiJoin[a, b] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- leftAntiJoinDatasets(left, right, jn.condition)
-        } yield result
+      case jn: Dataset.LeftAntiJoin[?, ?] =>
+        executeJoin(jn.left, jn.right)(leftAntiJoinDatasets(_, _, jn.condition))
 
-      case jn: Dataset.InnerJoinOn[a, b, k] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- innerJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result
+      case jn: Dataset.InnerJoinOn[?, ?, ?] =>
+        executeJoin(jn.left, jn.right)(innerJoinOnExpr(_, _, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType))
 
-      case jn: Dataset.LeftJoinOn[a, b, k] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- leftJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result
+      case jn: Dataset.LeftJoinOn[?, ?, ?] =>
+        executeJoin(jn.left, jn.right)(leftJoinOnExpr(_, _, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType))
 
-      case jn: Dataset.RightJoinOn[a, b, k] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- rightJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result
+      case jn: Dataset.RightJoinOn[?, ?, ?] =>
+        executeJoin(jn.left, jn.right)(rightJoinOnExpr(_, _, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType))
 
-      case jn: Dataset.FullJoinOn[a, b, k] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- fullJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result
+      case jn: Dataset.FullJoinOn[?, ?, ?] =>
+        executeJoin(jn.left, jn.right)(fullJoinOnExpr(_, _, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType))
 
-      case jn: Dataset.LeftAntiJoinOn[a, b, k] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- leftAntiJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result
+      case jn: Dataset.LeftAntiJoinOn[?, ?, ?] =>
+        executeJoin(jn.left, jn.right)(
+          filterJoinOnExpr(_, _, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType, include = false)
+        )
 
       case srt: Dataset.Sort[T] =>
         execute(srt.parent).flatMap(parent => sort(parent, srt.ordering))
@@ -165,12 +102,12 @@ object DatasetInterpreter extends Interpreter {
           sample(parent, samp.fraction, samp.seed, samp.withReplacement)
         }
 
-      case zip: Dataset.ZipWithIndex[a] =>
+      case zip: Dataset.ZipWithIndex[?] =>
         execute(zip.parent).flatMap { parent =>
           zipWithIndex(parent)
         }
 
-      case zip: Dataset.ZipWithUniqueId[a] =>
+      case zip: Dataset.ZipWithUniqueId[?] =>
         execute(zip.parent).flatMap { parent =>
           zipWithIndex(parent)
         }
@@ -196,12 +133,10 @@ object DatasetInterpreter extends Interpreter {
           sortByExprs(parent, srtExprs.sortKeys)
         }
 
-      case jn: Dataset.LeftSemiJoinOn[a, b, k] =>
-        for {
-          left <- execute(jn.left)
-          right <- execute(jn.right)
-          result <- leftSemiJoinOnExpr(left, right, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType)
-        } yield result
+      case jn: Dataset.LeftSemiJoinOn[?, ?, ?] =>
+        executeJoin(jn.left, jn.right)(
+          filterJoinOnExpr(_, _, jn.leftKey, jn.rightKey, jn.leftKeyType, jn.rightKeyType, include = true)
+        )
 
       case ww: Dataset.WithWindow[_, T] =>
         execute(ww.parent).flatMap { parent =>
@@ -215,13 +150,32 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
+  private def executeJoin[A, B, R](
+    leftDs: Dataset[A],
+    rightDs: Dataset[B]
+  )(
+    f: (MaterializedDataset[A], MaterializedDataset[B]) => Either[ExecutionError, MaterializedDataset[R]]
+  ): Either[ExecutionError, MaterializedDataset[R]] =
+    for {
+      left <- execute(leftDs)
+      right <- execute(rightDs)
+      result <- f(left, right)
+    } yield result
+
+  private def collectAndTransform[A, B](
+    parent: MaterializedDataset[A],
+    transform: Vector[A] => Vector[B],
+    schema: Schema[B]
+  ): Either[ExecutionError, MaterializedDataset[B]] =
+    MaterializedDataset.fromVector(transform(parent.toVectorUnsafe))(using schema)
+
   private def filter[T](
     dataset: MaterializedDataset[T],
     predicate: Expr[T, Boolean]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
     ExprInterpreter.evalColumn(predicate, dataset.columns, ColumnType.BooleanType).flatMap {
       case Column.BooleanColumn(data, _) =>
-        val indices = (0 until data.length).filter(data(_)).toArray
+        val indices = data.indices.filter(data(_)).toArray
         val newColumns = dataset.columns.map(_.slice(indices))
         Right(MaterializedDataset(newColumns, dataset.schema))
       case other =>
@@ -265,26 +219,26 @@ object DatasetInterpreter extends Interpreter {
         )
       )
     } else {
-      left.columns
-        .zip(right.columns)
-        .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { case (acc, (leftCol, rightCol)) =>
-          acc.flatMap { cols =>
-            leftCol.concat(rightCol).map(cols :+ _)
-          }
-        }
-        .map(cols => MaterializedDataset(cols, left.schema))
+      traverseEither(left.columns.zip(right.columns)) { (leftCol, rightCol) =>
+        leftCol.concat(rightCol)
+      }.map(cols => MaterializedDataset(cols, left.schema))
     }
   }
+
+  private def reindexBy[T](dataset: MaterializedDataset[T], indices: Array[Int]): MaterializedDataset[T] =
+    MaterializedDataset(dataset.columns.map(_.slice(indices)), dataset.schema)
+
+  private def sortDatasetBy[T](dataset: MaterializedDataset[T])(
+    lt: (Int, Int) => Boolean
+  ): Either[ExecutionError, MaterializedDataset[T]] =
+    Right(reindexBy(dataset, (0 until dataset.rowCount).sortWith(lt).toArray))
 
   private def sort[T](
     dataset: MaterializedDataset[T],
     ord: Ordering[T]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
-    val rowCount = dataset.rowCount
     val decoded = dataset.toVectorUnsafe
-    val indices = (0 until rowCount).sortWith((a, b) => ord.lt(decoded(a), decoded(b))).toArray
-    val newColumns = dataset.columns.map(_.slice(indices))
-    Right(MaterializedDataset(newColumns, dataset.schema))
+    sortDatasetBy(dataset)((a, b) => ord.lt(decoded(a), decoded(b)))
   }
 
   private def sortBy[T, K](
@@ -292,43 +246,17 @@ object DatasetInterpreter extends Interpreter {
     key: T => K,
     ord: Ordering[K]
   ): Either[ExecutionError, MaterializedDataset[T]] = {
-    val rowCount = dataset.rowCount
-    val decoded = dataset.toVectorUnsafe
-    val keys = decoded.map(key)
-    val indices = (0 until rowCount).sortWith((a, b) => ord.lt(keys(a), keys(b))).toArray
-    val newColumns = dataset.columns.map(_.slice(indices))
-    Right(MaterializedDataset(newColumns, dataset.schema))
+    val keys = dataset.toVectorUnsafe.map(key)
+    sortDatasetBy(dataset)((a, b) => ord.lt(keys(a), keys(b)))
   }
 
   private def sortByExpr[T, K](
     dataset: MaterializedDataset[T],
     keyExpr: Expr[T, K],
     keyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[T]] = {
+  ): Either[ExecutionError, MaterializedDataset[T]] =
     ExprInterpreter.evalColumn(keyExpr, dataset.columns, keyType).map { keyCol =>
-      val rowCount = dataset.rowCount
-      val indices = sortIndicesByColumn(keyCol, rowCount)
-      val newColumns = dataset.columns.map(_.slice(indices))
-      MaterializedDataset(newColumns, dataset.schema)
-    }
-  }
-
-  private def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] =
-    col match {
-      case Column.IntColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
-      case Column.LongColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
-      case Column.DoubleColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => java.lang.Double.compare(data(a), data(b)) < 0).toArray
-      case Column.StringColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => data(a).nn.compareTo(data(b)) < 0).toArray
-      case Column.DateColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => data(a) < data(b)).toArray
-      case Column.BooleanColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => !data(a) && data(b)).toArray
-      case Column.AnyColumn(data, _) =>
-        (0 until rowCount).sortWith((a, b) => String.valueOf(data(a)).compareTo(String.valueOf(data(b))) < 0).toArray
+      reindexBy(dataset, Column.sortIndicesByColumn(keyCol, dataset.rowCount))
     }
 
   private def selectExpressions[In, Out](
@@ -336,14 +264,9 @@ object DatasetInterpreter extends Interpreter {
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
     outputSchema: Schema[Out]
   ): Either[ExecutionError, MaterializedDataset[Out]] = {
-    val newColumnsOrError = exprs.foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
-      case (acc, (_, expr, columnType)) =>
-        acc.flatMap { cols =>
-          ExprInterpreter.evalColumn(expr, dataset.columns, columnType).map(cols :+ _)
-        }
-    }
-
-    newColumnsOrError.map(cols => MaterializedDataset(cols, outputSchema))
+    traverseEither(exprs) { (_, expr, columnType) =>
+      ExprInterpreter.evalColumn(expr, dataset.columns, columnType)
+    }.map(cols => MaterializedDataset(cols, outputSchema))
   }
 
   private def sample[T](
@@ -366,26 +289,18 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset(newColumns, dataset.schema)
   }
 
-  private def intersectDatasets[T](
+  private def setFilter[T](
     left: MaterializedDataset[T],
-    right: MaterializedDataset[T]
+    right: MaterializedDataset[T],
+    include: Boolean
   ): Either[ExecutionError, MaterializedDataset[T]] = {
     val leftRows = left.toVectorUnsafe
     val rightSet = right.toVectorUnsafe.toSet
-    val common = leftRows.filter(rightSet.contains).distinct
+    val filtered =
+      if (include) leftRows.filter(rightSet.contains).distinct
+      else leftRows.filterNot(rightSet.contains).distinct
 
-    MaterializedDataset.fromVector(common)(using left.schema)
-  }
-
-  private def exceptDatasets[T](
-    left: MaterializedDataset[T],
-    right: MaterializedDataset[T]
-  ): Either[ExecutionError, MaterializedDataset[T]] = {
-    val leftRows = left.toVectorUnsafe
-    val rightSet = right.toVectorUnsafe.toSet
-    val diff = leftRows.filterNot(rightSet.contains).distinct
-
-    MaterializedDataset.fromVector(diff)(using left.schema)
+    MaterializedDataset.fromVector(filtered)(using left.schema)
   }
 
   private def zipWithIndex[T](
@@ -417,83 +332,80 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)
   }
 
+  private def leftJoinSchema[A, B](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B]
+  ): Schema[(A, Option[B])] = {
+    given optB: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
+    Schema.tuple2Schema[A, Option[B]](using left.schema, optB)
+  }
+
+  private def rightJoinSchema[A, B](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B]
+  ): Schema[(Option[A], B)] = {
+    given optA: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
+    Schema.tuple2Schema[Option[A], B](using optA, right.schema)
+  }
+
+  private def fullJoinSchema[A, B](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B]
+  ): Schema[(Option[A], Option[B])] = {
+    given leftOpt: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
+    given rightOpt: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
+    Schema.tuple2Schema[Option[A], Option[B]](using leftOpt, rightOpt)
+  }
+
+  private def outerJoinDatasets[A, B, R](
+    primary: MaterializedDataset[A],
+    secondary: MaterializedDataset[B],
+    matches: (A, B) => Boolean,
+    mkMatched: (A, B) => R,
+    mkUnmatched: A => R,
+    schema: Schema[R]
+  ): Either[ExecutionError, MaterializedDataset[R]] = {
+    val primaryRows = primary.toVectorUnsafe
+    val secondaryRows = secondary.toVectorUnsafe
+
+    val resultRows = primaryRows.flatMap { pVal =>
+      val found = secondaryRows.filter(sVal => matches(pVal, sVal))
+      if (found.isEmpty) Vector(mkUnmatched(pVal))
+      else found.map(sVal => mkMatched(pVal, sVal))
+    }
+
+    MaterializedDataset.fromVector(resultRows)(using schema)
+  }
+
   private def leftJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
     condition: (A, B) => Boolean
-  ): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] = {
-    val leftRows = left.toVectorUnsafe
-    val rightRows = right.toVectorUnsafe
-
-    val resultRows = leftRows.flatMap { leftVal =>
-      val matches = rightRows.filter(rightVal => condition(leftVal, rightVal))
-      if (matches.isEmpty) {
-        Vector((leftVal, None))
-      } else {
-        matches.map(rightVal => (leftVal, Some(rightVal)))
-      }
-    }
-
-    given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
-    given resultSchema: Schema[(A, Option[B])] = Schema.tuple2Schema[A, Option[B]](using left.schema, rightOptionSchema)
-    MaterializedDataset.fromVector(resultRows)
-  }
+  ): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] =
+    outerJoinDatasets(left, right, condition, (a, b) => (a, Some(b)), a => (a, None), leftJoinSchema(left, right))
 
   private def rightJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
     condition: (A, B) => Boolean
-  ): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] = {
-    val leftRows = left.toVectorUnsafe
-    val rightRows = right.toVectorUnsafe
-
-    val resultRows = rightRows.flatMap { rightVal =>
-      val matches = leftRows.filter(leftVal => condition(leftVal, rightVal))
-      if (matches.isEmpty) {
-        Vector((None, rightVal))
-      } else {
-        matches.map(leftVal => (Some(leftVal), rightVal))
-      }
-    }
-
-    given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
-    given resultSchema: Schema[(Option[A], B)] = Schema.tuple2Schema[Option[A], B](using leftOptionSchema, right.schema)
-    MaterializedDataset.fromVector(resultRows)
-  }
+  ): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] =
+    outerJoinDatasets(
+      right,
+      left,
+      (b, a) => condition(a, b),
+      (b, a) => (Some(a), b),
+      b => (None, b),
+      rightJoinSchema(left, right)
+    )
 
   private def fullJoinDatasets[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
     condition: (A, B) => Boolean
-  ): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] = {
-    val leftRows = left.toVectorUnsafe
-    val rightRows = right.toVectorUnsafe
-
-    val leftMatches = scala.collection.mutable.HashSet.empty[A]
-    val rightMatches = scala.collection.mutable.HashSet.empty[B]
-
-    val innerResults = for {
-      leftVal <- leftRows
-      rightVal <- rightRows
-      if condition(leftVal, rightVal)
-    } yield {
-      leftMatches.add(leftVal)
-      rightMatches.add(rightVal)
-      (Some(leftVal), Some(rightVal))
-    }
-
-    val unmatchedLeft = leftRows.filterNot(leftMatches.contains).map(leftVal => (Some(leftVal), None))
-
-    val unmatchedRight = rightRows.filterNot(rightMatches.contains).map(rightVal => (None, Some(rightVal)))
-
-    val resultRows = innerResults ++ unmatchedLeft ++ unmatchedRight
-
-    given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
-    given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
-    given resultSchema: Schema[(Option[A], Option[B])] =
-      Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
-    MaterializedDataset.fromVector(resultRows)
-  }
+  ): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] =
+    MaterializedDataset.fromVector(JoinOps.fullJoin(left.toVectorUnsafe, right.toVectorUnsafe, condition))(using
+      fullJoinSchema(left, right)
+    )
 
   private def leftAntiJoinDatasets[A, B](
     left: MaterializedDataset[A],
@@ -541,11 +453,8 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(A, B)]] = {
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield {
+  ): Either[ExecutionError, MaterializedDataset[(A, B)]] =
+    evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
       val leftIndex = buildKeyIndex(leftKeyCol, left.rowCount)
       val leftIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
       val rightIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
@@ -563,7 +472,45 @@ object DatasetInterpreter extends Interpreter {
       val (cols, schema) = assembleJoinColumns(left, right, leftIdxBuf.toArray, rightIdxBuf.toArray)
       MaterializedDataset(cols, schema)
     }
+
+  private def probeJoinOnKeys[P, S, R](
+    probeRows: Vector[P],
+    probeKeyCol: Column[?],
+    lookupKeyCol: Column[?],
+    lookupRows: Vector[S],
+    lookupRowCount: Int,
+    mkMatched: (P, S) => R,
+    mkUnmatched: P => R,
+    schema: Schema[R]
+  ): MaterializedDataset[R] = {
+    val lookupIndex = buildKeyIndex(lookupKeyCol, lookupRowCount)
+
+    val resultRows: Vector[R] = probeRows.zipWithIndex.flatMap { case (pVal, pi) =>
+      val pKey = probeKeyCol.getValue(pi)
+      lookupIndex.get(pKey) match {
+        case Some(sIdxs) => sIdxs.map(si => mkMatched(pVal, lookupRows(si)))
+        case None => Vector(mkUnmatched(pVal))
+      }
+    }
+
+    MaterializedDataset.fromVector(resultRows)(using schema) match {
+      case Right(md) => md
+      case Left(_) => MaterializedDataset(Vector.empty, schema)
+    }
   }
+
+  private def evalKeys[A, B, K, R](
+    left: MaterializedDataset[A],
+    right: MaterializedDataset[B],
+    leftKey: Expr[A, K],
+    rightKey: Expr[B, K],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType
+  )(f: (Column[?], Column[?]) => R): Either[ExecutionError, R] =
+    for {
+      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+    } yield f(leftKeyCol, rightKeyCol)
 
   private def leftJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
@@ -572,32 +519,19 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] = {
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield {
-      val rightIndex = buildKeyIndex(rightKeyCol, right.rowCount)
-      val leftRows = left.toVectorUnsafe
-      val rightRows = right.toVectorUnsafe
-
-      val resultRows: Vector[(A, Option[B])] = leftRows.zipWithIndex.flatMap { case (leftVal, li) =>
-        val lKey = leftKeyCol.getValue(li)
-        rightIndex.get(lKey) match {
-          case Some(rightIdxs) => rightIdxs.map(ri => (leftVal, Option(rightRows(ri))))
-          case None => Vector((leftVal, Option.empty[B]))
-        }
-      }
-
-      given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
-      given resultSchema: Schema[(A, Option[B])] =
-        Schema.tuple2Schema[A, Option[B]](using left.schema, rightOptionSchema)
-      MaterializedDataset.fromVector(resultRows) match {
-        case Right(md) => md
-        case Left(_) => MaterializedDataset(Vector.empty, resultSchema)
-      }
+  ): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] =
+    evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (lkc, rkc) =>
+      probeJoinOnKeys(
+        left.toVectorUnsafe,
+        lkc,
+        rkc,
+        right.toVectorUnsafe,
+        right.rowCount,
+        (a, b) => (a, Some(b)),
+        a => (a, None),
+        leftJoinSchema(left, right)
+      )
     }
-  }
 
   private def rightJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
@@ -606,32 +540,19 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] = {
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield {
-      val leftIndex = buildKeyIndex(leftKeyCol, left.rowCount)
-      val leftRows = left.toVectorUnsafe
-      val rightRows = right.toVectorUnsafe
-
-      val resultRows: Vector[(Option[A], B)] = rightRows.zipWithIndex.flatMap { case (rightVal, ri) =>
-        val rKey = rightKeyCol.getValue(ri)
-        leftIndex.get(rKey) match {
-          case Some(leftIdxs) => leftIdxs.map(li => (Option(leftRows(li)), rightVal))
-          case None => Vector((Option.empty[A], rightVal))
-        }
-      }
-
-      given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
-      given resultSchema: Schema[(Option[A], B)] =
-        Schema.tuple2Schema[Option[A], B](using leftOptionSchema, right.schema)
-      MaterializedDataset.fromVector(resultRows) match {
-        case Right(md) => md
-        case Left(_) => MaterializedDataset(Vector.empty, resultSchema)
-      }
+  ): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] =
+    evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (lkc, rkc) =>
+      probeJoinOnKeys(
+        right.toVectorUnsafe,
+        rkc,
+        lkc,
+        left.toVectorUnsafe,
+        left.rowCount,
+        (b, a) => (Some(a), b),
+        b => (None, b),
+        rightJoinSchema(left, right)
+      )
     }
-  }
 
   private def fullJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
@@ -640,11 +561,8 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] = {
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield {
+  ): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] =
+    evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
       val rightIndex = buildKeyIndex(rightKeyCol, right.rowCount)
       val leftRows = left.toVectorUnsafe
       val rightRows = right.toVectorUnsafe
@@ -669,41 +587,51 @@ object DatasetInterpreter extends Interpreter {
 
       val resultRows = leftSideResults ++ unmatchedRight
 
-      given leftOptionSchema: Schema[Option[A]] = Schema.optionSchema[A](using left.schema)
-      given rightOptionSchema: Schema[Option[B]] = Schema.optionSchema[B](using right.schema)
-      given resultSchema: Schema[(Option[A], Option[B])] =
-        Schema.tuple2Schema[Option[A], Option[B]](using leftOptionSchema, rightOptionSchema)
+      given resultSchema: Schema[(Option[A], Option[B])] = fullJoinSchema(left, right)
       MaterializedDataset.fromVector(resultRows) match {
         case Right(md) => md
         case Left(_) => MaterializedDataset(Vector.empty, resultSchema)
       }
     }
-  }
 
-  private def leftAntiJoinOnExpr[A, B, K](
+  private def filterJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
     leftKey: Expr[A, K],
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
-    rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[A]] = {
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield {
+    rightKeyType: ColumnType,
+    include: Boolean
+  ): Either[ExecutionError, MaterializedDataset[A]] =
+    evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
       val rightKeys = scala.collection.mutable.HashSet.empty[Any]
       (0 until right.rowCount).foreach { ri =>
         rightKeys += rightKeyCol.getValue(ri)
       }
 
       val indices = (0 until left.rowCount).filter { li =>
-        !rightKeys.contains(leftKeyCol.getValue(li))
+        rightKeys.contains(leftKeyCol.getValue(li)) == include
       }.toArray
 
-      val newColumns = left.columns.map(_.slice(indices))
-      MaterializedDataset(newColumns, left.schema)
+      reindexBy(left, indices)
     }
+
+  private def emptyResult[T](
+    columnTypes: Vector[ColumnType],
+    schema: Schema[T]
+  ): Either[ExecutionError, MaterializedDataset[T]] =
+    Right(MaterializedDataset(columnTypes.map(Column.empty), schema))
+
+  private def partitionByKeys(
+    keyCols: Vector[Column[?]],
+    rowCount: Int
+  ): Vector[(Vector[Any], scala.collection.mutable.ArrayBuffer[Int])] = {
+    val groups = scala.collection.mutable.LinkedHashMap.empty[Vector[Any], scala.collection.mutable.ArrayBuffer[Int]]
+    (0 until rowCount).foreach { i =>
+      val key = keyCols.map(_.getValue(i))
+      groups.getOrElseUpdate(key, scala.collection.mutable.ArrayBuffer.empty[Int]) += i
+    }
+    groups.toVector
   }
 
   private def groupByAgg[In, Out](
@@ -714,24 +642,14 @@ object DatasetInterpreter extends Interpreter {
   ): Either[ExecutionError, MaterializedDataset[Out]] = {
     val rowCount = dataset.rowCount
     if (rowCount == 0) {
-      val emptyCols = (keySpecs.map(_.columnType) ++ aggSpecs.map(_.columnType)).map(Column.empty)
-      Right(MaterializedDataset(emptyCols, outputSchema))
+      emptyResult(keySpecs.map(_.columnType) ++ aggSpecs.map(_.columnType), outputSchema)
     } else {
 
-      val keyColsOrError = keySpecs.foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
-        case (acc, spec) =>
-          acc.flatMap(cols => ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ _))
-      }
+      val keyColsOrError =
+        traverseEither(keySpecs)(spec => ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType))
 
       keyColsOrError.flatMap { keyCols =>
-        val groups =
-          scala.collection.mutable.LinkedHashMap.empty[Vector[Any], scala.collection.mutable.ArrayBuffer[Int]]
-        (0 until rowCount).foreach { i =>
-          val key = keyCols.map(_.getValue(i))
-          groups.getOrElseUpdate(key, scala.collection.mutable.ArrayBuffer.empty[Int]) += i
-        }
-
-        val groupEntries = groups.toVector
+        val groupEntries = partitionByKeys(keyCols, rowCount)
 
         val keyOutputCols = keySpecs.zipWithIndex.map { case (spec, ki) =>
           val values = groupEntries.map(_._1(ki))
@@ -753,14 +671,18 @@ object DatasetInterpreter extends Interpreter {
           }
         }
 
-        val allColsResult =
-          (keyOutputCols ++ aggOutputCols).foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
-            case (acc, colOrErr) => acc.flatMap(cols => colOrErr.map(cols :+ _))
-          }
-
-        allColsResult.map(cols => MaterializedDataset(cols, outputSchema))
+        sequenceEither(keyOutputCols ++ aggOutputCols)
+          .map(cols => MaterializedDataset(cols, outputSchema))
       }
     }
+  }
+
+  private def multiColumnLt[T](keyCols: Vector[(Column[?], SortSpec[T])], a: Int, b: Int): Boolean = {
+    val result = keyCols.iterator.map { case (col, spec) =>
+      val cmp = compareColumnValues(col, a, b)
+      if (spec.ascending) cmp else -cmp
+    }.find(_ != 0).getOrElse(0)
+    result < 0
   }
 
   private def sortByExprs[T](
@@ -770,26 +692,10 @@ object DatasetInterpreter extends Interpreter {
     val rowCount = dataset.rowCount
     if (rowCount <= 1) Right(dataset)
     else {
-
-      val keyColsOrError =
-        sortKeys.foldLeft[Either[ExecutionError, Vector[(Column[?], SortSpec[T])]]](Right(Vector.empty)) {
-          case (acc, spec) =>
-            acc.flatMap(cols =>
-              ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ (_, spec))
-            )
-        }
-
-      keyColsOrError.map { keyCols =>
-        val indices = (0 until rowCount).sortWith { (a, b) =>
-          val result = keyCols.iterator.map { case (col, spec) =>
-            val cmp = compareColumnValues(col, a, b)
-            if (spec.ascending) cmp else -cmp
-          }.find(_ != 0).getOrElse(0)
-          result < 0
-        }.toArray
-
-        val newColumns = dataset.columns.map(_.slice(indices))
-        MaterializedDataset(newColumns, dataset.schema)
+      traverseEither(sortKeys)(spec =>
+        ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map((_, spec))
+      ).map { keyCols =>
+        reindexBy(dataset, (0 until rowCount).sortWith(multiColumnLt(keyCols, _, _)).toArray)
       }
     }
   }
@@ -799,75 +705,20 @@ object DatasetInterpreter extends Interpreter {
     * Uses GADT Column[A] pattern matching to dispatch to concrete typed comparisons. Each branch
     * uses the JDK compare method for the matched primitive type, requiring zero casts.
     */
-  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int =
-    col match {
-      case Column.IntColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else Integer.compare(data(a), data(b))
-      case Column.LongColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else java.lang.Long.compare(data(a), data(b))
-      case Column.DoubleColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else java.lang.Double.compare(data(a), data(b))
-      case Column.StringColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else data(a).nn.compareTo(data(b))
-      case Column.DateColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else Integer.compare(data(a), data(b))
-      case Column.BooleanColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else java.lang.Boolean.compare(data(a), data(b))
-      case Column.AnyColumn(data, nulls) =>
-        val na = nulls.contains(a); val nb = nulls.contains(b)
-        if (na && nb) 0
-        else if (na) -1
-        else if (nb) 1
-        else Ordering.String.compare(data(a).toString, data(b).toString)
+  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int = {
+    def nullSafe(nulls: scala.collection.immutable.BitSet)(compare: => Int): Int = {
+      val na = nulls.contains(a); val nb = nulls.contains(b)
+      if (na && nb) 0 else if (na) -1 else if (nb) 1 else compare
     }
 
-  private def leftSemiJoinOnExpr[A, B, K](
-    left: MaterializedDataset[A],
-    right: MaterializedDataset[B],
-    leftKey: Expr[A, K],
-    rightKey: Expr[B, K],
-    leftKeyType: ColumnType,
-    rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[A]] = {
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield {
-      val rightKeys = scala.collection.mutable.HashSet.empty[Any]
-      (0 until right.rowCount).foreach { ri =>
-        rightKeys += rightKeyCol.getValue(ri)
-      }
-
-      val indices = (0 until left.rowCount).filter { li =>
-        rightKeys.contains(leftKeyCol.getValue(li))
-      }.toArray
-
-      val newColumns = left.columns.map(_.slice(indices))
-      MaterializedDataset(newColumns, left.schema)
+    col match {
+      case Column.IntColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
+      case Column.LongColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
+      case Column.DoubleColumn(data, nulls) => nullSafe(nulls)(java.lang.Double.compare(data(a), data(b)))
+      case Column.StringColumn(data, nulls) => nullSafe(nulls)(data(a).nn.compareTo(data(b)))
+      case Column.DateColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
+      case Column.BooleanColumn(data, nulls) => nullSafe(nulls)(java.lang.Boolean.compare(data(a), data(b)))
+      case Column.AnyColumn(data, nulls) => nullSafe(nulls)(Ordering.String.compare(data(a).toString, data(b).toString))
     }
   }
 
@@ -884,40 +735,20 @@ object DatasetInterpreter extends Interpreter {
       Right(MaterializedDataset(parentCols ++ windowCols, outputSchema))
     } else {
 
-      val partColsOrError =
-        windowSpec.partitionBy.foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) {
-          case (acc, spec) =>
-            acc.flatMap(cols => ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ _))
-        }
+      val partColsOrError = traverseEither(windowSpec.partitionBy)(spec =>
+        ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType)
+      )
 
-      val orderColsOrError =
-        windowSpec.orderBy.foldLeft[Either[ExecutionError, Vector[(Column[?], SortSpec[In])]]](Right(Vector.empty)) {
-          case (acc, spec) =>
-            acc.flatMap(cols =>
-              ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map(cols :+ (_, spec))
-            )
-        }
+      val orderColsOrError = traverseEither(windowSpec.orderBy)(spec =>
+        ExprInterpreter.evalColumn(spec.expr, dataset.columns, spec.columnType).map((_, spec))
+      )
 
       for {
         partCols <- partColsOrError
         orderCols <- orderColsOrError
         result <- {
-          val partitions =
-            scala.collection.mutable.LinkedHashMap.empty[Vector[Any], scala.collection.mutable.ArrayBuffer[Int]]
-          (0 until rowCount).foreach { i =>
-            val key = partCols.map(_.getValue(i))
-            partitions.getOrElseUpdate(key, scala.collection.mutable.ArrayBuffer.empty[Int]) += i
-          }
-
-          val sortedPartitions = partitions.toVector.map { case (key, indices) =>
-            val sorted = indices.sortWith { (a, b) =>
-              val result = orderCols.iterator.map { case (col, spec) =>
-                val cmp = compareColumnValues(col, a, b)
-                if (spec.ascending) cmp else -cmp
-              }.find(_ != 0).getOrElse(0)
-              result < 0
-            }
-            (key, sorted)
+          val sortedPartitions = partitionByKeys(partCols, rowCount).map { case (key, indices) =>
+            (key, indices.sortWith(multiColumnLt(orderCols, _, _)))
           }
 
           val windowResultCols = windowExprs.map { spec =>
@@ -935,14 +766,8 @@ object DatasetInterpreter extends Interpreter {
                     (0 until partSize).foldLeft(1) { (lastRank, pos) =>
                       val rank =
                         if (pos == 0) 1
-                        else {
-                          val prev = sortedIndices(pos - 1)
-                          val curr = sortedIndices(pos)
-                          val same = orderCols.forall { case (col, _) =>
-                            java.util.Objects.equals(col.getValue(prev), col.getValue(curr))
-                          }
-                          if (same) lastRank else pos + 1
-                        }
+                        else if (sameOrderValues(orderCols, sortedIndices(pos - 1), sortedIndices(pos))) lastRank
+                        else pos + 1
                       resultArray(sortedIndices(pos)) = rank
                       rank
                     }
@@ -950,13 +775,7 @@ object DatasetInterpreter extends Interpreter {
 
                   case _: Expr.DenseRank[_] =>
                     (0 until partSize).foldLeft(0) { (currentRank, pos) =>
-                      val newGroup = pos == 0 || {
-                        val prev = sortedIndices(pos - 1)
-                        val curr = sortedIndices(pos)
-                        !orderCols.forall { case (col, _) =>
-                          java.util.Objects.equals(col.getValue(prev), col.getValue(curr))
-                        }
-                      }
+                      val newGroup = pos == 0 || !sameOrderValues(orderCols, sortedIndices(pos - 1), sortedIndices(pos))
                       val rank = if (newGroup) currentRank + 1 else currentRank
                       resultArray(sortedIndices(pos)) = rank
                       rank
@@ -964,36 +783,28 @@ object DatasetInterpreter extends Interpreter {
                     None
 
                   case lag: Expr.Lag[_, _] =>
-                    val offset = lag.offset
-                    val defaultVal = lag.default.getOrElse(null) // scalafix:ok DisableSyntax.null
-                    val innerType = ExprInterpreter.inferExprColumnType(lag.expr, dataset.columns)
-                    ExprInterpreter.evalColumn(lag.expr, dataset.columns, innerType) match {
-                      case Right(innerCol) =>
-                        (0 until partSize).foreach { pos =>
-                          val srcPos = pos - offset
-                          resultArray(sortedIndices(pos)) =
-                            if (srcPos >= 0 && srcPos < partSize) innerCol.getValue(sortedIndices(srcPos))
-                            else defaultVal
-                        }
-                        None
-                      case Left(e) => Some(e)
-                    }
+                    applyShiftWindow(
+                      lag.expr,
+                      lag.offset,
+                      lag.default.orNull,
+                      -1,
+                      partSize,
+                      sortedIndices,
+                      resultArray,
+                      dataset.columns
+                    )
 
                   case lead: Expr.Lead[_, _] =>
-                    val offset = lead.offset
-                    val defaultVal = lead.default.getOrElse(null) // scalafix:ok DisableSyntax.null
-                    val innerType = ExprInterpreter.inferExprColumnType(lead.expr, dataset.columns)
-                    ExprInterpreter.evalColumn(lead.expr, dataset.columns, innerType) match {
-                      case Right(innerCol) =>
-                        (0 until partSize).foreach { pos =>
-                          val srcPos = pos + offset
-                          resultArray(sortedIndices(pos)) =
-                            if (srcPos >= 0 && srcPos < partSize) innerCol.getValue(sortedIndices(srcPos))
-                            else defaultVal
-                        }
-                        None
-                      case Left(e) => Some(e)
-                    }
+                    applyShiftWindow(
+                      lead.expr,
+                      lead.offset,
+                      lead.default.orNull,
+                      1,
+                      partSize,
+                      sortedIndices,
+                      resultArray,
+                      dataset.columns
+                    )
 
                   case other =>
                     Some(ExecutionError.InvalidValue(s"Unsupported window expression: $other"))
@@ -1007,15 +818,57 @@ object DatasetInterpreter extends Interpreter {
             }
           }
 
-          windowResultCols
-            .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { case (acc, colOrErr) =>
-              acc.flatMap(cols => colOrErr.map(cols :+ _))
-            }
+          sequenceEither(windowResultCols)
             .map(windowCols => MaterializedDataset(dataset.columns ++ windowCols, outputSchema))
         }
       } yield result
     }
   }
+
+  private def sameOrderValues[T](
+    orderCols: Vector[(Column[?], SortSpec[T])],
+    idxA: Int,
+    idxB: Int
+  ): Boolean =
+    orderCols.forall { case (col, _) =>
+      java.util.Objects.equals(col.getValue(idxA), col.getValue(idxB))
+    }
+
+  private def applyShiftWindow(
+    expr: Expr[?, ?],
+    offset: Int,
+    defaultVal: Any | Null,
+    sign: Int,
+    partSize: Int,
+    sortedIndices: scala.collection.mutable.ArrayBuffer[Int],
+    resultArray: Array[Any | Null],
+    columns: Vector[Column[?]]
+  ): Option[ExecutionError] = {
+    val innerType = ExprInterpreter.inferExprColumnType(expr, columns)
+    ExprInterpreter.evalColumn(expr, columns, innerType) match {
+      case Right(innerCol) =>
+        (0 until partSize).foreach { pos =>
+          val srcPos = pos + sign * offset
+          resultArray(sortedIndices(pos)) =
+            if (srcPos >= 0 && srcPos < partSize) innerCol.getValue(sortedIndices(srcPos))
+            else defaultVal
+        }
+        None
+      case Left(e) => Some(e)
+    }
+  }
+
+  private def traverseEither[A, B](
+    items: Vector[A]
+  )(f: A => Either[ExecutionError, B]): Either[ExecutionError, Vector[B]] =
+    items.foldLeft[Either[ExecutionError, Vector[B]]](Right(Vector.empty)) { (acc, item) =>
+      acc.flatMap(results => f(item).map(results :+ _))
+    }
+
+  private def sequenceEither[A](
+    items: Vector[Either[ExecutionError, A]]
+  ): Either[ExecutionError, Vector[A]] =
+    traverseEither(items)(identity)
 
   private def globalAggregate[In, Out](
     dataset: MaterializedDataset[In],
@@ -1023,8 +876,7 @@ object DatasetInterpreter extends Interpreter {
     outputSchema: Schema[Out]
   ): Either[ExecutionError, MaterializedDataset[Out]] = {
     if (dataset.rowCount == 0) {
-      val emptyCols = aggSpecs.map(_.columnType).map(Column.empty)
-      Right(MaterializedDataset(emptyCols, outputSchema))
+      emptyResult(aggSpecs.map(_.columnType), outputSchema)
     } else {
 
       val aggOutputCols = aggSpecs.map { spec =>
@@ -1033,10 +885,7 @@ object DatasetInterpreter extends Interpreter {
         }
       }
 
-      aggOutputCols
-        .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { case (acc, colOrErr) =>
-          acc.flatMap(cols => colOrErr.map(cols :+ _))
-        }
+      sequenceEither(aggOutputCols)
         .map(cols => MaterializedDataset(cols, outputSchema))
     }
   }

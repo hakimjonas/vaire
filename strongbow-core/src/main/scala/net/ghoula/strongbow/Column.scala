@@ -395,4 +395,20 @@ object Column {
         Right(AnyColumn(values.toArray, nullIndices))
     }
   }
+
+  def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] = {
+    def sort[T](data: IArray[T])(lt: (T, T) => Boolean): Array[Int] =
+      (0 until rowCount).sortWith((a, b) => lt(data(a), data(b))).toArray
+
+    col match {
+      case IntColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
+      case LongColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
+      case DoubleColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Double.compare(a, b) < 0)
+      case StringColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => a.nn.compareTo(b) < 0)
+      case DateColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
+      case BooleanColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => !a && b)
+      case AnyColumn(data, _) =>
+        sort(IArray.unsafeFromArray(data))((a, b) => String.valueOf(a).compareTo(String.valueOf(b)) < 0)
+    }
+  }
 }

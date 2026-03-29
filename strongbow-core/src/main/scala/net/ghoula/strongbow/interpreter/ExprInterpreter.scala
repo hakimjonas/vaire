@@ -1482,24 +1482,19 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, opType)
       rightCol <- evalColumn(right, columns, opType)
       result <- {
+        def cmpCol[T](ld: Array[T], ln: BitSet, rd: Array[T], rn: BitSet)(cmp: (T, T) => Boolean): Either[ExecutionError, Column[?]] =
+          Right(Column.boolean(Array.tabulate(rowCount)(i => cmp(ld(i), rd(i))), ln | rn))
+
         val matched: Either[ExecutionError, Column[?]] = (leftCol, rightCol) match {
-          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn)) =>
-            Right(Column.boolean(Array.tabulate(rowCount)(i => intCmp(ld(i), rd(i))), ln | rn))
-          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn)) =>
-            Right(Column.boolean(Array.tabulate(rowCount)(i => longCmp(ld(i), rd(i))), ln | rn))
-          case (Column.DoubleColumn(ld, ln), Column.DoubleColumn(rd, rn)) =>
-            Right(Column.boolean(Array.tabulate(rowCount)(i => doubleCmp(ld(i), rd(i))), ln | rn))
+          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn))       => cmpCol(ld, ln, rd, rn)(intCmp)
+          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn))     => cmpCol(ld, ln, rd, rn)(longCmp)
+          case (Column.DoubleColumn(ld, ln), Column.DoubleColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(doubleCmp)
           case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
-            Right(
-              Column.boolean(
-                Array.tabulate(rowCount)(i =>
-                  if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)
-                ),
-                ln | rn
-              )
-            )
-          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn)) =>
-            Right(Column.boolean(Array.tabulate(rowCount)(i => intCmp(ld(i), rd(i))), ln | rn))
+            Right(Column.boolean(
+              Array.tabulate(rowCount)(i => if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)),
+              ln | rn
+            ))
+          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn))     => cmpCol(ld, ln, rd, rn)(intCmp)
           case _ =>
             Left(ExecutionError.UnsupportedOperation("Comparison not supported for untyped columns"))
         }

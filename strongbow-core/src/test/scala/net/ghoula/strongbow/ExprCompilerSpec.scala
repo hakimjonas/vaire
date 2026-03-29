@@ -5,7 +5,7 @@ import org.scalatest.matchers.should.Matchers
 
 import net.ghoula.strongbow.prelude.*
 
-class ExprMacroSpec extends AnyFlatSpec with Matchers {
+class ExprCompilerSpec extends AnyFlatSpec with Matchers {
 
   case class User(id: Int, name: String, age: Int)
   given Schema[User] = Schema.derived
@@ -31,21 +31,21 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   // --- column macro tests ---
 
   "column macro" should "produce Cell and IntType for _.age" in {
-    val (expr, colType) = ExprMacro.column[User, Int](_.age)
+    val (expr, colType) = ExprCompiler.column[User, Int](_.age)
 
     expr shouldBe Expr.Cell[User, Int]("age", ColumnIndex(2))
     colType shouldBe ColumnType.IntType
   }
 
   it should "produce Cell and StringType for _.name" in {
-    val (expr, colType) = ExprMacro.column[User, String](_.name)
+    val (expr, colType) = ExprCompiler.column[User, String](_.name)
 
     expr shouldBe Expr.Cell[User, String]("name", ColumnIndex(1))
     colType shouldBe ColumnType.StringType
   }
 
   it should "produce Cell and IntType for _.id" in {
-    val (expr, colType) = ExprMacro.column[User, Int](_.id)
+    val (expr, colType) = ExprCompiler.column[User, Int](_.id)
 
     expr shouldBe Expr.Cell[User, Int]("id", ColumnIndex(0))
     colType shouldBe ColumnType.IntType
@@ -54,7 +54,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   // --- predicate macro tests ---
 
   "predicate macro" should "compile _.age > 25" in {
-    val pred = ExprMacro.predicate[User](_.age > 25)
+    val pred = ExprCompiler.predicate[User](_.age > 25)
 
     pred shouldBe a[Expr.Gt[?, ?]]
 
@@ -65,7 +65,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile compound u => u.age >= 18 && u.age < 65" in {
-    val pred = ExprMacro.predicate[User](u => u.age >= 18 && u.age < 65)
+    val pred = ExprCompiler.predicate[User](u => u.age >= 18 && u.age < 65)
 
     pred shouldBe a[Expr.And[?]]
 
@@ -76,7 +76,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile _.name == \"Alice\"" in {
-    val pred = ExprMacro.predicate[User](_.name == "Alice")
+    val pred = ExprCompiler.predicate[User](_.name == "Alice")
 
     pred shouldBe a[Expr.Eq[?, ?]]
 
@@ -87,7 +87,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile _.age != 25" in {
-    val pred = ExprMacro.predicate[User](_.age != 25)
+    val pred = ExprCompiler.predicate[User](_.age != 25)
 
     val dataset = createDataset(testUsers)
     val result = dataset.filter(pred).collect.toOption.get
@@ -96,7 +96,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile arithmetic _.age * 2 + 1 > 50" in {
-    val pred = ExprMacro.predicate[User](_.age * 2 + 1 > 50)
+    val pred = ExprCompiler.predicate[User](_.age * 2 + 1 > 50)
 
     val dataset = createDataset(testUsers)
     val result = dataset.filter(pred).collect.toOption.get
@@ -106,7 +106,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile _.age < 18 || _.age > 60 (Or predicate)" in {
-    val pred = ExprMacro.predicate[User](u => u.age < 18 || u.age > 60)
+    val pred = ExprCompiler.predicate[User](u => u.age < 18 || u.age > 60)
 
     pred shouldBe a[Expr.Or[?]]
 
@@ -119,7 +119,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   // --- String ops in predicate tests (8.2c) ---
 
   it should "compile string concat _.name + \"!\" == \"Alice!\"" in {
-    val pred = ExprMacro.predicate[User](_.name + "!" == "Alice!")
+    val pred = ExprCompiler.predicate[User](_.name + "!" == "Alice!")
 
     val dataset = createDataset(testUsers)
     val result = dataset.filter(pred).collect.toOption.get
@@ -128,7 +128,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile string length _.name.length > 3" in {
-    val pred = ExprMacro.predicate[User](_.name.length > 3)
+    val pred = ExprCompiler.predicate[User](_.name.length > 3)
 
     val dataset = createDataset(testUsers)
     val result = dataset.filter(pred).collect.toOption.get
@@ -138,7 +138,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile string length + int arithmetic _.name.length + 1 > 5" in {
-    val pred = ExprMacro.predicate[User](_.name.length + 1 > 5)
+    val pred = ExprCompiler.predicate[User](_.name.length + 1 > 5)
 
     val dataset = createDataset(testUsers)
     val result = dataset.filter(pred).collect.toOption.get
@@ -171,7 +171,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   )
 
   "predicate macro" should "compile boolean field access _.isActive" in {
-    val pred = ExprMacro.predicate[Member](_.isActive)
+    val pred = ExprCompiler.predicate[Member](_.isActive)
 
     pred shouldBe a[Expr.Cell[?, ?]]
 
@@ -182,7 +182,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile negated boolean field !_.isActive" in {
-    val pred = ExprMacro.predicate[Member](m => !m.isActive)
+    val pred = ExprCompiler.predicate[Member](m => !m.isActive)
 
     pred shouldBe a[Expr.Not[?]]
 
@@ -193,7 +193,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile !_.isActive && _.age > 25 (Not combined with comparison)" in {
-    val pred = ExprMacro.predicate[Member](m => !m.isActive && m.age > 25)
+    val pred = ExprCompiler.predicate[Member](m => !m.isActive && m.age > 25)
 
     pred shouldBe a[Expr.And[?]]
 
@@ -231,7 +231,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   )
 
   "predicate macro" should "compile nested field _.address.city == \"Boston\"" in {
-    val pred = ExprMacro.predicate[Person](_.address.city == "Boston")
+    val pred = ExprCompiler.predicate[Person](_.address.city == "Boston")
 
     val dataset = createPersonDataset(testPeople)
     val result = dataset.filter(pred).collect.toOption.get
@@ -243,7 +243,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile nested + flat _.address.city == \"Boston\" && _.age > 20" in {
-    val pred = ExprMacro.predicate[Person](p => p.address.city == "Boston" && p.age > 20)
+    val pred = ExprCompiler.predicate[Person](p => p.address.city == "Boston" && p.age > 20)
 
     val dataset = createPersonDataset(testPeople)
     val result = dataset.filter(pred).collect.toOption.get
@@ -252,7 +252,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   "column macro" should "resolve nested field _.address.city to correct index" in {
-    val (expr, colType) = ExprMacro.column[Person, String](_.address.city)
+    val (expr, colType) = ExprCompiler.column[Person, String](_.address.city)
 
     // Person: name(0), age(1), address.street(2), address.city(3)
     expr shouldBe Expr.Cell[Person, String]("address.city", ColumnIndex(3))
@@ -262,21 +262,21 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   // --- compileExpr tests (8.2e) ---
 
   "compileExpr" should "compile Int arithmetic expression _.age * 2 + 1" in {
-    val (expr, colType) = ExprMacro.compileExpr[User, Int](_.age * 2 + 1)
+    val (expr, colType) = ExprCompiler.compileExpr[User, Int](_.age * 2 + 1)
 
     colType shouldBe ColumnType.IntType
     expr shouldBe a[Expr.Add[?]]
   }
 
   it should "compile String field access _.name" in {
-    val (expr, colType) = ExprMacro.compileExpr[User, String](_.name)
+    val (expr, colType) = ExprCompiler.compileExpr[User, String](_.name)
 
     colType shouldBe ColumnType.StringType
     expr shouldBe Expr.Cell[User, String]("name", ColumnIndex(1))
   }
 
   it should "compile Boolean predicate _.age > 25" in {
-    val (expr, colType) = ExprMacro.compileExpr[User, Boolean](_.age > 25)
+    val (expr, colType) = ExprCompiler.compileExpr[User, Boolean](_.age > 25)
 
     colType shouldBe ColumnType.BooleanType
     expr shouldBe a[Expr.Gt[?, ?]]
@@ -307,7 +307,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
 
   // Long arithmetic tests
   "predicate macro" should "compile Long arithmetic _.count * 2L + 5L > 25L" in {
-    val pred = ExprMacro.predicate[Measurement](_.count * 2L + 5L > 25L)
+    val pred = ExprCompiler.predicate[Measurement](_.count * 2L + 5L > 25L)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get
@@ -317,7 +317,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile Long subtraction _.count - 15L > 0L" in {
-    val pred = ExprMacro.predicate[Measurement](_.count - 15L > 0L)
+    val pred = ExprCompiler.predicate[Measurement](_.count - 15L > 0L)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get
@@ -327,7 +327,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile Long division _.count / 10L > 1L" in {
-    val pred = ExprMacro.predicate[Measurement](_.count / 10L > 1L)
+    val pred = ExprCompiler.predicate[Measurement](_.count / 10L > 1L)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get
@@ -338,7 +338,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
 
   // Double arithmetic tests
   it should "compile Double multiplication _.value * 2.0 > 4.0" in {
-    val pred = ExprMacro.predicate[Measurement](_.value * 2.0 > 4.0)
+    val pred = ExprCompiler.predicate[Measurement](_.value * 2.0 > 4.0)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get
@@ -352,7 +352,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile Double addition _.value + 1.0 > 3.0" in {
-    val pred = ExprMacro.predicate[Measurement](_.value + 1.0 > 3.0)
+    val pred = ExprCompiler.predicate[Measurement](_.value + 1.0 > 3.0)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get
@@ -366,7 +366,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile Double subtraction _.value - 2.0 > 0.0" in {
-    val pred = ExprMacro.predicate[Measurement](_.value - 2.0 > 0.0)
+    val pred = ExprCompiler.predicate[Measurement](_.value - 2.0 > 0.0)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get
@@ -380,7 +380,7 @@ class ExprMacroSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile Double division _.value / 2.0 > 1.0" in {
-    val pred = ExprMacro.predicate[Measurement](_.value / 2.0 > 1.0)
+    val pred = ExprCompiler.predicate[Measurement](_.value / 2.0 > 1.0)
 
     val dataset = createMeasurementDataset(testMeasurements)
     val result = dataset.filter(pred).collect.toOption.get

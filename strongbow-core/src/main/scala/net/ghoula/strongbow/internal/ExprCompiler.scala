@@ -9,7 +9,7 @@ import net.ghoula.strongbow.dataset.Dataset
 import net.ghoula.strongbow.expr.Expr as SExpr
 import net.ghoula.strongbow.types.ColumnIndex
 
-object ExprMacro {
+object ExprCompiler {
 
   /** Compile a field-access lambda to (Expr.Cell, ColumnType) at compile time. */
   inline def column[T, A](inline f: T => A)(using m: Mirror.ProductOf[T]): (SExpr[T, A], ColumnType) =
@@ -141,7 +141,7 @@ object ExprMacro {
 
   /** Compile a .copy() lambda into a Vector of (name, Expr, ColumnType) triples.
     *
-    * Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args)). This macro
+    * Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args)). This
     * extracts the val bindings and copy call, resolves each argument through bindings, and emits
     * Cell for unchanged fields or compiled Expr for replacement fields.
     */
@@ -782,11 +782,11 @@ extension [T](ds: Dataset[T]) {
 
   /** Filter using lambda compiled to Expr at compile time. */
   inline def where(inline f: T => Boolean)(using m: Mirror.ProductOf[T]): Dataset[T] =
-    Dataset.Filter(ds, ExprMacro.predicate(f))
+    Dataset.Filter(ds, ExprCompiler.predicate(f))
 
   /** Sort by field, compiled to SortByExpr. */
   inline def sortByColumn[K](inline f: T => K)(using m: Mirror.ProductOf[T], ord: Ordering[K]): Dataset[T] = {
-    val (expr, colType) = ExprMacro.column(f)
+    val (expr, colType) = ExprCompiler.column(f)
     Dataset.SortByExpr(ds, expr, colType, ord)
   }
 
@@ -798,7 +798,7 @@ extension [T](ds: Dataset[T]) {
     *   }}}
     */
   inline def withFields(inline f: T => T)(using m: Mirror.ProductOf[T], s: Schema[T]): Dataset[T] = {
-    val exprs = ExprMacro.compileCopy(f)
+    val exprs = ExprCompiler.compileCopy(f)
     Dataset.SelectExprs(ds, exprs, s)
   }
 
@@ -808,7 +808,7 @@ extension [T](ds: Dataset[T]) {
     mu: Mirror.ProductOf[U],
     su: Schema[U]
   ): Dataset[U] = {
-    val exprs = ExprMacro.projectExprs[T, U]
+    val exprs = ExprCompiler.projectExprs[T, U]
     Dataset.SelectExprs(ds, exprs, su)
   }
 }

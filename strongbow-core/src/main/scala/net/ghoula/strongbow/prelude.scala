@@ -29,7 +29,7 @@ object prelude {
   export net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
   export net.ghoula.strongbow.errors.{SchemaError, DecodeError, ExecutionError, NonEmptyList}
   export net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
-  export net.ghoula.strongbow.internal.ExprMacro
+  export net.ghoula.strongbow.internal.ExprCompiler
   export net.ghoula.strongbow.internal.{where, sortByColumn, withFields, project}
   export net.ghoula.strongbow.agg.AggBuilders as agg
   export net.ghoula.strongbow.agg.as

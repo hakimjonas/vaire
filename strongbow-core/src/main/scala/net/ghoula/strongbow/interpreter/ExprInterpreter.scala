@@ -1651,28 +1651,14 @@ object ExprInterpreter {
 
         case sd: Expr.StdDev[Row] =>
           aggregateDoubleExpr(sd.expr, columns) { (data, nulls) =>
-            val (sum, count) = sumAndCount(data, nulls)
-            if (count <= 1) 0.0
-            else {
-              val mean = sum / count
-              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
-                if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
-              }
-              math.sqrt(variance / (count - 1))
-            }
+            val (variance, count) = computeVariance(data, nulls)
+            if (count <= 1) 0.0 else math.sqrt(variance / (count - 1))
           }
 
         case sdp: Expr.StdDevPop[Row] =>
           aggregateDoubleExpr(sdp.expr, columns) { (data, nulls) =>
-            val (sum, count) = sumAndCount(data, nulls)
-            if (count == 0) 0.0
-            else {
-              val mean = sum / count
-              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
-                if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
-              }
-              math.sqrt(variance / count)
-            }
+            val (variance, count) = computeVariance(data, nulls)
+            if (count == 0) 0.0 else math.sqrt(variance / count)
           }
 
         case pct: Expr.PercentileApprox[Row] =>
@@ -1702,28 +1688,14 @@ object ExprInterpreter {
 
         case v: Expr.Variance[Row] =>
           aggregateDoubleExpr(v.expr, columns) { (data, nulls) =>
-            val (sum, count) = sumAndCount(data, nulls)
-            if (count <= 1) 0.0
-            else {
-              val mean = sum / count
-              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
-                if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
-              }
-              variance / (count - 1)
-            }
+            val (variance, count) = computeVariance(data, nulls)
+            if (count <= 1) 0.0 else variance / (count - 1)
           }
 
         case vp: Expr.VariancePop[Row] =>
           aggregateDoubleExpr(vp.expr, columns) { (data, nulls) =>
-            val (sum, count) = sumAndCount(data, nulls)
-            if (count == 0) 0.0
-            else {
-              val mean = sum / count
-              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
-                if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
-              }
-              variance / count
-            }
+            val (variance, count) = computeVariance(data, nulls)
+            if (count == 0) 0.0 else variance / count
           }
 
         case corr: Expr.Corr[Row] =>
@@ -1951,6 +1923,17 @@ object ExprInterpreter {
   }
 
   /** Sum non-null values and count them in a single pass. */
+  private def computeVariance(data: Array[Double], nulls: BitSet): (Double, Int) =
+    sumAndCount(data, nulls) match {
+      case (_, 0) => (0.0, 0)
+      case (sum, count) =>
+        val mean = sum / count
+        val variance = data.indices.filterNot(nulls.contains).foldLeft(0.0) { (acc, i) =>
+          val d = data(i) - mean; acc + d * d
+        }
+        (variance, count)
+    }
+
   private def sumAndCount(data: Array[Double], nulls: BitSet): (Double, Int) = {
     data.indices.foldLeft((0.0, 0)) { case ((sum, count), i) =>
       if (nulls.contains(i)) (sum, count) else (sum + data(i), count + 1)

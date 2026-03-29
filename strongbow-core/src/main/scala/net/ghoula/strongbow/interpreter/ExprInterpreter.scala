@@ -524,30 +524,14 @@ object ExprInterpreter {
         case in: Expr.IsNull[Row, _] =>
           val innerType = inferExprColumnType(in.expr, columns)
           evalColumn(in.expr, columns, innerType).map { col =>
-            val nulls = col match {
-              case Column.IntColumn(_, n) => n
-              case Column.LongColumn(_, n) => n
-              case Column.DoubleColumn(_, n) => n
-              case Column.StringColumn(_, n) => n
-              case Column.BooleanColumn(_, n) => n
-              case Column.DateColumn(_, n) => n
-              case Column.AnyColumn(_, n) => n
-            }
+            val nulls = col.nullSet
             Column.boolean(Array.tabulate(rowCount)(i => nulls.contains(i)))
           }
 
         case inn: Expr.IsNotNull[Row, _] =>
           val innerType = inferExprColumnType(inn.expr, columns)
           evalColumn(inn.expr, columns, innerType).map { col =>
-            val nulls = col match {
-              case Column.IntColumn(_, n) => n
-              case Column.LongColumn(_, n) => n
-              case Column.DoubleColumn(_, n) => n
-              case Column.StringColumn(_, n) => n
-              case Column.BooleanColumn(_, n) => n
-              case Column.DateColumn(_, n) => n
-              case Column.AnyColumn(_, n) => n
-            }
+            val nulls = col.nullSet
             Column.boolean(Array.tabulate(rowCount)(i => !nulls.contains(i)))
           }
 
@@ -718,15 +702,7 @@ object ExprInterpreter {
         case cts: Expr.CastToString[Row, _] =>
           val innerType = inferExprColumnType(cts.expr, columns)
           evalColumn(cts.expr, columns, innerType).map { col =>
-            val nulls = col match {
-              case Column.IntColumn(_, n) => n
-              case Column.LongColumn(_, n) => n
-              case Column.DoubleColumn(_, n) => n
-              case Column.StringColumn(_, n) => n
-              case Column.BooleanColumn(_, n) => n
-              case Column.DateColumn(_, n) => n
-              case Column.AnyColumn(_, n) => n
-            }
+            val nulls = col.nullSet
             Column.string(
               Array.tabulate(rowCount)(i =>
                 if (nulls.contains(i)) null else String.valueOf(col.getValue(i)).nn // scalafix:ok DisableSyntax.null

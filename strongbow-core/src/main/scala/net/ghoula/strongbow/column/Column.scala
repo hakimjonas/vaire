@@ -40,7 +40,7 @@ enum Column[+A] {
     case AnyColumn(_, _) => ColumnType.AnyType
   }
 
-  private inline def nullSet: BitSet = this match {
+  private[strongbow] inline def nullSet: BitSet = this match {
     case IntColumn(_, nulls) => nulls
     case LongColumn(_, nulls) => nulls
     case DoubleColumn(_, nulls) => nulls

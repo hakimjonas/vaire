@@ -274,7 +274,7 @@ object Schema {
     val columnNamesExpr = {
       val nameExprs = fieldLabels.zip(schemas).map { case (label, schema) =>
         val labelExpr = Expr(label)
-        '{ $schema.columnNames.map(name => ${ labelExpr } + "_" + name) }
+        '{ $schema.columnNames.map(name => ${ labelExpr }.toString + "_" + name) }
       }
       nameExprs.foldLeft[Expr[Vector[String]]]('{ Vector.empty }) { (acc, names) =>
         '{ $acc ++ $names }

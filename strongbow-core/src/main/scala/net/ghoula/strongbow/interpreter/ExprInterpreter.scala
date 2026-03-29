@@ -1782,16 +1782,10 @@ object ExprInterpreter {
           }
 
         case countDist: Expr.CountDistinct[Row, ?] =>
-          val colType = inferExprColumnType(countDist.expr, columns)
-          evalColumn(countDist.expr, columns, colType).map { col =>
-            (0 until rowCount).filter(i => !col.isNull(RowIndex(i))).map(col.getValue).toSet.size.toLong
-          }
+          countDistinctAgg(countDist.expr, columns, rowCount)
 
         case acd: Expr.ApproxCountDistinct[Row, ?] =>
-          val colType = inferExprColumnType(acd.expr, columns)
-          evalColumn(acd.expr, columns, colType).map { col =>
-            (0 until rowCount).filter(i => !col.isNull(RowIndex(i))).map(col.getValue).toSet.size.toLong
-          }
+          countDistinctAgg(acd.expr, columns, rowCount)
 
         case max: Expr.Max[Row, ?] =>
           val colType = inferExprColumnType(max.expr, columns)
@@ -1931,6 +1925,17 @@ object ExprInterpreter {
         }
         (variance, count)
     }
+
+  private def countDistinctAgg[Row](
+    expr: Expr[Row, ?],
+    columns: Vector[Column[?]],
+    rowCount: Int
+  ): Either[ExecutionError, Long] = {
+    val colType = inferExprColumnType(expr, columns)
+    evalColumn(expr, columns, colType).map { col =>
+      (0 until rowCount).filter(i => !col.isNull(RowIndex(i))).map(col.getValue).toSet.size.toLong
+    }
+  }
 
   private def sumAndCount(data: Array[Double], nulls: BitSet): (Double, Int) = {
     data.indices.foldLeft((0.0, 0)) { case ((sum, count), i) =>

@@ -22,87 +22,20 @@ import net.ghoula.strongbow.types.{Date, RowIndex}
 object ExprInterpreter {
 
   private[strongbow] def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]]): ColumnType = {
-    (expr: @unchecked) match {
-      case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
-      case c: Expr.Const[_, _] =>
-        c.value match {
-          case _: Int => ColumnType.IntType
-          case _: Long => ColumnType.LongType
-          case _: Double => ColumnType.DoubleType
-          case _: String => ColumnType.StringType
-          case _: Boolean => ColumnType.BooleanType
-          case _ => ColumnType.AnyType
-        }
-      case n: Expr.Named[_, _] => inferExprColumnType(n.expr, columns)
-      case _: Expr.Add[_] | _: Expr.Sub[_] | _: Expr.Mul[_] | _: Expr.Div[_] | _: Expr.Length[_] | _: Expr.Mod[_] |
-          _: Expr.Abs[_] | _: Expr.Negate[_] =>
-        ColumnType.IntType
-      case _: Expr.AddLong[_] | _: Expr.SubLong[_] | _: Expr.MulLong[_] | _: Expr.DivLong[_] | _: Expr.ModLong[_] |
-          _: Expr.AbsLong[_] | _: Expr.NegateLong[_] | _: Expr.CastToLong[_] =>
-        ColumnType.LongType
-      case _: Expr.AddDouble[_] | _: Expr.SubDouble[_] | _: Expr.MulDouble[_] | _: Expr.DivDouble[_] |
-          _: Expr.AbsDouble[_] | _: Expr.NegateDouble[_] | _: Expr.Round[_] | _: Expr.Floor[_] | _: Expr.Ceil[_] |
-          _: Expr.CastToDouble[_] | _: Expr.CastLongToDouble[_] =>
-        ColumnType.DoubleType
-      case _: Expr.Concat[_] | _: Expr.Lower[_] | _: Expr.Upper[_] | _: Expr.Trim[_] | _: Expr.LTrim[_] |
-          _: Expr.RTrim[_] | _: Expr.Substring[_] | _: Expr.StringReplace[_] | _: Expr.RegexpReplace[_] |
-          _: Expr.RegexpExtract[_] | _: Expr.ConcatWs[_] | _: Expr.CastToString[_, _] =>
-        ColumnType.StringType
-      case _: Expr.StringSplit[_] => ColumnType.AnyType
-      case _: Expr.Gt[_, _] | _: Expr.Lt[_, _] | _: Expr.Gte[_, _] | _: Expr.Lte[_, _] | _: Expr.Eq[_, _] |
-          _: Expr.Neq[_, _] | _: Expr.And[_] | _: Expr.Or[_] | _: Expr.Not[_] | _: Expr.IsDefined[_, _] |
-          _: Expr.Like[_] | _: Expr.StartsWith[_] | _: Expr.EndsWith[_] | _: Expr.StringContains[_] |
-          _: Expr.IsNull[_, _] | _: Expr.IsNotNull[_, _] | _: Expr.In[_, _] | _: Expr.Between[_, _] =>
-        ColumnType.BooleanType
-      case c: Expr.Coalesce[_, _] =>
-        c.exprs.headOption.map(e => inferExprColumnType(e, columns)).getOrElse(ColumnType.AnyType)
-      case w: Expr.When[_, _] => inferExprColumnType(w.thenExpr, columns)
-      case g: Expr.GetOrElse[_, _] => inferExprColumnType(g.expr, columns)
-      case _: Expr.SumDouble[_] | _: Expr.Avg[_] | _: Expr.StdDev[_] | _: Expr.StdDevPop[_] => ColumnType.DoubleType
-      case _: Expr.Sum[_] | _: Expr.SumLong[_] | _: Expr.Count[_] | _: Expr.CountDistinct[_, _] | _: Expr.CountIf[_] =>
-        ColumnType.LongType
-      case _: Expr.Max[_, _] | _: Expr.Min[_, _] | _: Expr.First[_, _] => ColumnType.AnyType
-      case _: Expr.Collect[_, _] | _: Expr.Option2Iterable[_, _] => ColumnType.AnyType
-      case _: Expr.PercentileApprox[_] => ColumnType.DoubleType
-      case _: Expr.MaxBy[_, _, _] | _: Expr.MinBy[_, _, _] => ColumnType.AnyType
-      case _: Expr.MaxN[_, _] | _: Expr.MinN[_, _] | _: Expr.MaxByN[_, _, _] | _: Expr.MinByN[_, _, _] =>
-        ColumnType.AnyType
-      case _: Expr.DateAddDays[_] | _: Expr.DateSubDays[_] | _: Expr.DateAddMonths[_] => ColumnType.DateType
-      case _: Expr.DateDiff[_] | _: Expr.ExtractYear[_] | _: Expr.ExtractMonth[_] | _: Expr.ExtractDay[_] =>
-        ColumnType.IntType
-      case _: Expr.RowNumber[_] | _: Expr.Rank[_] | _: Expr.DenseRank[_] => ColumnType.IntType
-      case _: Expr.Lag[_, _] | _: Expr.Lead[_, _] => ColumnType.AnyType
-      case _: Expr.Sqrt[_] | _: Expr.Pow[_] | _: Expr.Log[_] | _: Expr.Log10[_] | _: Expr.Log2[_] | _: Expr.Exp[_] |
-          _: Expr.Sin[_] | _: Expr.Cos[_] | _: Expr.Tan[_] | _: Expr.Asin[_] | _: Expr.Acos[_] | _: Expr.Atan[_] |
-          _: Expr.Atan2[_] | _: Expr.Signum[_] | _: Expr.Rand[_] =>
-        ColumnType.DoubleType
-      case _: Expr.DayOfWeek[_] | _: Expr.DayOfYear[_] | _: Expr.WeekOfYear[_] | _: Expr.Quarter[_] =>
-        ColumnType.IntType
-      case _: Expr.LastDay[_] | _: Expr.NextDay[_] | _: Expr.DateTrunc[_] | _: Expr.MakeDate[_] =>
-        ColumnType.DateType
-      case _: Expr.MonthsBetween[_] => ColumnType.DoubleType
-      case _: Expr.DateFormat[_] => ColumnType.StringType
-      case _: Expr.Variance[_] | _: Expr.VariancePop[_] | _: Expr.Corr[_] | _: Expr.CovarSamp[_] | _: Expr.CovarPop[_] |
-          _: Expr.Median[_] =>
-        ColumnType.DoubleType
-      case _: Expr.ApproxCountDistinct[_, _] => ColumnType.LongType
-      case _: Expr.CollectSet[_, _] => ColumnType.AnyType
-      case _: Expr.ExprLast[_, _] | _: Expr.AnyValue[_, _] | _: Expr.Mode[_, _] => ColumnType.AnyType
-      case _: Expr.BoolAnd[_] | _: Expr.BoolOr[_] => ColumnType.BooleanType
-      case _: Expr.NTile[_] => ColumnType.IntType
-      case _: Expr.CumeDist[_] | _: Expr.PercentRank[_] => ColumnType.DoubleType
-      case _: Expr.NthValue[_, _] | _: Expr.FirstValue[_, _] | _: Expr.LastValue[_, _] => ColumnType.AnyType
-      case _: Expr.ArraySize[_, _] => ColumnType.IntType
-      case _: Expr.ArrayContains[_, _] | _: Expr.MapContainsKey[_, _, _] => ColumnType.BooleanType
-      case _: Expr.Explode[_, _] | _: Expr.ElementAt[_, _] => ColumnType.AnyType
-      case _: Expr.ArraySort[_, _] | _: Expr.ArrayDistinct[_, _] | _: Expr.ArrayUnion[_, _] |
-          _: Expr.ArrayIntersect[_, _] | _: Expr.ArrayExcept[_, _] | _: Expr.Flatten[_, _] | _: Expr.ArraySlice[_, _] |
-          _: Expr.MapKeys[_, _, _] | _: Expr.MapValues[_, _, _] | _: Expr.MapEntries[_, _, _] =>
-        ColumnType.AnyType
-      case _: Expr.MapFromArrays[_, _, _] | _: Expr.MapConcat[_, _, _] => ColumnType.AnyType
-      case _: Expr.Md5[_] | _: Expr.Sha1[_] | _: Expr.Sha2[_] | _: Expr.UrlEncode[_] | _: Expr.UrlDecode[_] |
-          _: Expr.Base64Encode[_] | _: Expr.Base64Decode[_] | _: Expr.Hex[_] | _: Expr.GetJsonObject[_] =>
-        ColumnType.StringType
+    expr.outputType.getOrElse {
+      expr match {
+        case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
+        case c: Expr.Const[_, _] =>
+          c.value match {
+            case _: Int     => ColumnType.IntType
+            case _: Long    => ColumnType.LongType
+            case _: Double  => ColumnType.DoubleType
+            case _: String  => ColumnType.StringType
+            case _: Boolean => ColumnType.BooleanType
+            case _          => ColumnType.AnyType
+          }
+        case _ => ColumnType.AnyType
+      }
     }
   }
 

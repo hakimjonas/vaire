@@ -109,7 +109,7 @@ object ExprInterpreter {
   /** Evaluate expression for all rows, producing a new column.
     *
     * Vectorized: operates on entire arrays instead of row-by-row where possible. For Cell
-    * references, returns the column directly (zero work). For arithmetic/comparisons/string ops,
+    * references, returns the column directly (zero work). For arithmetic/comparisons/string ops, It
     * uses while-loops on typed arrays.
     */
   def evalColumn[Row, A](
@@ -144,7 +144,7 @@ object ExprInterpreter {
               Right(Column.boolean(Array.fill(rowCount)(v)))
             case v =>
               if (Option(v).isEmpty) {
-                val allNulls = BitSet((0 until rowCount)*)
+                val allNulls = BitSet(0 until rowCount*)
                 Right(columnType match {
                   case ColumnType.IntType => Column.int(new Array[Int](rowCount), allNulls)
                   case ColumnType.LongType => Column.long(new Array[Long](rowCount), allNulls)
@@ -1060,7 +1060,7 @@ object ExprInterpreter {
                 Array.tabulate(rowCount) { i =>
                   if (nulls.contains(i)) 0
                   else {
-                    val d = java.time.LocalDate.ofEpochDay(data(i).toLong);
+                    val d = java.time.LocalDate.ofEpochDay(data(i).toLong)
                     d.withDayOfMonth(d.lengthOfMonth()).toEpochDay.toInt
                   }
                 },
@@ -1692,10 +1692,10 @@ object ExprInterpreter {
     }
   }
 
-  /** Evaluate aggregation expression over entire dataset.
+  /** Evaluate aggregation expression over the entire dataset.
     *
     * Aggregations operate on all rows to produce a single value. Returns Any because the result is
-    * consumed by DatasetInterpreter via Column.fromValues which takes Vector[Any]. The GADT type
+    * consumed by DatasetInterpreter via Column.fromValues, which takes Vector[Any]. The GADT type
     * parameter A is used internally for typed column dispatch but erased at the return boundary.
     * Fixed-type aggregations (Sum, Avg, StdDev) operate on typed columns via evalColumn. Generic
     * aggregations (Max, Collect) use Column GADT pattern matching for typed access.
@@ -1749,28 +1749,28 @@ object ExprInterpreter {
         case sum: Expr.Sum[Row] =>
           evalColumn(sum.expr, columns, ColumnType.IntType).map {
             case Column.IntColumn(data, nulls) =>
-              (0 until data.length).foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+              data.indices.foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
             case _ => 0L
           }
 
         case sumD: Expr.SumDouble[Row] =>
           evalColumn(sumD.expr, columns, ColumnType.DoubleType).map {
             case Column.DoubleColumn(data, nulls) =>
-              (0 until data.length).foldLeft(0.0)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+              data.indices.foldLeft(0.0)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
             case _ => 0.0
           }
 
         case sumL: Expr.SumLong[Row] =>
           evalColumn(sumL.expr, columns, ColumnType.LongType).map {
             case Column.LongColumn(data, nulls) =>
-              (0 until data.length).foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
+              data.indices.foldLeft(0L)((acc, i) => if (nulls.contains(i)) acc else acc + data(i))
             case _ => 0L
           }
 
         case avg: Expr.Avg[Row] =>
           evalColumn(avg.expr, columns, ColumnType.DoubleType).map {
             case Column.DoubleColumn(data, nulls) =>
-              val (total, count) = (0 until data.length).foldLeft((0.0, 0)) { case ((sum, cnt), i) =>
+              val (total, count) = data.indices.foldLeft((0.0, 0)) { case ((sum, cnt), i) =>
                 if (nulls.contains(i)) (sum, cnt) else (sum + data(i), cnt + 1)
               }
               if (count == 0) 0.0 else total / count
@@ -1780,7 +1780,7 @@ object ExprInterpreter {
         case countIf: Expr.CountIf[Row] =>
           evalColumn(countIf.predicate, columns, ColumnType.BooleanType).map {
             case Column.BooleanColumn(data, nulls) =>
-              (0 until data.length).foldLeft(0L)((acc, i) => if (!nulls.contains(i) && data(i)) acc + 1L else acc)
+              data.indices.foldLeft(0L)((acc, i) => if (!nulls.contains(i) && data(i)) acc + 1L else acc)
             case _ => 0L
           }
 
@@ -1790,7 +1790,7 @@ object ExprInterpreter {
             if (count <= 1) 0.0
             else {
               val mean = sum / count
-              val variance = (0 until data.length).foldLeft(0.0) { (acc, i) =>
+              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
                 if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
               }
               math.sqrt(variance / (count - 1))
@@ -1803,7 +1803,7 @@ object ExprInterpreter {
             if (count == 0) 0.0
             else {
               val mean = sum / count
-              val variance = (0 until data.length).foldLeft(0.0) { (acc, i) =>
+              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
                 if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
               }
               math.sqrt(variance / count)
@@ -1824,14 +1824,14 @@ object ExprInterpreter {
         case ba: Expr.BoolAnd[Row] =>
           evalColumn(ba.expr, columns, ColumnType.BooleanType).map {
             case Column.BooleanColumn(data, nulls) =>
-              !(0 until data.length).exists(i => !nulls.contains(i) && !data(i))
+              !data.indices.exists(i => !nulls.contains(i) && !data(i))
             case _ => true
           }
 
         case bo: Expr.BoolOr[Row] =>
           evalColumn(bo.expr, columns, ColumnType.BooleanType).map {
             case Column.BooleanColumn(data, nulls) =>
-              (0 until data.length).exists(i => !nulls.contains(i) && data(i))
+              data.indices.exists(i => !nulls.contains(i) && data(i))
             case _ => false
           }
 
@@ -1841,7 +1841,7 @@ object ExprInterpreter {
             if (count <= 1) 0.0
             else {
               val mean = sum / count
-              val variance = (0 until data.length).foldLeft(0.0) { (acc, i) =>
+              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
                 if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
               }
               variance / (count - 1)
@@ -1854,7 +1854,7 @@ object ExprInterpreter {
             if (count == 0) 0.0
             else {
               val mean = sum / count
-              val variance = (0 until data.length).foldLeft(0.0) { (acc, i) =>
+              val variance = data.indices.foldLeft(0.0) { (acc, i) =>
                 if (nulls.contains(i)) acc else { val d = data(i) - mean; acc + d * d }
               }
               variance / count
@@ -1875,7 +1875,7 @@ object ExprInterpreter {
                 else {
                   val xMean = xSum / n
                   val yMean = ySum / n
-                  val (cov, xVar, yVar) = (0 until xData.length).foldLeft((0.0, 0.0, 0.0)) { case ((c, xv, yv), i) =>
+                  val (cov, xVar, yVar) = xData.indices.foldLeft((0.0, 0.0, 0.0)) { case ((c, xv, yv), i) =>
                     if (combinedNulls.contains(i)) (c, xv, yv)
                     else {
                       val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
@@ -1902,7 +1902,7 @@ object ExprInterpreter {
                 else {
                   val xMean = xSum / n
                   val yMean = ySum / n
-                  val cov = (0 until xData.length).foldLeft(0.0) { (acc, i) =>
+                  val cov = xData.indices.foldLeft(0.0) { (acc, i) =>
                     if (combinedNulls.contains(i)) acc else acc + (xData(i) - xMean) * (yData(i) - yMean)
                   }
                   cov / (n - 1)
@@ -1925,7 +1925,7 @@ object ExprInterpreter {
                 else {
                   val xMean = xSum / n
                   val yMean = ySum / n
-                  val cov = (0 until xData.length).foldLeft(0.0) { (acc, i) =>
+                  val cov = xData.indices.foldLeft(0.0) { (acc, i) =>
                     if (combinedNulls.contains(i)) acc else acc + (xData(i) - xMean) * (yData(i) - yMean)
                   }
                   cov / n
@@ -2004,7 +2004,7 @@ object ExprInterpreter {
         case collect: Expr.Collect[Row, ?] =>
           val colType = inferExprColumnType(collect.expr, columns)
           evalColumn(collect.expr, columns, colType).map { col =>
-            (0 until rowCount).filter(i => !col.isNull(RowIndex(i))).map(col.getValue).toSeq
+            (0 until rowCount).filter(i => !col.isNull(RowIndex(i))).map(col.getValue)
           }
 
         case cs: Expr.CollectSet[Row, ?] =>
@@ -2079,17 +2079,15 @@ object ExprInterpreter {
     subExpr: Expr[Row, Double],
     columns: Vector[Column[?]]
   )(f: (Array[Double], BitSet) => Double): Either[ExecutionError, Double] = {
-    evalColumn(subExpr, columns, ColumnType.DoubleType).map { col =>
-      col match {
-        case Column.DoubleColumn(data, nulls) => f(data, nulls)
-        case _ => 0.0
-      }
+    evalColumn(subExpr, columns, ColumnType.DoubleType).map {
+      case Column.DoubleColumn(data, nulls) => f(data, nulls)
+      case _ => 0.0
     }
   }
 
   /** Sum non-null values and count them in a single pass. */
   private def sumAndCount(data: Array[Double], nulls: BitSet): (Double, Int) = {
-    (0 until data.length).foldLeft((0.0, 0)) { case ((sum, count), i) =>
+    data.indices.foldLeft((0.0, 0)) { case ((sum, count), i) =>
       if (nulls.contains(i)) (sum, count) else (sum + data(i), count + 1)
     }
   }
@@ -2182,30 +2180,30 @@ object ExprInterpreter {
       case Column.IntColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
         val sorted = if (isMax) vals.sorted(using Ordering[Int].reverse) else vals.sorted
-        sorted.take(n).toSeq
+        sorted.take(n)
       case Column.LongColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
         val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
-        sorted.take(n).toSeq
+        sorted.take(n)
       case Column.DoubleColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
         val sorted = if (isMax) vals.sorted(using Ordering[Double].reverse) else vals.sorted
-        sorted.take(n).toSeq
+        sorted.take(n)
       case Column.StringColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount).map(_.nn)
         val sorted = if (isMax) vals.sorted(using Ordering[String].reverse) else vals.sorted
-        sorted.take(n).toSeq
+        sorted.take(n)
       case Column.DateColumn(data, nulls) =>
         val vals = (0 until rowCount).filter(!nulls.contains(_)).map(i => Date.ofEpochDay(data(i).toLong)).toVector
         val sorted = if (isMax) vals.sorted(using Ordering[Date].reverse) else vals.sorted
-        sorted.take(n).toSeq
+        sorted.take(n)
       case Column.BooleanColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
         val sorted = if (isMax) vals.sorted(using Ordering[Boolean].reverse) else vals.sorted
-        sorted.take(n).toSeq
+        sorted.take(n)
       case Column.AnyColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
-        vals.take(n).toSeq
+        vals.take(n)
     }
   }
 
@@ -2221,7 +2219,7 @@ object ExprInterpreter {
       if (isMax) compareColumnValues(keyCol, a, b, wantGreater = true)
       else compareColumnValues(keyCol, a, b, wantGreater = false)
     }
-    sortedIndices.take(n).map(i => valCol.getValue(i)).toSeq
+    sortedIndices.take(n).map(i => valCol.getValue(i))
   }
 
   private def collectNonNullTyped[T](data: Array[T], nulls: BitSet, rowCount: Int): Vector[T] = {

@@ -26,10 +26,10 @@ object SortSpec {
   ): SortSpec[T] = {
     new SortSpec[T] {
       type K = K0
-      val expr = e
-      val ordering = ord
-      val columnType = ct
-      val ascending = asc
+      val expr: Expr[T, K0] = e
+      val ordering: Ordering[K0] = ord
+      val columnType: ColumnType = ct
+      val ascending: Boolean = asc
     }
   }
 }

@@ -143,7 +143,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 1: Filter 1M rows
   // ---------------------------------------------------------------------------
 
-  "Filter overhead" should "be measured for 1M rows" in {
+  "Filter overhead" should "be measured for 1M rows" taggedAs Benchmark in {
     val threshold = (N * 0.9).toInt
 
     val sbTimings = (0 until Warmup + Measured).map { _ =>
@@ -178,7 +178,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 2: Distinct on 1M rows
   // ---------------------------------------------------------------------------
 
-  "Distinct overhead" should "be measured for 1M rows" in {
+  "Distinct overhead" should "be measured for 1M rows" taggedAs Benchmark in {
     val sbTimings = (0 until Warmup + Measured).map { _ =>
       val t0 = System.nanoTime()
       val ds = intDataset(halfDupeData).distinct
@@ -209,7 +209,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 3: JoinOn 500K x 500K
   // ---------------------------------------------------------------------------
 
-  "JoinOn overhead" should "be measured for 500K x 500K" in {
+  "JoinOn overhead" should "be measured for 500K x 500K" taggedAs Benchmark in {
     given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
 
     val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
@@ -247,7 +247,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 4: SelectExprs arithmetic on 1M
   // ---------------------------------------------------------------------------
 
-  "SelectExprs overhead" should "be measured for 1M rows" in {
+  "SelectExprs overhead" should "be measured for 1M rows" taggedAs Benchmark in {
     val doubled = Expr
       .Add(
         Expr.Mul(valueExpr, Expr.Const(2)),
@@ -285,7 +285,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 5: Intersect 500K x 500K
   // ---------------------------------------------------------------------------
 
-  "Intersect overhead" should "be measured for 500K x 500K" in {
+  "Intersect overhead" should "be measured for 500K x 500K" taggedAs Benchmark in {
     val sbTimings = (0 until Warmup + Measured).map { _ =>
       val t0 = System.nanoTime()
       val ds = intDataset(intersectData1).intersect(intDataset(intersectData2))
@@ -317,7 +317,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 6: End-to-end: filter -> join -> distinct
   // ---------------------------------------------------------------------------
 
-  "End-to-end pipeline overhead" should "be measured for filter -> join" in {
+  "End-to-end pipeline overhead" should "be measured for filter -> join" taggedAs Benchmark in {
     given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
 
     val threshold = (JoinN * 0.5).toInt
@@ -357,7 +357,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 7: GroupByAgg (500K rows, 1K groups)
   // ---------------------------------------------------------------------------
 
-  "GroupByAgg overhead" should "be measured for 500K rows with 1K groups" in {
+  "GroupByAgg overhead" should "be measured for 500K rows with 1K groups" taggedAs Benchmark in {
     val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
     val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
 
@@ -397,7 +397,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 8: SortByExprs (500K rows, 2-column sort)
   // ---------------------------------------------------------------------------
 
-  "SortByExprs overhead" should "be measured for 500K rows with 2-column sort" in {
+  "SortByExprs overhead" should "be measured for 500K rows with 2-column sort" taggedAs Benchmark in {
     val quantityCell: Expr[BenchRecord, Int] = Expr.Cell("quantity_value", ColumnIndex(2))
     val idCell: Expr[BenchRecord, Int] = Expr.Cell("id_value", ColumnIndex(3))
 
@@ -436,7 +436,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // Benchmark 9: WithWindow (500K rows, ROW_NUMBER)
   // ---------------------------------------------------------------------------
 
-  "WithWindow overhead" should "be measured for 200K rows with ROW_NUMBER" in {
+  "WithWindow overhead" should "be measured for 200K rows with ROW_NUMBER" taggedAs Benchmark in {
     val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
     val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
 

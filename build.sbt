@@ -72,6 +72,7 @@ lazy val spark = project
       "org.scalatest" %% "scalatest" % "3.2.19" % Test
     ),
     Test / fork := true,
+    Test / testOptions += Tests.Argument("-l", "net.ghoula.strongbow.Benchmark"),
     // Scala 3.8's unified scala-library uses TASTY metadata instead of ScalaSig annotations.
     // scala-reflect 2.13 (used by Spark internals) reads ScalaSig to resolve types like
     // Array.apply. Without ScalaSig, it fails: "class Array does not have a member apply".

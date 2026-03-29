@@ -119,7 +119,7 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
     )
   }
 
-  "Plan vs Exec" should "show overhead amortizes with scale" in {
+  "Plan vs Exec" should "show overhead amortizes with scale" taggedAs Benchmark in {
     val valCell = Expr.Cell[BenchRow, Int]("value_value", ColumnIndex(1))
     val keyCell: Expr[BenchRow, Any] = Expr.Cell("key_value", ColumnIndex(0))
     val keyStrCell: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))

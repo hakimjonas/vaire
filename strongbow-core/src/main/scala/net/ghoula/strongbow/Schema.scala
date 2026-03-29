@@ -1,5 +1,6 @@
 package net.ghoula.strongbow
 
+import scala.annotation.tailrec
 import scala.deriving.Mirror
 import scala.quoted.{Expr, Quotes, Type}
 
@@ -263,6 +264,7 @@ object Schema {
     labels: List[String]
   )(using q: Quotes): List[(String, String)] = {
 
+    @tailrec
     def collect[E <: Tuple: Type](
       remainingLabels: List[String],
       acc: List[(String, String)]

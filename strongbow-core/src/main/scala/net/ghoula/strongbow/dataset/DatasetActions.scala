@@ -30,9 +30,9 @@ object DatasetActions {
       interpreter.execute(dataset).map(_.rowCount.toLong)
     }
 
-    /** Check if dataset is empty.
+    /** Check if the dataset is empty.
       *
-      * Short-circuits on first row.
+      * Short-circuits on the first row.
       */
     def isEmpty(using interpreter: Interpreter = DatasetInterpreter): Either[ExecutionError, Boolean] = {
       count.map(_ == 0)

@@ -1,6 +1,6 @@
 package net.ghoula.strongbow.dataset
 
-/** Formats Dataset AST as human-readable string. */
+/** Formats Dataset AST as a human-readable string. */
 object DatasetExplainer {
 
   def explain[T](dataset: Dataset[T], indent: Int = 0): String = {

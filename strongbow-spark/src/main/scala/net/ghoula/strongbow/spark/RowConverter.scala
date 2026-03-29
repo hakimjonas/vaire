@@ -52,7 +52,7 @@ object RowConverter {
 
   /** Convert Spark Rows directly to a MaterializedDataset via typed column extraction.
     *
-    * Bypasses the box→case class→encode→Column.fromValues round-trip by reading typed Spark Row
+    * Bypasses the box→case class→encode→Column.fromValues-round-trip by reading typed Spark Row
     * accessors (getInt, getDouble, etc.) directly into primitive arrays. One typed read per cell,
     * zero intermediate boxing.
     */

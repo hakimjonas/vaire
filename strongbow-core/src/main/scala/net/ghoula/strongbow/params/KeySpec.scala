@@ -15,9 +15,9 @@ object KeySpec {
   def apply[T, K0](n: String, e: Expr[T, K0], ct: ColumnType): KeySpec[T] = {
     new KeySpec[T] {
       type K = K0
-      val name = n
-      val expr = e
-      val columnType = ct
+      val name: String = n
+      val expr: Expr[T, K0] = e
+      val columnType: ColumnType = ct
     }
   }
 }

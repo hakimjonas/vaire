@@ -90,7 +90,7 @@ enum Column[+A] {
     * For typed access, we pattern match the Column variant directly to get the typed Array. Returns
     * null for SQL NULL rows (BitSet is authoritative).
     */
-  inline def getValue(index: Int): Any | Null = { // scalafix:ok DisableSyntax.null
+  inline def getValue(index: Int): Any | Null = {
     if (nullSet.contains(index)) null // scalafix:ok DisableSyntax.null
     else
       this match {
@@ -354,7 +354,7 @@ object Column {
   def binary(data: Array[Byte], offsets: Array[Int], nulls: BitSet = BitSet.empty): Column[types.Binary] =
     BinaryColumn(data, offsets, nulls)
 
-  def binaryFromArrays(byteArrays: IndexedSeq[Array[Byte]], nulls: BitSet): Column[types.Binary] = {
+  def binaryFromArrays(byteArrays: Array[Array[Byte]], nulls: BitSet): Column[types.Binary] = {
     val (data, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
       val newBytes = new Array[Byte](bytes.length + ba.length)
       System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
@@ -483,7 +483,7 @@ object Column {
                   Left(ExecutionError.TypeMismatch("Array[Byte]", v.getClass.getSimpleName, "Column.fromValues"))
                 )
         }
-        validated.map(byteArrays => binaryFromArrays(byteArrays, nullIndices))
+        validated.map(byteArrays => binaryFromArrays(byteArrays.toArray, nullIndices))
       case ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
         buildColumn[String | Null](
           "String",

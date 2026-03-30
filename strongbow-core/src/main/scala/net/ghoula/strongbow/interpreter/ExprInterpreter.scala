@@ -2017,39 +2017,8 @@ object ExprInterpreter {
   }
 
   private def compareColumnValues(col: Column[?], i: Int, j: Int, wantGreater: Boolean): Boolean = {
-    col match {
-      case Column.IntColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.LongColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.DoubleColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.FloatColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.ShortColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.ByteColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.TimestampColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.TimestampNTZColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.YearMonthIntervalColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.DayTimeIntervalColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.StringColumn(data, _) =>
-        val cmp = data(i).nn.compareTo(data(j))
-        if (wantGreater) cmp > 0 else cmp < 0
-      case Column.DateColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.BinaryColumn(data, offsets, _) =>
-        val cmp = java.util.Arrays.compare(data, offsets(i), offsets(i + 1), data, offsets(j), offsets(j + 1))
-        if (wantGreater) cmp > 0 else cmp < 0
-      case Column.BooleanColumn(data, _) =>
-        if (wantGreater) data(i) && !data(j) else !data(i) && data(j)
-      case Column.AnyColumn(_, _) => false
-    }
+    val cmp = Column.compareAt(col, i, j)
+    if (wantGreater) cmp > 0 else cmp < 0
   }
 
   private def topNValues(col: Column[?], rowCount: Int, n: Int, isMax: Boolean): Seq[Any] = {

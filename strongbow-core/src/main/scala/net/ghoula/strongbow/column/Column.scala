@@ -479,6 +479,31 @@ object Column {
     }
   }
 
+  def compareAt(col: Column[?], a: Int, b: Int): Int = {
+    val nulls = col.nullSet
+    val na = nulls.contains(a); val nb = nulls.contains(b)
+    if (na && nb) 0
+    else if (na) -1
+    else if (nb) 1
+    else col match {
+      case IntColumn(data, _)                  => Integer.compare(data(a), data(b))
+      case LongColumn(data, _)                 => java.lang.Long.compare(data(a), data(b))
+      case DoubleColumn(data, _)               => java.lang.Double.compare(data(a), data(b))
+      case FloatColumn(data, _)                => java.lang.Float.compare(data(a), data(b))
+      case ShortColumn(data, _)                => java.lang.Short.compare(data(a), data(b))
+      case ByteColumn(data, _)                 => java.lang.Byte.compare(data(a), data(b))
+      case TimestampColumn(data, _)            => java.lang.Long.compare(data(a), data(b))
+      case TimestampNTZColumn(data, _)         => java.lang.Long.compare(data(a), data(b))
+      case YearMonthIntervalColumn(data, _)    => Integer.compare(data(a), data(b))
+      case DayTimeIntervalColumn(data, _)      => java.lang.Long.compare(data(a), data(b))
+      case BinaryColumn(data, offsets, _)      => java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1))
+      case StringColumn(data, _)               => data(a).nn.compareTo(data(b))
+      case DateColumn(data, _)                 => Integer.compare(data(a), data(b))
+      case BooleanColumn(data, _)              => java.lang.Boolean.compare(data(a), data(b))
+      case AnyColumn(data, _)                  => Ordering.String.compare(data(a).toString, data(b).toString)
+    }
+  }
+
   def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] = {
     def sort[T](data: IArray[T])(lt: (T, T) => Boolean): Array[Int] =
       (0 until rowCount).sortWith((a, b) => lt(data(a), data(b))).toArray

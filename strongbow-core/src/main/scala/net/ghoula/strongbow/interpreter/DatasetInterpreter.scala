@@ -705,36 +705,8 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Compare two column values at indices a and b.
-    *
-    * Uses GADT Column[A] pattern matching to dispatch to concrete typed comparisons. Each branch
-    * uses the JDK compare method for the matched primitive type, requiring zero casts.
-    */
-  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int = {
-    def nullSafe(nulls: scala.collection.immutable.BitSet)(compare: => Int): Int = {
-      val na = nulls.contains(a); val nb = nulls.contains(b)
-      if (na && nb) 0 else if (na) -1 else if (nb) 1 else compare
-    }
-
-    col match {
-      case Column.IntColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
-      case Column.LongColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
-      case Column.DoubleColumn(data, nulls) => nullSafe(nulls)(java.lang.Double.compare(data(a), data(b)))
-      case Column.FloatColumn(data, nulls) => nullSafe(nulls)(java.lang.Float.compare(data(a), data(b)))
-      case Column.ShortColumn(data, nulls) => nullSafe(nulls)(java.lang.Short.compare(data(a), data(b)))
-      case Column.ByteColumn(data, nulls) => nullSafe(nulls)(java.lang.Byte.compare(data(a), data(b)))
-      case Column.TimestampColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
-      case Column.TimestampNTZColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
-      case Column.YearMonthIntervalColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
-      case Column.DayTimeIntervalColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
-      case Column.BinaryColumn(data, offsets, nulls) =>
-        nullSafe(nulls)(java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1)))
-      case Column.StringColumn(data, nulls) => nullSafe(nulls)(data(a).nn.compareTo(data(b)))
-      case Column.DateColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
-      case Column.BooleanColumn(data, nulls) => nullSafe(nulls)(java.lang.Boolean.compare(data(a), data(b)))
-      case Column.AnyColumn(data, nulls) => nullSafe(nulls)(Ordering.String.compare(data(a).toString, data(b).toString))
-    }
-  }
+  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int =
+    Column.compareAt(col, a, b)
 
   private def withWindow[In, Out](
     dataset: MaterializedDataset[In],

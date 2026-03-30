@@ -141,9 +141,9 @@ object ExprCompiler {
 
   /** Compile a .copy() lambda into a Vector of (name, Expr, ColumnType) triples.
     *
-    * Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args)). This
-    * extracts the val bindings and copy call, resolves each argument through bindings, and emits
-    * Cell for unchanged fields or compiled Expr for replacement fields.
+    * Scala 3 desugars .copy() into Block(valDefs, Apply(Select(_, "copy"), args)). This extracts
+    * the val bindings and copy call, resolves each argument through bindings, and emits Cell for
+    * unchanged fields or compiled Expr for replacement fields.
     */
   private def compileCopyImpl[T: Type, Labels <: Tuple: Type, Elems <: Tuple: Type](
     f: QExpr[T => T]

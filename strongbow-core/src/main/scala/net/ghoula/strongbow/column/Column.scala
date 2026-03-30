@@ -107,7 +107,8 @@ enum Column[+A] {
         case StringColumn(data, _) => data(index)
         case BooleanColumn(data, _) => data(index)
         case DateColumn(data, _) => types.Date.ofEpochDay(data(index).toLong)
-        case BinaryColumn(data, offsets, _) => types.Binary(java.util.Arrays.copyOfRange(data, offsets(index), offsets(index + 1)))
+        case BinaryColumn(data, offsets, _) =>
+          types.Binary(java.util.Arrays.copyOfRange(data, offsets(index), offsets(index + 1)))
         case AnyColumn(data, _) => data(index)
       }
   }
@@ -141,7 +142,11 @@ enum Column[+A] {
       case DateColumn(data, _) => DateColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case BinaryColumn(data, offsets, _) =>
         val endByte = offsets(len)
-        BinaryColumn(java.util.Arrays.copyOfRange(data, 0, endByte), java.util.Arrays.copyOfRange(offsets, 0, len + 1), trimmedNulls)
+        BinaryColumn(
+          java.util.Arrays.copyOfRange(data, 0, endByte),
+          java.util.Arrays.copyOfRange(offsets, 0, len + 1),
+          trimmedNulls
+        )
       case AnyColumn(data, _) =>
         val arr = new Array[Any | Null](len)
         System.arraycopy(data, 0, arr, 0, len)
@@ -349,6 +354,16 @@ object Column {
   def binary(data: Array[Byte], offsets: Array[Int], nulls: BitSet = BitSet.empty): Column[types.Binary] =
     BinaryColumn(data, offsets, nulls)
 
+  def binaryFromArrays(byteArrays: IndexedSeq[Array[Byte]], nulls: BitSet): Column[types.Binary] = {
+    val (data, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
+      val newBytes = new Array[Byte](bytes.length + ba.length)
+      System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
+      System.arraycopy(ba, 0, newBytes, bytes.length, ba.length)
+      (newBytes, offs :+ newBytes.length)
+    }
+    BinaryColumn(data, offsets.toArray, nulls)
+  }
+
   inline def any(data: Array[Any | Null], nulls: BitSet = BitSet.empty): Column[Any] = {
     AnyColumn(data, nulls)
   }
@@ -460,20 +475,22 @@ object Column {
           case (Left(err), _) => Left(err)
           case (Right(acc), (v, idx)) =>
             if (nullIndices.contains(idx)) Right(acc :+ Array.empty[Byte])
-            else Option(v).flatMap(cast.lift).map(ba => Right(acc :+ ba))
-              .getOrElse(Left(ExecutionError.TypeMismatch("Array[Byte]", v.getClass.getSimpleName, "Column.fromValues")))
+            else
+              Option(v)
+                .flatMap(cast.lift)
+                .map(ba => Right(acc :+ ba))
+                .getOrElse(
+                  Left(ExecutionError.TypeMismatch("Array[Byte]", v.getClass.getSimpleName, "Column.fromValues"))
+                )
         }
-        validated.map { byteArrays =>
-          val (data, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
-            val newBytes = new Array[Byte](bytes.length + ba.length)
-            System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
-            System.arraycopy(ba, 0, newBytes, bytes.length, ba.length)
-            (newBytes, offs :+ newBytes.length)
-          }
-          BinaryColumn(data, offsets.toArray, nullIndices)
-        }
+        validated.map(byteArrays => binaryFromArrays(byteArrays, nullIndices))
       case ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
-        buildColumn[String | Null]("String", null, { case s: String => s }, StringColumn(_, _)) // scalafix:ok DisableSyntax.null
+        buildColumn[String | Null](
+          "String",
+          null,
+          { case s: String => s },
+          StringColumn(_, _)
+        ) // scalafix:ok DisableSyntax.null
       case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         Right(AnyColumn(values.toArray, nullIndices))
     }
@@ -485,23 +502,25 @@ object Column {
     if (na && nb) 0
     else if (na) -1
     else if (nb) 1
-    else col match {
-      case IntColumn(data, _)                  => Integer.compare(data(a), data(b))
-      case LongColumn(data, _)                 => java.lang.Long.compare(data(a), data(b))
-      case DoubleColumn(data, _)               => java.lang.Double.compare(data(a), data(b))
-      case FloatColumn(data, _)                => java.lang.Float.compare(data(a), data(b))
-      case ShortColumn(data, _)                => java.lang.Short.compare(data(a), data(b))
-      case ByteColumn(data, _)                 => java.lang.Byte.compare(data(a), data(b))
-      case TimestampColumn(data, _)            => java.lang.Long.compare(data(a), data(b))
-      case TimestampNTZColumn(data, _)         => java.lang.Long.compare(data(a), data(b))
-      case YearMonthIntervalColumn(data, _)    => Integer.compare(data(a), data(b))
-      case DayTimeIntervalColumn(data, _)      => java.lang.Long.compare(data(a), data(b))
-      case BinaryColumn(data, offsets, _)      => java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1))
-      case StringColumn(data, _)               => data(a).nn.compareTo(data(b))
-      case DateColumn(data, _)                 => Integer.compare(data(a), data(b))
-      case BooleanColumn(data, _)              => java.lang.Boolean.compare(data(a), data(b))
-      case AnyColumn(data, _)                  => Ordering.String.compare(data(a).toString, data(b).toString)
-    }
+    else
+      col match {
+        case IntColumn(data, _) => Integer.compare(data(a), data(b))
+        case LongColumn(data, _) => java.lang.Long.compare(data(a), data(b))
+        case DoubleColumn(data, _) => java.lang.Double.compare(data(a), data(b))
+        case FloatColumn(data, _) => java.lang.Float.compare(data(a), data(b))
+        case ShortColumn(data, _) => java.lang.Short.compare(data(a), data(b))
+        case ByteColumn(data, _) => java.lang.Byte.compare(data(a), data(b))
+        case TimestampColumn(data, _) => java.lang.Long.compare(data(a), data(b))
+        case TimestampNTZColumn(data, _) => java.lang.Long.compare(data(a), data(b))
+        case YearMonthIntervalColumn(data, _) => Integer.compare(data(a), data(b))
+        case DayTimeIntervalColumn(data, _) => java.lang.Long.compare(data(a), data(b))
+        case BinaryColumn(data, offsets, _) =>
+          java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1))
+        case StringColumn(data, _) => data(a).nn.compareTo(data(b))
+        case DateColumn(data, _) => Integer.compare(data(a), data(b))
+        case BooleanColumn(data, _) => java.lang.Boolean.compare(data(a), data(b))
+        case AnyColumn(data, _) => Ordering.String.compare(data(a).toString, data(b).toString)
+      }
   }
 
   def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] = {

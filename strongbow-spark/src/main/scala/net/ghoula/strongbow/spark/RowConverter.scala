@@ -79,18 +79,18 @@ object RowConverter {
       wrap(Array.tabulate(rowCount)(i => if (nulls.contains(i)) defaultVal else get(rows(i), colIdx)), nulls)
 
     ct match {
-      case ColumnType.IntType               => extract(0, _.getInt(_), Column.int(_, _))
-      case ColumnType.LongType              => extract(0L, _.getLong(_), Column.long(_, _))
-      case ColumnType.DoubleType            => extract(0.0, _.getDouble(_), Column.double(_, _))
-      case ColumnType.FloatType             => extract(0.0f, _.getFloat(_), Column.float(_, _))
-      case ColumnType.ShortType             => extract((0: Short), _.getShort(_), Column.short(_, _))
-      case ColumnType.ByteType              => extract((0: Byte), _.getByte(_), Column.byte(_, _))
-      case ColumnType.TimestampType         => extract(0L, _.getLong(_), Column.timestamp(_, _))
-      case ColumnType.TimestampNTZType      => extract(0L, _.getLong(_), Column.timestampNTZ(_, _))
-      case ColumnType.YearMonthIntervalType => extract(0, _.getInt(_), Column.yearMonthInterval(_, _))
-      case ColumnType.DayTimeIntervalType   => extract(0L, _.getLong(_), Column.dayTimeInterval(_, _))
-      case ColumnType.BooleanType           => extract(false, _.getBoolean(_), Column.boolean(_, _))
-      case ColumnType.DateType              => extract(0, (r, c) => r.getDate(c).toLocalDate.toEpochDay.toInt, Column.date(_, _))
+      case ColumnType.IntType => extract(0, _.getInt(_), Column.int)
+      case ColumnType.LongType => extract(0L, _.getLong(_), Column.long)
+      case ColumnType.DoubleType => extract(0.0, _.getDouble(_), Column.double)
+      case ColumnType.FloatType => extract(0.0f, _.getFloat(_), Column.float)
+      case ColumnType.ShortType => extract(0: Short, _.getShort(_), Column.short)
+      case ColumnType.ByteType => extract(0: Byte, _.getByte(_), Column.byte)
+      case ColumnType.TimestampType => extract(0L, _.getLong(_), Column.timestamp)
+      case ColumnType.TimestampNTZType => extract(0L, _.getLong(_), Column.timestampNTZ)
+      case ColumnType.YearMonthIntervalType => extract(0, _.getInt(_), Column.yearMonthInterval)
+      case ColumnType.DayTimeIntervalType => extract(0L, _.getLong(_), Column.dayTimeInterval)
+      case ColumnType.BooleanType => extract(false, _.getBoolean(_), Column.boolean)
+      case ColumnType.DateType => extract(0, (r, c) => r.getDate(c).toLocalDate.toEpochDay.toInt, Column.date)
 
       case ColumnType.StringType | ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
         Column.string(
@@ -104,13 +104,7 @@ object RowConverter {
         val byteArrays = Array.tabulate(rowCount)(i =>
           if (nulls.contains(i)) Array.empty[Byte] else rows(i).getAs[Array[Byte]](colIdx)
         )
-        val (flatData, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
-          val newBytes = new Array[Byte](bytes.length + ba.length)
-          System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
-          System.arraycopy(ba, 0, newBytes, bytes.length, ba.length)
-          (newBytes, offs :+ newBytes.length)
-        }
-        Column.binary(flatData, offsets.toArray, nulls)
+        Column.binaryFromArrays(byteArrays, nulls)
 
       case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         Column.any(

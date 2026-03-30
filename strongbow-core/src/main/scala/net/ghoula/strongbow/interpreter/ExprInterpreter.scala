@@ -27,12 +27,12 @@ object ExprInterpreter {
         case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
         case c: Expr.Const[_, _] =>
           c.value match {
-            case _: Int     => ColumnType.IntType
-            case _: Long    => ColumnType.LongType
-            case _: Double  => ColumnType.DoubleType
-            case _: String  => ColumnType.StringType
+            case _: Int => ColumnType.IntType
+            case _: Long => ColumnType.LongType
+            case _: Double => ColumnType.DoubleType
+            case _: String => ColumnType.StringType
             case _: Boolean => ColumnType.BooleanType
-            case _          => ColumnType.AnyType
+            case _ => ColumnType.AnyType
           }
         case _ => ColumnType.AnyType
       }
@@ -554,10 +554,14 @@ object ExprInterpreter {
                 lte: (T, T) => Boolean
               ): Either[ExecutionError, Column[?]] = {
                 val combined = vn | ln | un
-                Right(Column.boolean(
-                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else gte(vd(i), ld(i)) && lte(vd(i), ud(i))),
-                  combined
-                ))
+                Right(
+                  Column.boolean(
+                    Array.tabulate(rowCount)(i =>
+                      if (combined.contains(i)) false else gte(vd(i), ld(i)) && lte(vd(i), ud(i))
+                    ),
+                    combined
+                  )
+                )
               }
 
               (exprCol, lowerCol, upperCol) match {
@@ -1441,7 +1445,11 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedLongDiv(left: Array[Long], right: Array[Long], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedLongDiv(
+    left: Array[Long],
+    right: Array[Long],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ / _, Column.long)
 
   private def vectorizedDoubleBinOp[Row](
@@ -1463,7 +1471,11 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedDoubleDiv(left: Array[Double], right: Array[Double], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedDoubleDiv(
+    left: Array[Double],
+    right: Array[Double],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0.0, _ / _, Column.double)
 
   private def typedComparison[Row, A](
@@ -1482,19 +1494,25 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, opType)
       rightCol <- evalColumn(right, columns, opType)
       result <- {
-        def cmpCol[T](ld: Array[T], ln: BitSet, rd: Array[T], rn: BitSet)(cmp: (T, T) => Boolean): Either[ExecutionError, Column[?]] =
+        def cmpCol[T](ld: Array[T], ln: BitSet, rd: Array[T], rn: BitSet)(
+          cmp: (T, T) => Boolean
+        ): Either[ExecutionError, Column[?]] =
           Right(Column.boolean(Array.tabulate(rowCount)(i => cmp(ld(i), rd(i))), ln | rn))
 
         val matched: Either[ExecutionError, Column[?]] = (leftCol, rightCol) match {
-          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn))       => cmpCol(ld, ln, rd, rn)(intCmp)
-          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn))     => cmpCol(ld, ln, rd, rn)(longCmp)
+          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(intCmp)
+          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(longCmp)
           case (Column.DoubleColumn(ld, ln), Column.DoubleColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(doubleCmp)
           case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
-            Right(Column.boolean(
-              Array.tabulate(rowCount)(i => if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)),
-              ln | rn
-            ))
-          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn))     => cmpCol(ld, ln, rd, rn)(intCmp)
+            Right(
+              Column.boolean(
+                Array.tabulate(rowCount)(i =>
+                  if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)
+                ),
+                ln | rn
+              )
+            )
+          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(intCmp)
           case _ =>
             Left(ExecutionError.UnsupportedOperation("Comparison not supported for untyped columns"))
         }
@@ -1521,7 +1539,11 @@ object ExprInterpreter {
   private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ % _, Column.int)
 
-  private def vectorizedLongMod(left: Array[Long], right: Array[Long], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedLongMod(
+    left: Array[Long],
+    right: Array[Long],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ % _, Column.long)
 
   private def vectorizedDoubleUnaryOp[Row](
@@ -1694,13 +1716,14 @@ object ExprInterpreter {
           }
 
         case corr: Expr.Corr[Row] =>
-          bivariateStat(corr.left, corr.right, columns, minCount = 2) { (xData, yData, combinedNulls, xMean, yMean, _) =>
-            val (cov, xVar, yVar) = xData.indices.filterNot(combinedNulls.contains).foldLeft((0.0, 0.0, 0.0)) {
-              case ((c, xv, yv), i) =>
-                val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
-            }
-            val denom = math.sqrt(xVar * yVar)
-            if (denom == 0.0) 0.0 else cov / denom
+          bivariateStat(corr.left, corr.right, columns, minCount = 2) {
+            (xData, yData, combinedNulls, xMean, yMean, _) =>
+              val (cov, xVar, yVar) =
+                xData.indices.filterNot(combinedNulls.contains).foldLeft((0.0, 0.0, 0.0)) { case ((c, xv, yv), i) =>
+                  val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
+                }
+              val denom = math.sqrt(xVar * yVar)
+              if (denom == 0.0) 0.0 else cov / denom
           }
 
         case cs: Expr.CovarSamp[Row] =>

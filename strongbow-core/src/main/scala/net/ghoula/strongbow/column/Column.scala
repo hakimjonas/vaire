@@ -199,12 +199,8 @@ enum Column[+A] {
         case (BooleanColumn(l, _), BooleanColumn(r, _)) => concatArrays(l, r, BooleanColumn(_, _))
         case (DateColumn(l, _), DateColumn(r, _)) => concatArrays(l, r, DateColumn(_, _))
         case (BinaryColumn(ld, lo, _), BinaryColumn(rd, ro, _)) =>
-          val newData = new Array[Byte](ld.length + rd.length)
-          System.arraycopy(ld, 0, newData, 0, ld.length)
-          System.arraycopy(rd, 0, newData, ld.length, rd.length)
-          val newOffsets = new Array[Int](lo.length + ro.length - 1)
-          System.arraycopy(lo, 0, newOffsets, 0, lo.length)
-          (0 until ro.length - 1).foreach(i => newOffsets(lo.length + i) = ro(i + 1) + ld.length)
+          val newData = Column.concatByteArrays(ld, rd)
+          val newOffsets = lo ++ ro.tail.map(_ + ld.length)
           Right(BinaryColumn(newData, newOffsets, combinedNulls))
         case (AnyColumn(l, _), AnyColumn(r, _)) => concatArrays(l, r, AnyColumn(_, _))
         case _ =>
@@ -354,12 +350,16 @@ object Column {
   def binary(data: Array[Byte], offsets: Array[Int], nulls: BitSet = BitSet.empty): Column[types.Binary] =
     BinaryColumn(data, offsets, nulls)
 
+  private def concatByteArrays(left: Array[Byte], right: Array[Byte]): Array[Byte] = {
+    val result = new Array[Byte](left.length + right.length)
+    System.arraycopy(left, 0, result, 0, left.length)
+    System.arraycopy(right, 0, result, left.length, right.length)
+    result
+  }
+
   def binaryFromArrays(byteArrays: Array[Array[Byte]], nulls: BitSet): Column[types.Binary] = {
     val (data, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
-      val newBytes = new Array[Byte](bytes.length + ba.length)
-      System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
-      System.arraycopy(ba, 0, newBytes, bytes.length, ba.length)
-      (newBytes, offs :+ newBytes.length)
+      (concatByteArrays(bytes, ba), offs :+ (bytes.length + ba.length))
     }
     BinaryColumn(data, offsets.toArray, nulls)
   }
@@ -453,7 +453,7 @@ object Column {
         buildColumn[Int]("YearMonthInterval", 0, { case i: Int => i }, YearMonthIntervalColumn(_, _))
       case ColumnType.DayTimeIntervalType =>
         buildColumn[Long]("DayTimeInterval", 0L, { case l: Long => l }, DayTimeIntervalColumn(_, _))
-      case ColumnType.StringType =>
+      case ColumnType.StringType | ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
         buildColumn[String | Null](
           "String",
           null,
@@ -484,13 +484,6 @@ object Column {
                 )
         }
         validated.map(byteArrays => binaryFromArrays(byteArrays.toArray, nullIndices))
-      case ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
-        buildColumn[String | Null](
-          "String",
-          null,
-          { case s: String => s },
-          StringColumn(_, _)
-        ) // scalafix:ok DisableSyntax.null
       case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         Right(AnyColumn(values.toArray, nullIndices))
     }
@@ -541,10 +534,8 @@ object Column {
         sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
       case StringColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => a.nn.compareTo(b) < 0)
       case DateColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
-      case BinaryColumn(data, offsets, _) =>
-        (0 until rowCount).sortWith { (a, b) =>
-          java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1)) < 0
-        }.toArray
+      case bc: BinaryColumn =>
+        (0 until rowCount).sortWith((a, b) => compareAt(bc, a, b) < 0).toArray
       case BooleanColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => !a && b)
       case AnyColumn(data, _) =>
         sort(IArray.unsafeFromArray(data))((a, b) => String.valueOf(a).compareTo(String.valueOf(b)) < 0)

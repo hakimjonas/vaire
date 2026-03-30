@@ -130,6 +130,15 @@ object Schema {
       decodeSingle("DayTimeInterval") { case l: Long => types.DayTimeInterval.ofMicros(l) }(values)
   }
 
+  given binarySchema: Schema[types.Binary] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.BinaryType)
+    def encode(value: types.Binary): Vector[Any] = Vector(value.toBytes)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Binary] =
+      decodeSingle("Binary") { case ba: Array[Byte @unchecked] => types.Binary(ba) }(values)
+  }
+
   given dateSchema: Schema[types.Date] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")

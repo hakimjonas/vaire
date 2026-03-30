@@ -1981,6 +1981,19 @@ object ExprInterpreter {
             }
           }
         }
+      case Column.BinaryColumn(data, offsets, nulls) =>
+        (0 until rowCount).foldLeft(Option.empty[Array[Byte]]) { (best, i) =>
+          if (nulls.contains(i)) best
+          else {
+            val v = java.util.Arrays.copyOfRange(data, offsets(i), offsets(i + 1))
+            best match {
+              case None => Some(v)
+              case Some(b) =>
+                val cmp = java.util.Arrays.compare(v, b)
+                Some(if (isMax && cmp > 0) v else if (!isMax && cmp < 0) v else b)
+            }
+          }
+        }
       case Column.BooleanColumn(data, nulls) =>
         foldExtremum(data, nulls, (a: Boolean, b: Boolean) => if (isMax) a && !b else !a && b)
       case Column.AnyColumn(_, _) => None
@@ -2030,6 +2043,9 @@ object ExprInterpreter {
         if (wantGreater) cmp > 0 else cmp < 0
       case Column.DateColumn(data, _) =>
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.BinaryColumn(data, offsets, _) =>
+        val cmp = java.util.Arrays.compare(data, offsets(i), offsets(i + 1), data, offsets(j), offsets(j + 1))
+        if (wantGreater) cmp > 0 else cmp < 0
       case Column.BooleanColumn(data, _) =>
         if (wantGreater) data(i) && !data(j) else !data(i) && data(j)
       case Column.AnyColumn(_, _) => false
@@ -2085,6 +2101,12 @@ object ExprInterpreter {
       case Column.DateColumn(data, nulls) =>
         val vals = (0 until rowCount).filter(!nulls.contains(_)).map(i => Date.ofEpochDay(data(i).toLong)).toVector
         val sorted = if (isMax) vals.sorted(using Ordering[Date].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.BinaryColumn(data, offsets, nulls) =>
+        given Ordering[Array[Byte]] = (a, b) => java.util.Arrays.compare(a, b)
+        val vals = (0 until rowCount).filter(!nulls.contains(_))
+          .map(i => java.util.Arrays.copyOfRange(data, offsets(i), offsets(i + 1))).toVector
+        val sorted = if (isMax) vals.sorted(using summon[Ordering[Array[Byte]]].reverse) else vals.sorted
         sorted.take(n)
       case Column.BooleanColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)

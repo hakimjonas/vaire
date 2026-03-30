@@ -727,6 +727,8 @@ object DatasetInterpreter extends Interpreter {
       case Column.TimestampNTZColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
       case Column.YearMonthIntervalColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
       case Column.DayTimeIntervalColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
+      case Column.BinaryColumn(data, offsets, nulls) =>
+        nullSafe(nulls)(java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1)))
       case Column.StringColumn(data, nulls) => nullSafe(nulls)(data(a).nn.compareTo(data(b)))
       case Column.DateColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
       case Column.BooleanColumn(data, nulls) => nullSafe(nulls)(java.lang.Boolean.compare(data(a), data(b)))

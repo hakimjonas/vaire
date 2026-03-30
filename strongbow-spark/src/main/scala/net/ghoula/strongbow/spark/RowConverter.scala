@@ -115,6 +115,26 @@ object RowConverter {
         val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
         Column.dayTimeInterval(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0L else rows(i).getLong(colIdx)), nulls)
 
+      case ColumnType.BinaryType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        val byteArrays = Array.tabulate(rowCount)(i => if (nulls.contains(i)) Array.empty[Byte] else rows(i).getAs[Array[Byte]](colIdx))
+        val (flatData, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
+          val newBytes = new Array[Byte](bytes.length + ba.length)
+          System.arraycopy(bytes, 0, newBytes, 0, bytes.length)
+          System.arraycopy(ba, 0, newBytes, bytes.length, ba.length)
+          (newBytes, offs :+ newBytes.length)
+        }
+        Column.binary(flatData, offsets.toArray, nulls)
+
+      case ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.string(
+          Array.tabulate(rowCount)(i =>
+            if (nulls.contains(i)) null else rows(i).getString(colIdx) // scalafix:ok DisableSyntax.null
+          ),
+          nulls
+        )
+
       case ColumnType.StringType =>
         val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
         Column.string(

@@ -18,6 +18,9 @@ enum ColumnType derives CanEqual {
   case TimestampNTZType
   case YearMonthIntervalType
   case DayTimeIntervalType
+  case BinaryType
+  case CharType(length: Int)
+  case VarcharType(maxLength: Int)
   case OptionType(inner: ColumnType)
   case ArrayType(elementType: ColumnType)
   case MapType(keyType: ColumnType, valueType: ColumnType)

@@ -8,6 +8,7 @@ enum ColumnType derives CanEqual {
   case IntType
   case LongType
   case DoubleType
+  case FloatType
   case StringType
   case BooleanType
   case DateType

@@ -67,6 +67,15 @@ object Schema {
       decodeSingle("Double") { case d: Double => d }(values)
   }
 
+  given floatSchema: Schema[Float] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.FloatType)
+    def encode(value: Float): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Float] =
+      decodeSingle("Float") { case f: Float => f }(values)
+  }
+
   given dateSchema: Schema[types.Date] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")

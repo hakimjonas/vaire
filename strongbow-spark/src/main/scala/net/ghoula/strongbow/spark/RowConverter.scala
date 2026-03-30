@@ -87,6 +87,10 @@ object RowConverter {
         val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
         Column.double(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0.0 else rows(i).getDouble(colIdx)), nulls)
 
+      case ColumnType.FloatType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.float(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0.0f else rows(i).getFloat(colIdx)), nulls)
+
       case ColumnType.StringType =>
         val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
         Column.string(

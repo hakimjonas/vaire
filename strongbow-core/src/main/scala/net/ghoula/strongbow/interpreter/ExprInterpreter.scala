@@ -1948,6 +1948,8 @@ object ExprInterpreter {
         foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
       case Column.DoubleColumn(data, nulls) =>
         foldExtremum(data, nulls, (a: Double, b: Double) => if (isMax) a > b else a < b)
+      case Column.FloatColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Float, b: Float) => if (isMax) a > b else a < b)
       case Column.StringColumn(data, nulls) =>
         foldExtremum(
           data,
@@ -1997,6 +1999,8 @@ object ExprInterpreter {
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
       case Column.DoubleColumn(data, _) =>
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.FloatColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
       case Column.StringColumn(data, _) =>
         val cmp = data(i).nn.compareTo(data(j))
         if (wantGreater) cmp > 0 else cmp < 0
@@ -2021,6 +2025,10 @@ object ExprInterpreter {
       case Column.DoubleColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
         val sorted = if (isMax) vals.sorted(using Ordering[Double].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.FloatColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Float].reverse) else vals.sorted
         sorted.take(n)
       case Column.StringColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount).map(_.nn)

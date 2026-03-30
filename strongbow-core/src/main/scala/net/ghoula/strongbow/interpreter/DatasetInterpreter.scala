@@ -720,6 +720,7 @@ object DatasetInterpreter extends Interpreter {
       case Column.IntColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
       case Column.LongColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
       case Column.DoubleColumn(data, nulls) => nullSafe(nulls)(java.lang.Double.compare(data(a), data(b)))
+      case Column.FloatColumn(data, nulls) => nullSafe(nulls)(java.lang.Float.compare(data(a), data(b)))
       case Column.StringColumn(data, nulls) => nullSafe(nulls)(data(a).nn.compareTo(data(b)))
       case Column.DateColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
       case Column.BooleanColumn(data, nulls) => nullSafe(nulls)(java.lang.Boolean.compare(data(a), data(b)))

@@ -6,6 +6,7 @@ import org.apache.spark.sql.types.{
   DataType => SparkDataType,
   DateType => SparkDateType,
   DoubleType => SparkDoubleType,
+  FloatType => SparkFloatType,
   IntegerType => SparkIntegerType,
   LongType => SparkLongType,
   MapType => SparkMapType,
@@ -38,6 +39,7 @@ object SchemaConverter {
     case ColumnType.IntType => SparkIntegerType
     case ColumnType.LongType => SparkLongType
     case ColumnType.DoubleType => SparkDoubleType
+    case ColumnType.FloatType => SparkFloatType
     case ColumnType.StringType => SparkStringType
     case ColumnType.BooleanType => SparkBooleanType
     case ColumnType.DateType => SparkDateType
@@ -52,6 +54,7 @@ object SchemaConverter {
     case SparkIntegerType => ColumnType.IntType
     case SparkLongType => ColumnType.LongType
     case SparkDoubleType => ColumnType.DoubleType
+    case SparkFloatType => ColumnType.FloatType
     case SparkStringType => ColumnType.StringType
     case SparkBooleanType => ColumnType.BooleanType
     case SparkDateType => ColumnType.DateType

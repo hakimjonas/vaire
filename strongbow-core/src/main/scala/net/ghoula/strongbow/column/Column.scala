@@ -15,6 +15,7 @@ enum Column[+A] {
   case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
   case LongColumn(data: Array[Long], nulls: BitSet) extends Column[Long]
   case DoubleColumn(data: Array[Double], nulls: BitSet) extends Column[Double]
+  case FloatColumn(data: Array[Float], nulls: BitSet) extends Column[Float]
   case StringColumn(data: Array[String | Null], nulls: BitSet) extends Column[String]
   case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
   case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
@@ -24,6 +25,7 @@ enum Column[+A] {
     case IntColumn(data, _) => data.length
     case LongColumn(data, _) => data.length
     case DoubleColumn(data, _) => data.length
+    case FloatColumn(data, _) => data.length
     case StringColumn(data, _) => data.length
     case BooleanColumn(data, _) => data.length
     case DateColumn(data, _) => data.length
@@ -34,6 +36,7 @@ enum Column[+A] {
     case IntColumn(_, _) => ColumnType.IntType
     case LongColumn(_, _) => ColumnType.LongType
     case DoubleColumn(_, _) => ColumnType.DoubleType
+    case FloatColumn(_, _) => ColumnType.FloatType
     case StringColumn(_, _) => ColumnType.StringType
     case BooleanColumn(_, _) => ColumnType.BooleanType
     case DateColumn(_, _) => ColumnType.DateType
@@ -44,6 +47,7 @@ enum Column[+A] {
     case IntColumn(_, nulls) => nulls
     case LongColumn(_, nulls) => nulls
     case DoubleColumn(_, nulls) => nulls
+    case FloatColumn(_, nulls) => nulls
     case StringColumn(_, nulls) => nulls
     case BooleanColumn(_, nulls) => nulls
     case DateColumn(_, nulls) => nulls
@@ -65,6 +69,7 @@ enum Column[+A] {
         case IntColumn(data, _) => data(index)
         case LongColumn(data, _) => data(index)
         case DoubleColumn(data, _) => data(index)
+        case FloatColumn(data, _) => data(index)
         case StringColumn(data, _) => data(index)
         case BooleanColumn(data, _) => data(index)
         case DateColumn(data, _) => types.Date.ofEpochDay(data(index).toLong)
@@ -87,6 +92,7 @@ enum Column[+A] {
       case IntColumn(data, _) => IntColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case LongColumn(data, _) => LongColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case DoubleColumn(data, _) => DoubleColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case FloatColumn(data, _) => FloatColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case StringColumn(data, _) => StringColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case BooleanColumn(data, _) => BooleanColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case DateColumn(data, _) => DateColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
@@ -129,6 +135,7 @@ enum Column[+A] {
         case (IntColumn(l, _), IntColumn(r, _)) => concatArrays(l, r, IntColumn(_, _))
         case (LongColumn(l, _), LongColumn(r, _)) => concatArrays(l, r, LongColumn(_, _))
         case (DoubleColumn(l, _), DoubleColumn(r, _)) => concatArrays(l, r, DoubleColumn(_, _))
+        case (FloatColumn(l, _), FloatColumn(r, _)) => concatArrays(l, r, FloatColumn(_, _))
         case (StringColumn(l, _), StringColumn(r, _)) => concatArrays(l, r, StringColumn(_, _))
         case (BooleanColumn(l, _), BooleanColumn(r, _)) => concatArrays(l, r, BooleanColumn(_, _))
         case (DateColumn(l, _), DateColumn(r, _)) => concatArrays(l, r, DateColumn(_, _))
@@ -166,6 +173,8 @@ enum Column[+A] {
       LongColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
     case DoubleColumn(data, nulls) =>
       DoubleColumn(sliceArray(data, indices, nulls, 0.0), buildNullSet(nulls, indices))
+    case FloatColumn(data, nulls) =>
+      FloatColumn(sliceArray(data, indices, nulls, 0.0f), buildNullSet(nulls, indices))
     case StringColumn(data, nulls) =>
       StringColumn(
         sliceArray(data, indices, nulls, null), // scalafix:ok DisableSyntax.null
@@ -206,6 +215,10 @@ object Column {
     DoubleColumn(data, nulls)
   }
 
+  inline def float(data: Array[Float], nulls: BitSet = BitSet.empty): Column[Float] = {
+    FloatColumn(data, nulls)
+  }
+
   inline def string(data: Array[String | Null], nulls: BitSet = BitSet.empty): Column[String] = {
     StringColumn(data, nulls)
   }
@@ -228,6 +241,7 @@ object Column {
     case ColumnType.IntType => IntColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.LongType => LongColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.DoubleType => DoubleColumn(Array.empty[Double], BitSet.empty)
+    case ColumnType.FloatType => FloatColumn(Array.empty[Float], BitSet.empty)
     case ColumnType.StringType => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.BooleanType => BooleanColumn(Array.empty[Boolean], BitSet.empty)
     case ColumnType.DateType => DateColumn(Array.empty[Int], BitSet.empty)
@@ -284,6 +298,8 @@ object Column {
         buildColumn[Long]("Long", 0L, { case l: Long => l }, LongColumn(_, _))
       case ColumnType.DoubleType =>
         buildColumn[Double]("Double", 0.0, { case d: Double => d }, DoubleColumn(_, _))
+      case ColumnType.FloatType =>
+        buildColumn[Float]("Float", 0.0f, { case f: Float => f }, FloatColumn(_, _))
       case ColumnType.StringType =>
         buildColumn[String | Null](
           "String",
@@ -313,6 +329,7 @@ object Column {
       case IntColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case LongColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case DoubleColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Double.compare(a, b) < 0)
+      case FloatColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Float.compare(a, b) < 0)
       case StringColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => a.nn.compareTo(b) < 0)
       case DateColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case BooleanColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => !a && b)

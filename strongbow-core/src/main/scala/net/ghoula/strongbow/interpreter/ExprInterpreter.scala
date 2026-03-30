@@ -1931,72 +1931,18 @@ object ExprInterpreter {
   }
 
   private def findExtremum(col: Column[?], rowCount: Int, isMax: Boolean): Option[Any] = {
-    def foldExtremum[T](data: Array[T], nulls: BitSet, better: (T, T) => Boolean): Option[T] =
-      (0 until rowCount).foldLeft(Option.empty[T]) { (best, i) =>
-        if (nulls.contains(i)) best
-        else
-          best match {
-            case None => Some(data(i))
-            case Some(b) => Some(if (better(data(i), b)) data(i) else b)
-          }
-      }
-
     col match {
-      case Column.IntColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Int, b: Int) => if (isMax) a > b else a < b)
-      case Column.LongColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
-      case Column.DoubleColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Double, b: Double) => if (isMax) a > b else a < b)
-      case Column.FloatColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Float, b: Float) => if (isMax) a > b else a < b)
-      case Column.ShortColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Short, b: Short) => if (isMax) a > b else a < b)
-      case Column.ByteColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Byte, b: Byte) => if (isMax) a > b else a < b)
-      case Column.TimestampColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
-      case Column.TimestampNTZColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
-      case Column.YearMonthIntervalColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Int, b: Int) => if (isMax) a > b else a < b)
-      case Column.DayTimeIntervalColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
-      case Column.StringColumn(data, nulls) =>
-        foldExtremum(
-          data,
-          nulls,
-          (a: String | Null, b: String | Null) => { val c = a.nn.compareTo(b); if (isMax) c > 0 else c < 0 }
-        )
-      case Column.DateColumn(data, nulls) =>
-        (0 until rowCount).foldLeft(Option.empty[Date]) { (best, i) =>
-          if (nulls.contains(i)) best
-          else {
-            val d = Date.ofEpochDay(data(i).toLong)
-            best match {
-              case None => Some(d)
-              case Some(b) =>
-                val cmp = data(i).compareTo(b.toEpochDay.toInt)
-                Some(if (isMax && cmp > 0) d else if (!isMax && cmp < 0) d else b)
-            }
-          }
-        }
-      case Column.BinaryColumn(data, offsets, nulls) =>
-        (0 until rowCount).foldLeft(Option.empty[Array[Byte]]) { (best, i) =>
-          if (nulls.contains(i)) best
-          else {
-            val v = java.util.Arrays.copyOfRange(data, offsets(i), offsets(i + 1))
-            best match {
-              case None => Some(v)
-              case Some(b) =>
-                val cmp = java.util.Arrays.compare(v, b)
-                Some(if (isMax && cmp > 0) v else if (!isMax && cmp < 0) v else b)
-            }
-          }
-        }
-      case Column.BooleanColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Boolean, b: Boolean) => if (isMax) a && !b else !a && b)
       case Column.AnyColumn(_, _) => None
+      case _ =>
+        val bestIdx = (0 until rowCount).foldLeft(-1) { (best, i) =>
+          if (col.nullSet.contains(i)) best
+          else if (best < 0) i
+          else {
+            val cmp = Column.compareAt(col, i, best)
+            if (isMax && cmp > 0) i else if (!isMax && cmp < 0) i else best
+          }
+        }
+        if (bestIdx < 0) None else Some(col.getValue(bestIdx))
     }
   }
 
@@ -2022,69 +1968,12 @@ object ExprInterpreter {
   }
 
   private def topNValues(col: Column[?], rowCount: Int, n: Int, isMax: Boolean): Seq[Any] = {
-    col match {
-      case Column.IntColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Int].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.LongColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.DoubleColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Double].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.FloatColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Float].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.ShortColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Short].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.ByteColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Byte].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.TimestampColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.TimestampNTZColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.YearMonthIntervalColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Int].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.DayTimeIntervalColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.StringColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount).map(_.nn)
-        val sorted = if (isMax) vals.sorted(using Ordering[String].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.DateColumn(data, nulls) =>
-        val vals = (0 until rowCount).filter(!nulls.contains(_)).map(i => Date.ofEpochDay(data(i).toLong)).toVector
-        val sorted = if (isMax) vals.sorted(using Ordering[Date].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.BinaryColumn(data, offsets, nulls) =>
-        given Ordering[Array[Byte]] = (a, b) => java.util.Arrays.compare(a, b)
-        val vals = (0 until rowCount).filter(!nulls.contains(_))
-          .map(i => java.util.Arrays.copyOfRange(data, offsets(i), offsets(i + 1))).toVector
-        val sorted = if (isMax) vals.sorted(using summon[Ordering[Array[Byte]]].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.BooleanColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Boolean].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.AnyColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        vals.take(n)
+    val nonNullIndices = (0 until rowCount).filter(i => !col.nullSet.contains(i))
+    val sorted = nonNullIndices.sortWith { (a, b) =>
+      val cmp = Column.compareAt(col, a, b)
+      if (isMax) cmp > 0 else cmp < 0
     }
+    sorted.take(n).map(col.getValue)
   }
 
   private def topNByKey(
@@ -2100,10 +1989,6 @@ object ExprInterpreter {
       else compareColumnValues(keyCol, a, b, wantGreater = false)
     }
     sortedIndices.take(n).map(i => valCol.getValue(i))
-  }
-
-  private def collectNonNullTyped[T](data: Array[T], nulls: BitSet, rowCount: Int): Vector[T] = {
-    (0 until rowCount).filter(i => !nulls.contains(i)).map(data(_)).toVector
   }
 
   private def hexEncode(bytes: Array[Byte]): String =

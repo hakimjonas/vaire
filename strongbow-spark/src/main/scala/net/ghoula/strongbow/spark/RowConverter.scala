@@ -91,6 +91,30 @@ object RowConverter {
         val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
         Column.float(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0.0f else rows(i).getFloat(colIdx)), nulls)
 
+      case ColumnType.ShortType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.short(Array.tabulate(rowCount)(i => if (nulls.contains(i)) (0: Short) else rows(i).getShort(colIdx)), nulls)
+
+      case ColumnType.ByteType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.byte(Array.tabulate(rowCount)(i => if (nulls.contains(i)) (0: Byte) else rows(i).getByte(colIdx)), nulls)
+
+      case ColumnType.TimestampType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.timestamp(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0L else rows(i).getLong(colIdx)), nulls)
+
+      case ColumnType.TimestampNTZType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.timestampNTZ(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0L else rows(i).getLong(colIdx)), nulls)
+
+      case ColumnType.YearMonthIntervalType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.yearMonthInterval(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0 else rows(i).getInt(colIdx)), nulls)
+
+      case ColumnType.DayTimeIntervalType =>
+        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+        Column.dayTimeInterval(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0L else rows(i).getLong(colIdx)), nulls)
+
       case ColumnType.StringType =>
         val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
         Column.string(

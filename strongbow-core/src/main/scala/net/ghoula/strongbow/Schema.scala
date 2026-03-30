@@ -76,6 +76,60 @@ object Schema {
       decodeSingle("Float") { case f: Float => f }(values)
   }
 
+  given shortSchema: Schema[Short] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.ShortType)
+    def encode(value: Short): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Short] =
+      decodeSingle("Short") { case s: Short => s }(values)
+  }
+
+  given byteSchema: Schema[Byte] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.ByteType)
+    def encode(value: Byte): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Byte] =
+      decodeSingle("Byte") { case b: Byte => b }(values)
+  }
+
+  given timestampSchema: Schema[types.Timestamp] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.TimestampType)
+    def encode(value: types.Timestamp): Vector[Any] = Vector(value.toEpochMicro)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Timestamp] =
+      decodeSingle("Timestamp") { case l: Long => types.Timestamp.ofEpochMicro(l) }(values)
+  }
+
+  given timestampNTZSchema: Schema[types.TimestampNTZ] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.TimestampNTZType)
+    def encode(value: types.TimestampNTZ): Vector[Any] = Vector(value.toEpochMicro)
+    def decode(values: Vector[Any]): Either[DecodeError, types.TimestampNTZ] =
+      decodeSingle("TimestampNTZ") { case l: Long => types.TimestampNTZ.ofEpochMicro(l) }(values)
+  }
+
+  given yearMonthIntervalSchema: Schema[types.YearMonthInterval] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.YearMonthIntervalType)
+    def encode(value: types.YearMonthInterval): Vector[Any] = Vector(value.toMonths)
+    def decode(values: Vector[Any]): Either[DecodeError, types.YearMonthInterval] =
+      decodeSingle("YearMonthInterval") { case i: Int => types.YearMonthInterval.ofMonths(i) }(values)
+  }
+
+  given dayTimeIntervalSchema: Schema[types.DayTimeInterval] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DayTimeIntervalType)
+    def encode(value: types.DayTimeInterval): Vector[Any] = Vector(value.toMicros)
+    def decode(values: Vector[Any]): Either[DecodeError, types.DayTimeInterval] =
+      decodeSingle("DayTimeInterval") { case l: Long => types.DayTimeInterval.ofMicros(l) }(values)
+  }
+
   given dateSchema: Schema[types.Date] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")

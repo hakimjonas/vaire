@@ -9,9 +9,15 @@ enum ColumnType derives CanEqual {
   case LongType
   case DoubleType
   case FloatType
+  case ShortType
+  case ByteType
   case StringType
   case BooleanType
   case DateType
+  case TimestampType
+  case TimestampNTZType
+  case YearMonthIntervalType
+  case DayTimeIntervalType
   case OptionType(inner: ColumnType)
   case ArrayType(elementType: ColumnType)
   case MapType(keyType: ColumnType, valueType: ColumnType)

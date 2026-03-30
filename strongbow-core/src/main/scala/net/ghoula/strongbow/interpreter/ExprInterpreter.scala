@@ -1950,6 +1950,18 @@ object ExprInterpreter {
         foldExtremum(data, nulls, (a: Double, b: Double) => if (isMax) a > b else a < b)
       case Column.FloatColumn(data, nulls) =>
         foldExtremum(data, nulls, (a: Float, b: Float) => if (isMax) a > b else a < b)
+      case Column.ShortColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Short, b: Short) => if (isMax) a > b else a < b)
+      case Column.ByteColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Byte, b: Byte) => if (isMax) a > b else a < b)
+      case Column.TimestampColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
+      case Column.TimestampNTZColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
+      case Column.YearMonthIntervalColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Int, b: Int) => if (isMax) a > b else a < b)
+      case Column.DayTimeIntervalColumn(data, nulls) =>
+        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
       case Column.StringColumn(data, nulls) =>
         foldExtremum(
           data,
@@ -2001,6 +2013,18 @@ object ExprInterpreter {
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
       case Column.FloatColumn(data, _) =>
         if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.ShortColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.ByteColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.TimestampColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.TimestampNTZColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.YearMonthIntervalColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
+      case Column.DayTimeIntervalColumn(data, _) =>
+        if (wantGreater) data(i) > data(j) else data(i) < data(j)
       case Column.StringColumn(data, _) =>
         val cmp = data(i).nn.compareTo(data(j))
         if (wantGreater) cmp > 0 else cmp < 0
@@ -2029,6 +2053,30 @@ object ExprInterpreter {
       case Column.FloatColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount)
         val sorted = if (isMax) vals.sorted(using Ordering[Float].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.ShortColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Short].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.ByteColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Byte].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.TimestampColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.TimestampNTZColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.YearMonthIntervalColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Int].reverse) else vals.sorted
+        sorted.take(n)
+      case Column.DayTimeIntervalColumn(data, nulls) =>
+        val vals = collectNonNullTyped(data, nulls, rowCount)
+        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
         sorted.take(n)
       case Column.StringColumn(data, nulls) =>
         val vals = collectNonNullTyped(data, nulls, rowCount).map(_.nn)

@@ -3,16 +3,22 @@ package net.ghoula.strongbow.spark
 import org.apache.spark.sql.types.{
   ArrayType => SparkArrayType,
   BooleanType => SparkBooleanType,
+  ByteType => SparkByteType,
   DataType => SparkDataType,
   DateType => SparkDateType,
+  DayTimeIntervalType => SparkDayTimeIntervalType,
   DoubleType => SparkDoubleType,
   FloatType => SparkFloatType,
   IntegerType => SparkIntegerType,
   LongType => SparkLongType,
   MapType => SparkMapType,
+  ShortType => SparkShortType,
   StringType => SparkStringType,
   StructField,
-  StructType
+  StructType,
+  TimestampNTZType => SparkTimestampNTZType,
+  TimestampType => SparkTimestampType,
+  YearMonthIntervalType => SparkYearMonthIntervalType
 }
 
 import net.ghoula.strongbow.Schema
@@ -39,10 +45,16 @@ object SchemaConverter {
     case ColumnType.IntType => SparkIntegerType
     case ColumnType.LongType => SparkLongType
     case ColumnType.DoubleType => SparkDoubleType
+    case ColumnType.ShortType => SparkShortType
+    case ColumnType.ByteType => SparkByteType
     case ColumnType.FloatType => SparkFloatType
     case ColumnType.StringType => SparkStringType
     case ColumnType.BooleanType => SparkBooleanType
     case ColumnType.DateType => SparkDateType
+    case ColumnType.TimestampType => SparkTimestampType
+    case ColumnType.TimestampNTZType => SparkTimestampNTZType
+    case ColumnType.YearMonthIntervalType => SparkYearMonthIntervalType()
+    case ColumnType.DayTimeIntervalType => SparkDayTimeIntervalType()
     case ColumnType.OptionType(inner) => toSparkType(inner)
     case ColumnType.ArrayType(elem) => SparkArrayType(toSparkType(elem), containsNull = true)
     case ColumnType.MapType(key, value) => SparkMapType(toSparkType(key), toSparkType(value), valueContainsNull = true)
@@ -54,10 +66,16 @@ object SchemaConverter {
     case SparkIntegerType => ColumnType.IntType
     case SparkLongType => ColumnType.LongType
     case SparkDoubleType => ColumnType.DoubleType
+    case SparkShortType => ColumnType.ShortType
+    case SparkByteType => ColumnType.ByteType
     case SparkFloatType => ColumnType.FloatType
     case SparkStringType => ColumnType.StringType
     case SparkBooleanType => ColumnType.BooleanType
     case SparkDateType => ColumnType.DateType
+    case SparkTimestampType => ColumnType.TimestampType
+    case _: SparkTimestampNTZType => ColumnType.TimestampNTZType
+    case _: SparkYearMonthIntervalType => ColumnType.YearMonthIntervalType
+    case _: SparkDayTimeIntervalType => ColumnType.DayTimeIntervalType
     case at: SparkArrayType => ColumnType.ArrayType(fromSparkType(at.elementType))
     case mt: SparkMapType => ColumnType.MapType(fromSparkType(mt.keyType), fromSparkType(mt.valueType))
     case _ => ColumnType.AnyType

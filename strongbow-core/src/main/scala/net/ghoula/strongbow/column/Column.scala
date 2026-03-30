@@ -16,6 +16,12 @@ enum Column[+A] {
   case LongColumn(data: Array[Long], nulls: BitSet) extends Column[Long]
   case DoubleColumn(data: Array[Double], nulls: BitSet) extends Column[Double]
   case FloatColumn(data: Array[Float], nulls: BitSet) extends Column[Float]
+  case ShortColumn(data: Array[Short], nulls: BitSet) extends Column[Short]
+  case ByteColumn(data: Array[Byte], nulls: BitSet) extends Column[Byte]
+  case TimestampColumn(data: Array[Long], nulls: BitSet) extends Column[types.Timestamp]
+  case TimestampNTZColumn(data: Array[Long], nulls: BitSet) extends Column[types.TimestampNTZ]
+  case YearMonthIntervalColumn(data: Array[Int], nulls: BitSet) extends Column[types.YearMonthInterval]
+  case DayTimeIntervalColumn(data: Array[Long], nulls: BitSet) extends Column[types.DayTimeInterval]
   case StringColumn(data: Array[String | Null], nulls: BitSet) extends Column[String]
   case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
   case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
@@ -26,6 +32,12 @@ enum Column[+A] {
     case LongColumn(data, _) => data.length
     case DoubleColumn(data, _) => data.length
     case FloatColumn(data, _) => data.length
+    case ShortColumn(data, _) => data.length
+    case ByteColumn(data, _) => data.length
+    case TimestampColumn(data, _) => data.length
+    case TimestampNTZColumn(data, _) => data.length
+    case YearMonthIntervalColumn(data, _) => data.length
+    case DayTimeIntervalColumn(data, _) => data.length
     case StringColumn(data, _) => data.length
     case BooleanColumn(data, _) => data.length
     case DateColumn(data, _) => data.length
@@ -37,6 +49,12 @@ enum Column[+A] {
     case LongColumn(_, _) => ColumnType.LongType
     case DoubleColumn(_, _) => ColumnType.DoubleType
     case FloatColumn(_, _) => ColumnType.FloatType
+    case ShortColumn(_, _) => ColumnType.ShortType
+    case ByteColumn(_, _) => ColumnType.ByteType
+    case TimestampColumn(_, _) => ColumnType.TimestampType
+    case TimestampNTZColumn(_, _) => ColumnType.TimestampNTZType
+    case YearMonthIntervalColumn(_, _) => ColumnType.YearMonthIntervalType
+    case DayTimeIntervalColumn(_, _) => ColumnType.DayTimeIntervalType
     case StringColumn(_, _) => ColumnType.StringType
     case BooleanColumn(_, _) => ColumnType.BooleanType
     case DateColumn(_, _) => ColumnType.DateType
@@ -48,6 +66,12 @@ enum Column[+A] {
     case LongColumn(_, nulls) => nulls
     case DoubleColumn(_, nulls) => nulls
     case FloatColumn(_, nulls) => nulls
+    case ShortColumn(_, nulls) => nulls
+    case ByteColumn(_, nulls) => nulls
+    case TimestampColumn(_, nulls) => nulls
+    case TimestampNTZColumn(_, nulls) => nulls
+    case YearMonthIntervalColumn(_, nulls) => nulls
+    case DayTimeIntervalColumn(_, nulls) => nulls
     case StringColumn(_, nulls) => nulls
     case BooleanColumn(_, nulls) => nulls
     case DateColumn(_, nulls) => nulls
@@ -70,6 +94,12 @@ enum Column[+A] {
         case LongColumn(data, _) => data(index)
         case DoubleColumn(data, _) => data(index)
         case FloatColumn(data, _) => data(index)
+        case ShortColumn(data, _) => data(index)
+        case ByteColumn(data, _) => data(index)
+        case TimestampColumn(data, _) => types.Timestamp.ofEpochMicro(data(index))
+        case TimestampNTZColumn(data, _) => types.TimestampNTZ.ofEpochMicro(data(index))
+        case YearMonthIntervalColumn(data, _) => types.YearMonthInterval.ofMonths(data(index))
+        case DayTimeIntervalColumn(data, _) => types.DayTimeInterval.ofMicros(data(index))
         case StringColumn(data, _) => data(index)
         case BooleanColumn(data, _) => data(index)
         case DateColumn(data, _) => types.Date.ofEpochDay(data(index).toLong)
@@ -93,6 +123,14 @@ enum Column[+A] {
       case LongColumn(data, _) => LongColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case DoubleColumn(data, _) => DoubleColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case FloatColumn(data, _) => FloatColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case ShortColumn(data, _) => ShortColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case ByteColumn(data, _) => ByteColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case TimestampColumn(data, _) => TimestampColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case TimestampNTZColumn(data, _) => TimestampNTZColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case YearMonthIntervalColumn(data, _) =>
+        YearMonthIntervalColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case DayTimeIntervalColumn(data, _) =>
+        DayTimeIntervalColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case StringColumn(data, _) => StringColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case BooleanColumn(data, _) => BooleanColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case DateColumn(data, _) => DateColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
@@ -136,6 +174,14 @@ enum Column[+A] {
         case (LongColumn(l, _), LongColumn(r, _)) => concatArrays(l, r, LongColumn(_, _))
         case (DoubleColumn(l, _), DoubleColumn(r, _)) => concatArrays(l, r, DoubleColumn(_, _))
         case (FloatColumn(l, _), FloatColumn(r, _)) => concatArrays(l, r, FloatColumn(_, _))
+        case (ShortColumn(l, _), ShortColumn(r, _)) => concatArrays(l, r, ShortColumn(_, _))
+        case (ByteColumn(l, _), ByteColumn(r, _)) => concatArrays(l, r, ByteColumn(_, _))
+        case (TimestampColumn(l, _), TimestampColumn(r, _)) => concatArrays(l, r, TimestampColumn(_, _))
+        case (TimestampNTZColumn(l, _), TimestampNTZColumn(r, _)) => concatArrays(l, r, TimestampNTZColumn(_, _))
+        case (YearMonthIntervalColumn(l, _), YearMonthIntervalColumn(r, _)) =>
+          concatArrays(l, r, YearMonthIntervalColumn(_, _))
+        case (DayTimeIntervalColumn(l, _), DayTimeIntervalColumn(r, _)) =>
+          concatArrays(l, r, DayTimeIntervalColumn(_, _))
         case (StringColumn(l, _), StringColumn(r, _)) => concatArrays(l, r, StringColumn(_, _))
         case (BooleanColumn(l, _), BooleanColumn(r, _)) => concatArrays(l, r, BooleanColumn(_, _))
         case (DateColumn(l, _), DateColumn(r, _)) => concatArrays(l, r, DateColumn(_, _))
@@ -175,6 +221,18 @@ enum Column[+A] {
       DoubleColumn(sliceArray(data, indices, nulls, 0.0), buildNullSet(nulls, indices))
     case FloatColumn(data, nulls) =>
       FloatColumn(sliceArray(data, indices, nulls, 0.0f), buildNullSet(nulls, indices))
+    case ShortColumn(data, nulls) =>
+      ShortColumn(sliceArray(data, indices, nulls, (0: Short)), buildNullSet(nulls, indices))
+    case ByteColumn(data, nulls) =>
+      ByteColumn(sliceArray(data, indices, nulls, (0: Byte)), buildNullSet(nulls, indices))
+    case TimestampColumn(data, nulls) =>
+      TimestampColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
+    case TimestampNTZColumn(data, nulls) =>
+      TimestampNTZColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
+    case YearMonthIntervalColumn(data, nulls) =>
+      YearMonthIntervalColumn(sliceArray(data, indices, nulls, 0), buildNullSet(nulls, indices))
+    case DayTimeIntervalColumn(data, nulls) =>
+      DayTimeIntervalColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
     case StringColumn(data, nulls) =>
       StringColumn(
         sliceArray(data, indices, nulls, null), // scalafix:ok DisableSyntax.null
@@ -219,6 +277,34 @@ object Column {
     FloatColumn(data, nulls)
   }
 
+  inline def short(data: Array[Short], nulls: BitSet = BitSet.empty): Column[Short] = {
+    ShortColumn(data, nulls)
+  }
+
+  inline def byte(data: Array[Byte], nulls: BitSet = BitSet.empty): Column[Byte] = {
+    ByteColumn(data, nulls)
+  }
+
+  /** Create a TimestampColumn from epoch microsecond values. */
+  inline def timestamp(data: Array[Long], nulls: BitSet = BitSet.empty): Column[types.Timestamp] = {
+    TimestampColumn(data, nulls)
+  }
+
+  /** Create a TimestampNTZColumn from epoch microsecond values. */
+  inline def timestampNTZ(data: Array[Long], nulls: BitSet = BitSet.empty): Column[types.TimestampNTZ] = {
+    TimestampNTZColumn(data, nulls)
+  }
+
+  /** Create a YearMonthIntervalColumn from total month values. */
+  inline def yearMonthInterval(data: Array[Int], nulls: BitSet = BitSet.empty): Column[types.YearMonthInterval] = {
+    YearMonthIntervalColumn(data, nulls)
+  }
+
+  /** Create a DayTimeIntervalColumn from total microsecond values. */
+  inline def dayTimeInterval(data: Array[Long], nulls: BitSet = BitSet.empty): Column[types.DayTimeInterval] = {
+    DayTimeIntervalColumn(data, nulls)
+  }
+
   inline def string(data: Array[String | Null], nulls: BitSet = BitSet.empty): Column[String] = {
     StringColumn(data, nulls)
   }
@@ -242,6 +328,12 @@ object Column {
     case ColumnType.LongType => LongColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.DoubleType => DoubleColumn(Array.empty[Double], BitSet.empty)
     case ColumnType.FloatType => FloatColumn(Array.empty[Float], BitSet.empty)
+    case ColumnType.ShortType => ShortColumn(Array.empty[Short], BitSet.empty)
+    case ColumnType.ByteType => ByteColumn(Array.empty[Byte], BitSet.empty)
+    case ColumnType.TimestampType => TimestampColumn(Array.empty[Long], BitSet.empty)
+    case ColumnType.TimestampNTZType => TimestampNTZColumn(Array.empty[Long], BitSet.empty)
+    case ColumnType.YearMonthIntervalType => YearMonthIntervalColumn(Array.empty[Int], BitSet.empty)
+    case ColumnType.DayTimeIntervalType => DayTimeIntervalColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.StringType => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.BooleanType => BooleanColumn(Array.empty[Boolean], BitSet.empty)
     case ColumnType.DateType => DateColumn(Array.empty[Int], BitSet.empty)
@@ -300,6 +392,18 @@ object Column {
         buildColumn[Double]("Double", 0.0, { case d: Double => d }, DoubleColumn(_, _))
       case ColumnType.FloatType =>
         buildColumn[Float]("Float", 0.0f, { case f: Float => f }, FloatColumn(_, _))
+      case ColumnType.ShortType =>
+        buildColumn[Short]("Short", (0: Short), { case s: Short => s }, ShortColumn(_, _))
+      case ColumnType.ByteType =>
+        buildColumn[Byte]("Byte", (0: Byte), { case b: Byte => b }, ByteColumn(_, _))
+      case ColumnType.TimestampType =>
+        buildColumn[Long]("Timestamp", 0L, { case l: Long => l }, TimestampColumn(_, _))
+      case ColumnType.TimestampNTZType =>
+        buildColumn[Long]("TimestampNTZ", 0L, { case l: Long => l }, TimestampNTZColumn(_, _))
+      case ColumnType.YearMonthIntervalType =>
+        buildColumn[Int]("YearMonthInterval", 0, { case i: Int => i }, YearMonthIntervalColumn(_, _))
+      case ColumnType.DayTimeIntervalType =>
+        buildColumn[Long]("DayTimeInterval", 0L, { case l: Long => l }, DayTimeIntervalColumn(_, _))
       case ColumnType.StringType =>
         buildColumn[String | Null](
           "String",
@@ -330,6 +434,13 @@ object Column {
       case LongColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case DoubleColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Double.compare(a, b) < 0)
       case FloatColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Float.compare(a, b) < 0)
+      case ShortColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
+      case ByteColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
+      case TimestampColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
+      case TimestampNTZColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
+      case YearMonthIntervalColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => Integer.compare(a, b) < 0)
+      case DayTimeIntervalColumn(data, _) =>
+        sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
       case StringColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => a.nn.compareTo(b) < 0)
       case DateColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case BooleanColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => !a && b)

@@ -29,18 +29,29 @@ The same Dataset plan executes on the in-memory columnar interpreter or pushes t
 ## Key Properties
 
 **Type Safety**
-- `Column[+A]` GADT — typed columnar storage with compile-time guarantees
+- `Column[+A]` GADT — 16 typed columnar storage variants with compile-time guarantees
 - `Expr[Row, A]` GADT — 167 expression cases, all type-checked
 - `Dataset[T]` invariant GADT — pattern matching proves transformation types
 - `-Yexplicit-nulls` — compiler-enforced null safety
 - `-language:strictEquality` — no accidental equality comparisons
-- 6 `asInstanceOf` in the entire codebase (all in macro metaprogramming)
+- 7 `asInstanceOf` in the entire codebase (all in macro metaprogramming: ExprCompiler quote/splice, Schema Mirror derivation)
+- Zero `var`, zero `throw`, zero `return` in production code
 
-**Columnar Architecture**
-- Typed primitive arrays (`Array[Int]`, `Array[Long]`, `Array[Double]`) — no boxing
-- BitSet null tracking — SQL NULL as metadata, not values
-- All evaluation is columnar — no per-row dispatch
-- `Array.tabulate` and `foldLeft` throughout — zero `var`, zero `return`, zero `throw`
+**Columnar Storage**
+
+All Spark 4.1 types covered with typed, unboxed storage:
+
+| Category | Types | Storage |
+|---|---|---|
+| Primitive | Int, Long, Double, Float, Short, Byte | `Array[T]` (unboxed) |
+| String | String, Char(n), Varchar(n) | `Array[String\|Null]` |
+| Boolean | Boolean | `Array[Boolean]` |
+| Temporal | Date, Timestamp, TimestampNTZ, YearMonthInterval, DayTimeInterval | Opaque types over `Array[Int/Long]` |
+| Binary | Binary | Flat Arrow-style layout (`Array[Byte]` + offset array) |
+| Decimal | Decimal(p, s) where p <= 18 | Unscaled `Array[Long]` + precision/scale metadata |
+| Semi-structured | Variant | `AnyColumn` (Spark VariantVal round-trip) |
+
+BitSet null tracking — SQL NULL as metadata, not values. All evaluation is columnar — no per-row dispatch. `Array.tabulate` and `foldLeft` throughout.
 
 **Spark Integration**
 - Every Expr case maps to a native Spark SQL function
@@ -48,14 +59,14 @@ The same Dataset plan executes on the in-memory columnar interpreter or pushes t
 - GroupByAgg pushes to Spark groupBy + agg
 - Window functions push to Spark window specs
 - No UDFs — everything goes through Catalyst optimization
+- Overhead at 5M rows: 0.97x-1.12x vs native Spark (within measurement noise)
 
 ## Modules
 
 | Module | Dependencies | Purpose |
 |---|---|---|
 | `strongbow-core` | Rumil, Sarati | Dataset/Expr/Column GADT, interpreters, Schema |
-| `strongbow-spark` | Spark SQL 4.1.1 | Spark backend, ExprToColumn translation |
-| `strongbow-bench` | — | Benchmarks |
+| `strongbow-spark` | Spark SQL 4.1.1 | Spark backend, ExprToColumn translation, benchmarks |
 
 ## Compiler Settings
 
@@ -87,8 +98,8 @@ Scala 3.8.2 on JDK 25 (core) / JDK 21 (Spark module).
 
 ```bash
 sbt prepare       # scalafmt + scalafix + compile
-sbt core/test      # run tests (330 passing)
-sbt spark/compile  # verify Spark module
+sbt core/test      # 457 tests
+sbt spark/test     # 118 tests (includes Spark round-trip parity)
 ```
 
 ## Part of the Arda Ecosystem

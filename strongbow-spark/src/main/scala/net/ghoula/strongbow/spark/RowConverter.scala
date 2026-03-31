@@ -126,7 +126,8 @@ object RowConverter {
           nulls
         )
 
-      case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
+      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) |
+          ColumnType.MapType(_, _) =>
         Column.any(
           Array.tabulate(rowCount)(i =>
             if (nulls.contains(i)) null else rows(i).get(colIdx) // scalafix:ok DisableSyntax.null

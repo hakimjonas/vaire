@@ -25,5 +25,6 @@ enum ColumnType derives CanEqual {
   case OptionType(inner: ColumnType)
   case ArrayType(elementType: ColumnType)
   case MapType(keyType: ColumnType, valueType: ColumnType)
+  case VariantType
   case AnyType
 }

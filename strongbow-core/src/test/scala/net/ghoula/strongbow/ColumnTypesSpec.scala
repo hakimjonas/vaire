@@ -724,6 +724,28 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
     col.columnType shouldBe ColumnType.BinaryType
   }
 
+  // ── VariantType ───────────────────────────────────────────────────────
+
+  "VariantType" should "map to AnyColumn via Column.empty" in {
+    val col = Column.empty(ColumnType.VariantType)
+    col.length shouldBe 0
+    col match {
+      case AnyColumn(_, _) => succeed
+      case _ => fail("Expected AnyColumn")
+    }
+  }
+
+  it should "map to AnyColumn via fromValues" in {
+    val result = Column.fromValues(Vector("hello", 42, true), ColumnType.VariantType)
+    result.isRight shouldBe true
+    val col = result.toOption.get
+    col.length shouldBe 3
+    col match {
+      case AnyColumn(_, _) => succeed
+      case _ => fail("Expected AnyColumn")
+    }
+  }
+
   // ── fromValues type mismatch errors ──────────────────────────────────
 
   "Column.fromValues" should "reject wrong types for FloatType" in {

@@ -2,31 +2,31 @@
 
 ## Current State
 
-Strongbow has 15 Column variants covering all Spark 4.1 primitive and
-temporal types. All use unboxed primitive arrays. BinaryColumn uses a flat
-Arrow-style layout (contiguous `Array[Byte]` + offset array). Only
-`AnyColumn` boxes.
+Strongbow has 16 Column variants covering all Spark 4.1 primitive,
+temporal, binary, and decimal types. All use unboxed primitive arrays
+where possible. BinaryColumn uses a flat Arrow-style layout. DecimalColumn
+stores unscaled Long values (precision ≤ 18). Only `AnyColumn` boxes.
 
-## Implemented (Tier 1 + Tier 2)
+## Implemented
 
 ### Primitive Types (no opaque wrapper)
 
 | Spark Type | Column Variant | Storage | Status |
 |---|---|---|---|
-| `IntegerType` | `IntColumn` | `Array[Int]` | Original |
-| `LongType` | `LongColumn` | `Array[Long]` | Original |
-| `DoubleType` | `DoubleColumn` | `Array[Double]` | Original |
+| `IntegerType` | `IntColumn` | `Array[Int]` | Done |
+| `LongType` | `LongColumn` | `Array[Long]` | Done |
+| `DoubleType` | `DoubleColumn` | `Array[Double]` | Done |
 | `FloatType` | `FloatColumn` | `Array[Float]` | Done |
 | `ShortType` | `ShortColumn` | `Array[Short]` | Done |
 | `ByteType` | `ByteColumn` | `Array[Byte]` | Done |
-| `StringType` | `StringColumn` | `Array[String\|Null]` | Original |
-| `BooleanType` | `BooleanColumn` | `Array[Boolean]` | Original |
+| `StringType` | `StringColumn` | `Array[String\|Null]` | Done |
+| `BooleanType` | `BooleanColumn` | `Array[Boolean]` | Done |
 
 ### Temporal Types (opaque wrappers in `types/`)
 
 | Spark Type | Column Variant | Storage | Opaque Type | Status |
 |---|---|---|---|---|
-| `DateType` | `DateColumn` | `Array[Int]` | `types.Date` | Original |
+| `DateType` | `DateColumn` | `Array[Int]` | `types.Date` | Done |
 | `TimestampType` | `TimestampColumn` | `Array[Long]` | `types.Timestamp` | Done |
 | `TimestampNTZType` | `TimestampNTZColumn` | `Array[Long]` | `types.TimestampNTZ` | Done |
 | `YearMonthIntervalType` | `YearMonthIntervalColumn` | `Array[Int]` | `types.YearMonthInterval` | Done |
@@ -38,6 +38,13 @@ Arrow-style layout (contiguous `Array[Byte]` + offset array). Only
 |---|---|---|---|---|
 | `BinaryType` | `BinaryColumn` | `Array[Byte]` + `Array[Int]` offsets | `types.Binary` | Done |
 
+### Decimal (unboxed Long, precision ≤ 18)
+
+| Spark Type | Column Variant | Storage | Opaque Type | Status |
+|---|---|---|---|---|
+| `DecimalType(p, s)` p≤18 | `DecimalColumn` | `Array[Long]` + precision/scale metadata | `types.Decimal` | Done |
+| `DecimalType(p, s)` p>18 | `AnyColumn` | `Array[Any\|Null]` (boxed BigDecimal) | — | Fallback |
+
 ### String Variants (metadata only, maps to StringColumn)
 
 | Spark Type | ColumnType | Status |
@@ -45,43 +52,36 @@ Arrow-style layout (contiguous `Array[Byte]` + offset array). Only
 | `CharType(n)` | `ColumnType.CharType(n)` | Done |
 | `VarcharType(n)` | `ColumnType.VarcharType(n)` | Done |
 
-## Remaining (Tier 3)
+### Semi-structured (metadata only, maps to AnyColumn)
 
-### DecimalType(precision, scale)
+| Spark Type | ColumnType | Status |
+|---|---|---|
+| `VariantType` | `ColumnType.VariantType` | Done |
 
-Match types choose storage at compile time:
+## Planned (separate work)
 
-- `precision <= 18`: `Array[Long]` (unboxed, covers most financial data)
-- `precision > 18`: `Array[java.math.BigDecimal]` (boxed, correct)
+### Typed Variant Access API
 
-Spark makes this choice at runtime in `Decimal.fromLong`. Strongbow can
-push it to compile time. Precision and scale carried as literal type
-parameters: `Decimal[P <: Int, S <: Int]`.
-
-### VariantType
-
-Spark 4's semi-structured type. Strongbow can use Scala 3 to make this
-type-safe:
+Scala 3 typed extraction layer on top of stored Variant data:
 
 - **Union type GADT**: `Variant` enum with typed cases
 - **Inline extraction**: Match types resolve the result type at compile time
 - **Schema-driven derivation**: `Mirror` derivation for typed extraction
 - **Zero-overhead access**: Direct field extraction, no runtime type dispatch
 
+This is a typed API, not a storage format. VariantType storage and Spark
+round-trip are already implemented via AnyColumn.
+
 ### Nested StructType
 
-Recursive `Column` support for nested structs as column values. Design TBD.
+Recursive `Column` support for nested structs as column values. This is
+an architecture change to the Column abstraction — child columns, recursive
+slice/take/concat, and a new type parameter story. Separate design required.
 
-## TODO
+### DecimalType precision > 18
 
-- [ ] Tests for all new Column types (Float, Short, Byte, Timestamp,
-      TimestampNTZ, YearMonthInterval, DayTimeInterval, Binary, Char, Varchar)
-      covering: factory methods, fromValues round-trip, slice, take, concat,
-      sortIndicesByColumn, compareAt, Schema encode/decode, Spark SchemaConverter
-      + RowConverter round-trip
-- [ ] DecimalType design and implementation
-- [ ] VariantType design and implementation
-- [ ] Nested StructType design
+Native `DecimalBigDecimalColumn` for precision > 18. Additive — add a
+second variant without changing DecimalColumn. Currently falls to AnyColumn.
 
 ## Architecture
 

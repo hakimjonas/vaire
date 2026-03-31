@@ -408,6 +408,7 @@ object Column {
     case ColumnType.DecimalType(_, _) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.CharType(_) => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.VarcharType(_) => StringColumn(Array.empty[String | Null], BitSet.empty)
+    case ColumnType.VariantType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.AnyType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.ArrayType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
@@ -530,7 +531,8 @@ object Column {
                 )
         }
         validated.map(byteArrays => binaryFromArrays(byteArrays.toArray, nullIndices))
-      case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
+      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) |
+          ColumnType.MapType(_, _) =>
         Right(AnyColumn(values.toArray, nullIndices))
     }
   }

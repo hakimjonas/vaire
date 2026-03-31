@@ -7,6 +7,7 @@ import org.apache.spark.sql.types.{
   DayTimeIntervalType => SparkDayTimeIntervalType,
   DecimalType => SparkDecimalType,
   DoubleType => SparkDoubleType,
+  VariantType => SparkVariantType,
   FloatType => SparkFloatType,
   IntegerType => SparkIntegerType,
   LongType => SparkLongType,
@@ -82,6 +83,10 @@ class SchemaConverterSpec extends AnyFlatSpec with Matchers {
     sparkType shouldBe SparkDecimalType(18, 4)
   }
 
+  it should "convert VariantType to VariantType" in {
+    SchemaConverter.toSparkType(ColumnType.VariantType) shouldBe SparkVariantType
+  }
+
   it should "convert OptionType to inner type" in {
     SchemaConverter.toSparkType(ColumnType.OptionType(ColumnType.IntType)) shouldBe SparkIntegerType
   }
@@ -118,6 +123,10 @@ class SchemaConverterSpec extends AnyFlatSpec with Matchers {
   it should "reverse-map DecimalType with precision and scale" in {
     SchemaConverter.fromSparkType(SparkDecimalType(10, 2)) shouldBe ColumnType.DecimalType(10, 2)
     SchemaConverter.fromSparkType(SparkDecimalType(38, 18)) shouldBe ColumnType.DecimalType(38, 18)
+  }
+
+  it should "reverse-map VariantType" in {
+    SchemaConverter.fromSparkType(SparkVariantType) shouldBe ColumnType.VariantType
   }
 
   "toStructType" should "convert Int schema" in {

@@ -11,6 +11,7 @@ import org.apache.spark.sql.types.{
   VarcharType => SparkVarcharType,
   DayTimeIntervalType => SparkDayTimeIntervalType,
   DecimalType => SparkDecimalType,
+  VariantType => SparkVariantType,
   DoubleType => SparkDoubleType,
   FloatType => SparkFloatType,
   IntegerType => SparkIntegerType,
@@ -63,6 +64,7 @@ object SchemaConverter {
     case ColumnType.DecimalType(p, s) => SparkDecimalType(p, s)
     case ColumnType.CharType(n) => SparkCharType(n)
     case ColumnType.VarcharType(n) => SparkVarcharType(n)
+    case ColumnType.VariantType => SparkVariantType
     case ColumnType.OptionType(inner) => toSparkType(inner)
     case ColumnType.ArrayType(elem) => SparkArrayType(toSparkType(elem), containsNull = true)
     case ColumnType.MapType(key, value) => SparkMapType(toSparkType(key), toSparkType(value), valueContainsNull = true)
@@ -88,6 +90,7 @@ object SchemaConverter {
     case dt: SparkDecimalType => ColumnType.DecimalType(dt.precision, dt.scale)
     case ct: SparkCharType => ColumnType.CharType(ct.length)
     case vt: SparkVarcharType => ColumnType.VarcharType(vt.length)
+    case SparkVariantType => ColumnType.VariantType
     case at: SparkArrayType => ColumnType.ArrayType(fromSparkType(at.elementType))
     case mt: SparkMapType => ColumnType.MapType(fromSparkType(mt.keyType), fromSparkType(mt.valueType))
     case _ => ColumnType.AnyType

@@ -112,7 +112,15 @@ object RowConverter {
         Column.binaryFromArrays(byteArrays, nulls)
 
       case ColumnType.DecimalType(p, s) if p <= 18 =>
-        extract(0L, (r, c) => r.getDecimal(c).unscaledValue().longValueExact(), Column.decimal(_, p, s, _))
+        import net.ghoula.strongbow.types.Decimal
+        val converted = Array.tabulate(rowCount) { i =>
+          if (nulls.contains(i)) None
+          else Decimal.fromBigDecimal(rows(i).getDecimal(colIdx))
+        }
+        val overflowNulls =
+          BitSet.fromSpecific((0 until rowCount).filter(i => !nulls.contains(i) && converted(i).isEmpty))
+        val data = converted.map(_.fold(0L)(_.toUnscaled))
+        Column.decimal(data, p, s, nulls | overflowNulls)
 
       case ColumnType.DecimalType(_, _) =>
         Column.any(

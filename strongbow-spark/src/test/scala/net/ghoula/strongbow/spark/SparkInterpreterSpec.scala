@@ -350,6 +350,26 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     assertParity(ds)
   }
 
+  // --- New numeric types ---
+
+  "Float datasets" should "produce same results" in {
+    val col = Column.float(Array(1.0f, 2.5f, 3.7f))
+    val ds = Dataset.fromColumns(Vector(col), Schema.floatSchema).toOption.get
+    assertParity(ds)
+  }
+
+  "Short datasets" should "produce same results" in {
+    val col = Column.short(Array[Short](10, 20, 30))
+    val ds = Dataset.fromColumns(Vector(col), Schema.shortSchema).toOption.get
+    assertParity(ds)
+  }
+
+  "Byte datasets" should "produce same results" in {
+    val col = Column.byte(Array[Byte](1, 2, 3))
+    val ds = Dataset.fromColumns(Vector(col), Schema.byteSchema).toOption.get
+    assertParity(ds)
+  }
+
   // --- toDataFrame ---
 
   "toDataFrame" should "return a valid DataFrame for Root" in {

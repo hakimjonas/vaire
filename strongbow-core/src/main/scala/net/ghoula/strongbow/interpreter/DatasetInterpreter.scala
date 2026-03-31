@@ -269,8 +269,11 @@ object DatasetInterpreter extends Interpreter {
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
     outputSchema: Schema[Out]
   ): Either[ExecutionError, MaterializedDataset[Out]] = {
-    traverseEither(exprs) { (_, expr, columnType) =>
-      ExprInterpreter.evalColumn(expr, dataset.columns, columnType)
+    traverseEither(exprs) { (name, expr, columnType) =>
+      ExprInterpreter.evalColumn(expr, dataset.columns, columnType).flatMap { col =>
+        if (col.columnType == columnType) Right(col)
+        else Left(ExecutionError.TypeMismatch(columnType.toString, col.columnType.toString, s"selectAs '$name'"))
+      }
     }.map(cols => MaterializedDataset(cols, outputSchema))
   }
 
@@ -683,11 +686,17 @@ object DatasetInterpreter extends Interpreter {
   }
 
   private def multiColumnLt[T](keyCols: Vector[(Column[?], SortSpec[T])], a: Int, b: Int): Boolean = {
-    val result = keyCols.iterator.map { case (col, spec) =>
-      val cmp = compareColumnValues(col, a, b)
-      if (spec.ascending) cmp else -cmp
-    }.find(_ != 0).getOrElse(0)
-    result < 0
+    @scala.annotation.tailrec
+    def loop(idx: Int): Int =
+      if (idx >= keyCols.length) 0
+      else {
+        val (col, spec) = keyCols(idx)
+        val cmp = Column.compareAt(col, a, b)
+        val oriented = if (spec.ascending) cmp else -cmp
+        if (oriented != 0) oriented
+        else loop(idx + 1)
+      }
+    loop(0) < 0
   }
 
   private def sortByExprs[T](
@@ -704,9 +713,6 @@ object DatasetInterpreter extends Interpreter {
       }
     }
   }
-
-  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int =
-    Column.compareAt(col, a, b)
 
   private def withWindow[In, Out](
     dataset: MaterializedDataset[In],

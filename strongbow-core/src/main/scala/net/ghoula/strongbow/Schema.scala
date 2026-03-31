@@ -67,6 +67,78 @@ object Schema {
       decodeSingle("Double") { case d: Double => d }(values)
   }
 
+  given floatSchema: Schema[Float] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.FloatType)
+    def encode(value: Float): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Float] =
+      decodeSingle("Float") { case f: Float => f }(values)
+  }
+
+  given shortSchema: Schema[Short] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.ShortType)
+    def encode(value: Short): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Short] =
+      decodeSingle("Short") { case s: Short => s }(values)
+  }
+
+  given byteSchema: Schema[Byte] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.ByteType)
+    def encode(value: Byte): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Byte] =
+      decodeSingle("Byte") { case b: Byte => b }(values)
+  }
+
+  given timestampSchema: Schema[types.Timestamp] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.TimestampType)
+    def encode(value: types.Timestamp): Vector[Any] = Vector(value.toEpochMicro)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Timestamp] =
+      decodeSingle("Timestamp") { case l: Long => types.Timestamp.ofEpochMicro(l) }(values)
+  }
+
+  given timestampNTZSchema: Schema[types.TimestampNTZ] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.TimestampNTZType)
+    def encode(value: types.TimestampNTZ): Vector[Any] = Vector(value.toEpochMicro)
+    def decode(values: Vector[Any]): Either[DecodeError, types.TimestampNTZ] =
+      decodeSingle("TimestampNTZ") { case l: Long => types.TimestampNTZ.ofEpochMicro(l) }(values)
+  }
+
+  given yearMonthIntervalSchema: Schema[types.YearMonthInterval] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.YearMonthIntervalType)
+    def encode(value: types.YearMonthInterval): Vector[Any] = Vector(value.toMonths)
+    def decode(values: Vector[Any]): Either[DecodeError, types.YearMonthInterval] =
+      decodeSingle("YearMonthInterval") { case i: Int => types.YearMonthInterval.ofMonths(i) }(values)
+  }
+
+  given dayTimeIntervalSchema: Schema[types.DayTimeInterval] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DayTimeIntervalType)
+    def encode(value: types.DayTimeInterval): Vector[Any] = Vector(value.toMicros)
+    def decode(values: Vector[Any]): Either[DecodeError, types.DayTimeInterval] =
+      decodeSingle("DayTimeInterval") { case l: Long => types.DayTimeInterval.ofMicros(l) }(values)
+  }
+
+  given binarySchema: Schema[types.Binary] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.BinaryType)
+    def encode(value: types.Binary): Vector[Any] = Vector(value.toBytes)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Binary] =
+      decodeSingle("Binary") { case ba: Array[Byte @unchecked] => types.Binary(ba) }(values)
+  }
+
   given dateSchema: Schema[types.Date] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")
@@ -76,6 +148,32 @@ object Schema {
       case d: java.time.LocalDate => types.Date.fromLocalDate(d)
       case i: Int => types.Date.ofEpochDay(i.toLong)
     }(values)
+  }
+
+  private def decodeDecimalValue(values: Vector[Any]): Either[DecodeError, types.Decimal] =
+    if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
+    else
+      values.head match {
+        case l: Long => Right(types.Decimal.ofUnscaled(l))
+        case bd: java.math.BigDecimal =>
+          types.Decimal.fromBigDecimal(bd).toRight(DecodeError.TypeMismatch("Decimal", bd.toString))
+        case other => Left(DecodeError.TypeMismatch("Decimal", other.getClass.getSimpleName))
+      }
+
+  given decimalSchema: Schema[types.Decimal] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DecimalType(10, 0))
+    def encode(value: types.Decimal): Vector[Any] = Vector(value.toUnscaled)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Decimal] = decodeDecimalValue(values)
+  }
+
+  def decimalWith(precision: Int, scale: Int): Schema[types.Decimal] = new Schema[types.Decimal] {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DecimalType(precision, scale))
+    def encode(value: types.Decimal): Vector[Any] = Vector(value.toUnscaled)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Decimal] = decodeDecimalValue(values)
   }
 
   given booleanSchema: Schema[Boolean] with {

@@ -705,27 +705,8 @@ object DatasetInterpreter extends Interpreter {
     }
   }
 
-  /** Compare two column values at indices a and b.
-    *
-    * Uses GADT Column[A] pattern matching to dispatch to concrete typed comparisons. Each branch
-    * uses the JDK compare method for the matched primitive type, requiring zero casts.
-    */
-  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int = {
-    def nullSafe(nulls: scala.collection.immutable.BitSet)(compare: => Int): Int = {
-      val na = nulls.contains(a); val nb = nulls.contains(b)
-      if (na && nb) 0 else if (na) -1 else if (nb) 1 else compare
-    }
-
-    col match {
-      case Column.IntColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
-      case Column.LongColumn(data, nulls) => nullSafe(nulls)(java.lang.Long.compare(data(a), data(b)))
-      case Column.DoubleColumn(data, nulls) => nullSafe(nulls)(java.lang.Double.compare(data(a), data(b)))
-      case Column.StringColumn(data, nulls) => nullSafe(nulls)(data(a).nn.compareTo(data(b)))
-      case Column.DateColumn(data, nulls) => nullSafe(nulls)(Integer.compare(data(a), data(b)))
-      case Column.BooleanColumn(data, nulls) => nullSafe(nulls)(java.lang.Boolean.compare(data(a), data(b)))
-      case Column.AnyColumn(data, nulls) => nullSafe(nulls)(Ordering.String.compare(data(a).toString, data(b).toString))
-    }
-  }
+  private def compareColumnValues(col: Column[?], a: Int, b: Int): Int =
+    Column.compareAt(col, a, b)
 
   private def withWindow[In, Out](
     dataset: MaterializedDataset[In],

@@ -45,8 +45,8 @@ lazy val core = project
     libraryDependencies ++= Seq(
       "net.ghoula" %% "rumil-parsers" % rumilVersion,
       "net.ghoula" %% "sarati" % saratiVersion,
-      "org.scalatest" %% "scalatest" % "3.2.19" % Test,
-      "org.scalacheck" %% "scalacheck" % "1.18.1" % Test
+      "org.scalatest" %% "scalatest" % "3.2.20" % Test,
+      "org.scalacheck" %% "scalacheck" % "1.19.0" % Test
     )
   )
 
@@ -69,7 +69,7 @@ lazy val spark = project
         .cross(CrossVersion.for3Use2_13)
         .exclude("org.scala-lang.modules", "scala-xml_2.13"),
       "org.scala-lang.modules" %% "scala-xml" % "2.4.0" % Test,
-      "org.scalatest" %% "scalatest" % "3.2.19" % Test
+      "org.scalatest" %% "scalatest" % "3.2.20" % Test
     ),
     Test / fork := true,
     Test / testOptions += Tests.Argument("-l", "net.ghoula.strongbow.Benchmark"),

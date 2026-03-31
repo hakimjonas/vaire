@@ -27,12 +27,12 @@ object ExprInterpreter {
         case cell: Expr.Cell[_, _] => columns(cell.index.toInt).columnType
         case c: Expr.Const[_, _] =>
           c.value match {
-            case _: Int     => ColumnType.IntType
-            case _: Long    => ColumnType.LongType
-            case _: Double  => ColumnType.DoubleType
-            case _: String  => ColumnType.StringType
+            case _: Int => ColumnType.IntType
+            case _: Long => ColumnType.LongType
+            case _: Double => ColumnType.DoubleType
+            case _: String => ColumnType.StringType
             case _: Boolean => ColumnType.BooleanType
-            case _          => ColumnType.AnyType
+            case _ => ColumnType.AnyType
           }
         case _ => ColumnType.AnyType
       }
@@ -554,10 +554,14 @@ object ExprInterpreter {
                 lte: (T, T) => Boolean
               ): Either[ExecutionError, Column[?]] = {
                 val combined = vn | ln | un
-                Right(Column.boolean(
-                  Array.tabulate(rowCount)(i => if (combined.contains(i)) false else gte(vd(i), ld(i)) && lte(vd(i), ud(i))),
-                  combined
-                ))
+                Right(
+                  Column.boolean(
+                    Array.tabulate(rowCount)(i =>
+                      if (combined.contains(i)) false else gte(vd(i), ld(i)) && lte(vd(i), ud(i))
+                    ),
+                    combined
+                  )
+                )
               }
 
               (exprCol, lowerCol, upperCol) match {
@@ -1441,7 +1445,11 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedLongDiv(left: Array[Long], right: Array[Long], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedLongDiv(
+    left: Array[Long],
+    right: Array[Long],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ / _, Column.long)
 
   private def vectorizedDoubleBinOp[Row](
@@ -1463,7 +1471,11 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedDoubleDiv(left: Array[Double], right: Array[Double], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedDoubleDiv(
+    left: Array[Double],
+    right: Array[Double],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0.0, _ / _, Column.double)
 
   private def typedComparison[Row, A](
@@ -1482,19 +1494,25 @@ object ExprInterpreter {
       leftCol <- evalColumn(left, columns, opType)
       rightCol <- evalColumn(right, columns, opType)
       result <- {
-        def cmpCol[T](ld: Array[T], ln: BitSet, rd: Array[T], rn: BitSet)(cmp: (T, T) => Boolean): Either[ExecutionError, Column[?]] =
+        def cmpCol[T](ld: Array[T], ln: BitSet, rd: Array[T], rn: BitSet)(
+          cmp: (T, T) => Boolean
+        ): Either[ExecutionError, Column[?]] =
           Right(Column.boolean(Array.tabulate(rowCount)(i => cmp(ld(i), rd(i))), ln | rn))
 
         val matched: Either[ExecutionError, Column[?]] = (leftCol, rightCol) match {
-          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn))       => cmpCol(ld, ln, rd, rn)(intCmp)
-          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn))     => cmpCol(ld, ln, rd, rn)(longCmp)
+          case (Column.IntColumn(ld, ln), Column.IntColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(intCmp)
+          case (Column.LongColumn(ld, ln), Column.LongColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(longCmp)
           case (Column.DoubleColumn(ld, ln), Column.DoubleColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(doubleCmp)
           case (Column.StringColumn(ld, ln), Column.StringColumn(rd, rn)) =>
-            Right(Column.boolean(
-              Array.tabulate(rowCount)(i => if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)),
-              ln | rn
-            ))
-          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn))     => cmpCol(ld, ln, rd, rn)(intCmp)
+            Right(
+              Column.boolean(
+                Array.tabulate(rowCount)(i =>
+                  if (ln.contains(i) || rn.contains(i)) false else stringCmp(ld(i).nn, rd(i).nn)
+                ),
+                ln | rn
+              )
+            )
+          case (Column.DateColumn(ld, ln), Column.DateColumn(rd, rn)) => cmpCol(ld, ln, rd, rn)(intCmp)
           case _ =>
             Left(ExecutionError.UnsupportedOperation("Comparison not supported for untyped columns"))
         }
@@ -1521,7 +1539,11 @@ object ExprInterpreter {
   private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ % _, Column.int)
 
-  private def vectorizedLongMod(left: Array[Long], right: Array[Long], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedLongMod(
+    left: Array[Long],
+    right: Array[Long],
+    rowCount: Int
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ % _, Column.long)
 
   private def vectorizedDoubleUnaryOp[Row](
@@ -1694,13 +1716,14 @@ object ExprInterpreter {
           }
 
         case corr: Expr.Corr[Row] =>
-          bivariateStat(corr.left, corr.right, columns, minCount = 2) { (xData, yData, combinedNulls, xMean, yMean, _) =>
-            val (cov, xVar, yVar) = xData.indices.filterNot(combinedNulls.contains).foldLeft((0.0, 0.0, 0.0)) {
-              case ((c, xv, yv), i) =>
-                val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
-            }
-            val denom = math.sqrt(xVar * yVar)
-            if (denom == 0.0) 0.0 else cov / denom
+          bivariateStat(corr.left, corr.right, columns, minCount = 2) {
+            (xData, yData, combinedNulls, xMean, yMean, _) =>
+              val (cov, xVar, yVar) =
+                xData.indices.filterNot(combinedNulls.contains).foldLeft((0.0, 0.0, 0.0)) { case ((c, xv, yv), i) =>
+                  val dx = xData(i) - xMean; val dy = yData(i) - yMean; (c + dx * dy, xv + dx * dx, yv + dy * dy)
+                }
+              val denom = math.sqrt(xVar * yVar)
+              if (denom == 0.0) 0.0 else cov / denom
           }
 
         case cs: Expr.CovarSamp[Row] =>
@@ -1931,45 +1954,18 @@ object ExprInterpreter {
   }
 
   private def findExtremum(col: Column[?], rowCount: Int, isMax: Boolean): Option[Any] = {
-    def foldExtremum[T](data: Array[T], nulls: BitSet, better: (T, T) => Boolean): Option[T] =
-      (0 until rowCount).foldLeft(Option.empty[T]) { (best, i) =>
-        if (nulls.contains(i)) best
-        else
-          best match {
-            case None => Some(data(i))
-            case Some(b) => Some(if (better(data(i), b)) data(i) else b)
-          }
-      }
-
     col match {
-      case Column.IntColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Int, b: Int) => if (isMax) a > b else a < b)
-      case Column.LongColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Long, b: Long) => if (isMax) a > b else a < b)
-      case Column.DoubleColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Double, b: Double) => if (isMax) a > b else a < b)
-      case Column.StringColumn(data, nulls) =>
-        foldExtremum(
-          data,
-          nulls,
-          (a: String | Null, b: String | Null) => { val c = a.nn.compareTo(b); if (isMax) c > 0 else c < 0 }
-        )
-      case Column.DateColumn(data, nulls) =>
-        (0 until rowCount).foldLeft(Option.empty[Date]) { (best, i) =>
-          if (nulls.contains(i)) best
+      case Column.AnyColumn(_, _) => None
+      case _ =>
+        val bestIdx = (0 until rowCount).foldLeft(-1) { (best, i) =>
+          if (col.nullSet.contains(i)) best
+          else if (best < 0) i
           else {
-            val d = Date.ofEpochDay(data(i).toLong)
-            best match {
-              case None => Some(d)
-              case Some(b) =>
-                val cmp = data(i).compareTo(b.toEpochDay.toInt)
-                Some(if (isMax && cmp > 0) d else if (!isMax && cmp < 0) d else b)
-            }
+            val cmp = Column.compareAt(col, i, best)
+            if (isMax && cmp > 0) i else if (!isMax && cmp < 0) i else best
           }
         }
-      case Column.BooleanColumn(data, nulls) =>
-        foldExtremum(data, nulls, (a: Boolean, b: Boolean) => if (isMax) a && !b else !a && b)
-      case Column.AnyColumn(_, _) => None
+        if (bestIdx < 0) None else Some(col.getValue(bestIdx))
     }
   }
 
@@ -1990,54 +1986,17 @@ object ExprInterpreter {
   }
 
   private def compareColumnValues(col: Column[?], i: Int, j: Int, wantGreater: Boolean): Boolean = {
-    col match {
-      case Column.IntColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.LongColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.DoubleColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.StringColumn(data, _) =>
-        val cmp = data(i).nn.compareTo(data(j))
-        if (wantGreater) cmp > 0 else cmp < 0
-      case Column.DateColumn(data, _) =>
-        if (wantGreater) data(i) > data(j) else data(i) < data(j)
-      case Column.BooleanColumn(data, _) =>
-        if (wantGreater) data(i) && !data(j) else !data(i) && data(j)
-      case Column.AnyColumn(_, _) => false
-    }
+    val cmp = Column.compareAt(col, i, j)
+    if (wantGreater) cmp > 0 else cmp < 0
   }
 
   private def topNValues(col: Column[?], rowCount: Int, n: Int, isMax: Boolean): Seq[Any] = {
-    col match {
-      case Column.IntColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Int].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.LongColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Long].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.DoubleColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Double].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.StringColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount).map(_.nn)
-        val sorted = if (isMax) vals.sorted(using Ordering[String].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.DateColumn(data, nulls) =>
-        val vals = (0 until rowCount).filter(!nulls.contains(_)).map(i => Date.ofEpochDay(data(i).toLong)).toVector
-        val sorted = if (isMax) vals.sorted(using Ordering[Date].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.BooleanColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        val sorted = if (isMax) vals.sorted(using Ordering[Boolean].reverse) else vals.sorted
-        sorted.take(n)
-      case Column.AnyColumn(data, nulls) =>
-        val vals = collectNonNullTyped(data, nulls, rowCount)
-        vals.take(n)
+    val nonNullIndices = (0 until rowCount).filter(i => !col.nullSet.contains(i))
+    val sorted = nonNullIndices.sortWith { (a, b) =>
+      val cmp = Column.compareAt(col, a, b)
+      if (isMax) cmp > 0 else cmp < 0
     }
+    sorted.take(n).map(col.getValue)
   }
 
   private def topNByKey(
@@ -2053,10 +2012,6 @@ object ExprInterpreter {
       else compareColumnValues(keyCol, a, b, wantGreater = false)
     }
     sortedIndices.take(n).map(i => valCol.getValue(i))
-  }
-
-  private def collectNonNullTyped[T](data: Array[T], nulls: BitSet, rowCount: Int): Vector[T] = {
-    (0 until rowCount).filter(i => !nulls.contains(i)).map(data(_)).toVector
   }
 
   private def hexEncode(bytes: Array[Byte]): String =

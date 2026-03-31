@@ -22,6 +22,11 @@ object RowConverter {
             case d: java.time.LocalDate => java.sql.Date.valueOf(d)
             case other => other
           }
+        case ColumnType.DecimalType(_, s) =>
+          v match {
+            case l: Long => java.math.BigDecimal.valueOf(l, s)
+            case other => other
+          }
         case _ => v
       }
     }
@@ -52,7 +57,7 @@ object RowConverter {
 
   /** Convert Spark Rows directly to a MaterializedDataset via typed column extraction.
     *
-    * Bypasses the box→case class→encode→Column.fromValues-round-trip by reading typed Spark Row
+    * Bypasses the box->case class->encode->Column.fromValues-round-trip by reading typed Spark Row
     * accessors (getInt, getDouble, etc.) directly into primitive arrays. One typed read per cell,
     * zero intermediate boxing.
     */
@@ -68,27 +73,31 @@ object RowConverter {
     }
   }
 
-  /** Extract a single typed Column from an Array of Spark Rows.
-    *
-    * Uses typed Row accessors (getInt, getLong, getDouble, etc.) to read directly into primitive
-    * arrays. Null values are tracked via BitSet, matching Column's SQL NULL contract.
-    */
   private def extractColumn(rows: Array[Row], colIdx: Int, ct: ColumnType, rowCount: Int): Column[?] = {
+    val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+
+    def extract[T: scala.reflect.ClassTag](
+      defaultVal: T,
+      get: (Row, Int) => T,
+      wrap: (Array[T], BitSet) => Column[?]
+    ): Column[?] =
+      wrap(Array.tabulate(rowCount)(i => if (nulls.contains(i)) defaultVal else get(rows(i), colIdx)), nulls)
+
     ct match {
-      case ColumnType.IntType =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
-        Column.int(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0 else rows(i).getInt(colIdx)), nulls)
+      case ColumnType.IntType => extract(0, _.getInt(_), Column.int)
+      case ColumnType.LongType => extract(0L, _.getLong(_), Column.long)
+      case ColumnType.DoubleType => extract(0.0, _.getDouble(_), Column.double)
+      case ColumnType.FloatType => extract(0.0f, _.getFloat(_), Column.float)
+      case ColumnType.ShortType => extract(0: Short, _.getShort(_), Column.short)
+      case ColumnType.ByteType => extract(0: Byte, _.getByte(_), Column.byte)
+      case ColumnType.TimestampType => extract(0L, _.getLong(_), Column.timestamp)
+      case ColumnType.TimestampNTZType => extract(0L, _.getLong(_), Column.timestampNTZ)
+      case ColumnType.YearMonthIntervalType => extract(0, _.getInt(_), Column.yearMonthInterval)
+      case ColumnType.DayTimeIntervalType => extract(0L, _.getLong(_), Column.dayTimeInterval)
+      case ColumnType.BooleanType => extract(false, _.getBoolean(_), Column.boolean)
+      case ColumnType.DateType => extract(0, (r, c) => r.getDate(c).toLocalDate.toEpochDay.toInt, Column.date)
 
-      case ColumnType.LongType =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
-        Column.long(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0L else rows(i).getLong(colIdx)), nulls)
-
-      case ColumnType.DoubleType =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
-        Column.double(Array.tabulate(rowCount)(i => if (nulls.contains(i)) 0.0 else rows(i).getDouble(colIdx)), nulls)
-
-      case ColumnType.StringType =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+      case ColumnType.StringType | ColumnType.CharType(_) | ColumnType.VarcharType(_) =>
         Column.string(
           Array.tabulate(rowCount)(i =>
             if (nulls.contains(i)) null else rows(i).getString(colIdx) // scalafix:ok DisableSyntax.null
@@ -96,24 +105,33 @@ object RowConverter {
           nulls
         )
 
-      case ColumnType.BooleanType =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
-        Column.boolean(
-          Array.tabulate(rowCount)(i => if (nulls.contains(i)) false else rows(i).getBoolean(colIdx)),
-          nulls
+      case ColumnType.BinaryType =>
+        val byteArrays = Array.tabulate(rowCount)(i =>
+          if (nulls.contains(i)) Array.empty[Byte] else rows(i).getAs[Array[Byte]](colIdx)
         )
+        Column.binaryFromArrays(byteArrays, nulls)
 
-      case ColumnType.DateType =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
-        Column.date(
+      case ColumnType.DecimalType(p, s) if p <= 18 =>
+        import net.ghoula.strongbow.types.Decimal
+        val converted = Array.tabulate(rowCount) { i =>
+          if (nulls.contains(i)) None
+          else Decimal.fromBigDecimal(rows(i).getDecimal(colIdx))
+        }
+        val overflowNulls =
+          BitSet.fromSpecific((0 until rowCount).filter(i => !nulls.contains(i) && converted(i).isEmpty))
+        val data = converted.map(_.fold(0L)(_.toUnscaled))
+        Column.decimal(data, p, s, nulls | overflowNulls)
+
+      case ColumnType.DecimalType(_, _) =>
+        Column.any(
           Array.tabulate(rowCount)(i =>
-            if (nulls.contains(i)) 0 else rows(i).getDate(colIdx).toLocalDate.toEpochDay.toInt
+            if (nulls.contains(i)) null else rows(i).getDecimal(colIdx) // scalafix:ok DisableSyntax.null
           ),
           nulls
         )
 
-      case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
-        val nulls = BitSet.fromSpecific((0 until rowCount).filter(rows(_).isNullAt(colIdx)))
+      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) |
+          ColumnType.MapType(_, _) =>
         Column.any(
           Array.tabulate(rowCount)(i =>
             if (nulls.contains(i)) null else rows(i).get(colIdx) // scalafix:ok DisableSyntax.null

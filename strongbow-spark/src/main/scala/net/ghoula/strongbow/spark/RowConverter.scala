@@ -22,6 +22,11 @@ object RowConverter {
             case d: java.time.LocalDate => java.sql.Date.valueOf(d)
             case other => other
           }
+        case ColumnType.DecimalType(_, s) =>
+          v match {
+            case l: Long => java.math.BigDecimal.valueOf(l, s)
+            case other => other
+          }
         case _ => v
       }
     }
@@ -105,6 +110,21 @@ object RowConverter {
           if (nulls.contains(i)) Array.empty[Byte] else rows(i).getAs[Array[Byte]](colIdx)
         )
         Column.binaryFromArrays(byteArrays, nulls)
+
+      case ColumnType.DecimalType(p, s) if p <= 18 =>
+        val arr = Array.tabulate(rowCount) { i =>
+          if (nulls.contains(i)) 0L
+          else rows(i).getDecimal(colIdx).setScale(s).unscaledValue().longValueExact()
+        }
+        Column.decimal(arr, p, s, nulls)
+
+      case ColumnType.DecimalType(_, _) =>
+        Column.any(
+          Array.tabulate(rowCount)(i =>
+            if (nulls.contains(i)) null else rows(i).getDecimal(colIdx) // scalafix:ok DisableSyntax.null
+          ),
+          nulls
+        )
 
       case ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) | ColumnType.MapType(_, _) =>
         Column.any(

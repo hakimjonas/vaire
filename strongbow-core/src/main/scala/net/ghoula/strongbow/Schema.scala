@@ -150,6 +150,32 @@ object Schema {
     }(values)
   }
 
+  private def decodeDecimalValue(values: Vector[Any]): Either[DecodeError, types.Decimal] =
+    if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
+    else
+      values.head match {
+        case l: Long => Right(types.Decimal.ofUnscaled(l))
+        case bd: java.math.BigDecimal =>
+          types.Decimal.fromBigDecimal(bd).toRight(DecodeError.TypeMismatch("Decimal", bd.toString))
+        case other => Left(DecodeError.TypeMismatch("Decimal", other.getClass.getSimpleName))
+      }
+
+  given decimalSchema: Schema[types.Decimal] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DecimalType(10, 0))
+    def encode(value: types.Decimal): Vector[Any] = Vector(value.toUnscaled)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Decimal] = decodeDecimalValue(values)
+  }
+
+  def decimalWith(precision: Int, scale: Int): Schema[types.Decimal] = new Schema[types.Decimal] {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.DecimalType(precision, scale))
+    def encode(value: types.Decimal): Vector[Any] = Vector(value.toUnscaled)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Decimal] = decodeDecimalValue(values)
+  }
+
   given booleanSchema: Schema[Boolean] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")

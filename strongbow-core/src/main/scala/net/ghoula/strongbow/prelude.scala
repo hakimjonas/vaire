@@ -26,7 +26,7 @@ object prelude {
   export net.ghoula.strongbow.expr.Expr
   export net.ghoula.strongbow.interpreter.{DatasetInterpreter, ExprInterpreter, Interpreter}
   export net.ghoula.strongbow.Schema
-  export net.ghoula.strongbow.types.{ColumnIndex, Date, RowIndex}
+  export net.ghoula.strongbow.types.{ColumnIndex, Date, Decimal, RowIndex}
   export net.ghoula.strongbow.errors.{SchemaError, DecodeError, ExecutionError, NonEmptyList}
   export net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
   export net.ghoula.strongbow.internal.ExprCompiler

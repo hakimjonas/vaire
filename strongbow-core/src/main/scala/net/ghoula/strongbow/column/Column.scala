@@ -26,6 +26,7 @@ enum Column[+A] {
   case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
   case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
   case BinaryColumn(data: Array[Byte], offsets: Array[Int], nulls: BitSet) extends Column[types.Binary]
+  case DecimalColumn(data: Array[Long], precision: Int, scale: Int, nulls: BitSet) extends Column[types.Decimal]
   case AnyColumn(data: Array[Any | Null], nulls: BitSet) extends Column[Any]
 
   inline def length: Int = this match {
@@ -43,6 +44,7 @@ enum Column[+A] {
     case BooleanColumn(data, _) => data.length
     case DateColumn(data, _) => data.length
     case BinaryColumn(_, offsets, _) => offsets.length - 1
+    case DecimalColumn(data, _, _, _) => data.length
     case AnyColumn(data, _) => data.length
   }
 
@@ -61,6 +63,7 @@ enum Column[+A] {
     case BooleanColumn(_, _) => ColumnType.BooleanType
     case DateColumn(_, _) => ColumnType.DateType
     case BinaryColumn(_, _, _) => ColumnType.BinaryType
+    case DecimalColumn(_, p, s, _) => ColumnType.DecimalType(p, s)
     case AnyColumn(_, _) => ColumnType.AnyType
   }
 
@@ -79,6 +82,7 @@ enum Column[+A] {
     case BooleanColumn(_, nulls) => nulls
     case DateColumn(_, nulls) => nulls
     case BinaryColumn(_, _, nulls) => nulls
+    case DecimalColumn(_, _, _, nulls) => nulls
     case AnyColumn(_, nulls) => nulls
   }
 
@@ -109,6 +113,7 @@ enum Column[+A] {
         case DateColumn(data, _) => types.Date.ofEpochDay(data(index).toLong)
         case BinaryColumn(data, offsets, _) =>
           types.Binary(java.util.Arrays.copyOfRange(data, offsets(index), offsets(index + 1)))
+        case DecimalColumn(data, _, _, _) => types.Decimal.ofUnscaled(data(index))
         case AnyColumn(data, _) => data(index)
       }
   }
@@ -147,6 +152,8 @@ enum Column[+A] {
           java.util.Arrays.copyOfRange(offsets, 0, len + 1),
           trimmedNulls
         )
+      case DecimalColumn(data, p, s, _) =>
+        DecimalColumn(java.util.Arrays.copyOfRange(data, 0, len), p, s, trimmedNulls)
       case AnyColumn(data, _) =>
         val arr = new Array[Any | Null](len)
         System.arraycopy(data, 0, arr, 0, len)
@@ -202,6 +209,8 @@ enum Column[+A] {
           val newData = Column.concatByteArrays(ld, rd)
           val newOffsets = lo ++ ro.tail.map(_ + ld.length)
           Right(BinaryColumn(newData, newOffsets, combinedNulls))
+        case (DecimalColumn(l, p, s, _), DecimalColumn(r, _, _, _)) =>
+          concatArrays(l, r, (arr, ns) => DecimalColumn(arr, p, s, ns))
         case (AnyColumn(l, _), AnyColumn(r, _)) => concatArrays(l, r, AnyColumn(_, _))
         case _ =>
           Left(ExecutionError.TypeMismatch(this.columnType.toString, other.columnType.toString, "Column.concat"))
@@ -271,6 +280,8 @@ enum Column[+A] {
           System.arraycopy(data, offsets(indices(i)), newData, newOffsets(i), lengths(i))
       }
       BinaryColumn(newData, newOffsets, newNulls)
+    case DecimalColumn(data, p, s, nulls) =>
+      DecimalColumn(sliceArray(data, indices, nulls, 0L), p, s, buildNullSet(nulls, indices))
     case AnyColumn(data, nulls) =>
       AnyColumn(sliceArray(data, indices, nulls, null), buildNullSet(nulls, indices)) // scalafix:ok DisableSyntax.null
   }
@@ -350,6 +361,15 @@ object Column {
   def binary(data: Array[Byte], offsets: Array[Int], nulls: BitSet = BitSet.empty): Column[types.Binary] =
     BinaryColumn(data, offsets, nulls)
 
+  /** Create a DecimalColumn from unscaled Long values with precision and scale metadata. */
+  inline def decimal(
+    data: Array[Long],
+    precision: Int,
+    scale: Int,
+    nulls: BitSet = BitSet.empty
+  ): Column[types.Decimal] =
+    DecimalColumn(data, precision, scale, nulls)
+
   private def concatByteArrays(left: Array[Byte], right: Array[Byte]): Array[Byte] = {
     val result = new Array[Byte](left.length + right.length)
     System.arraycopy(left, 0, result, 0, left.length)
@@ -384,6 +404,8 @@ object Column {
     case ColumnType.BooleanType => BooleanColumn(Array.empty[Boolean], BitSet.empty)
     case ColumnType.DateType => DateColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.BinaryType => BinaryColumn(Array.empty[Byte], Array(0), BitSet.empty)
+    case ColumnType.DecimalType(p, s) if p <= 18 => DecimalColumn(Array.empty[Long], p, s, BitSet.empty)
+    case ColumnType.DecimalType(_, _) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.CharType(_) => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.VarcharType(_) => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.AnyType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
@@ -469,6 +491,30 @@ object Column {
           { case d: java.time.LocalDate => d.toEpochDay.toInt; case i: Int => i },
           DateColumn(_, _)
         )
+      case ColumnType.DecimalType(p, s) if p <= 18 =>
+        val cast: PartialFunction[Any, Long] = {
+          case l: Long => l
+          case bd: java.math.BigDecimal => bd.setScale(s).unscaledValue().longValueExact()
+        }
+        val arr = new Array[Long](values.length)
+        val error = values.zipWithIndex.foldLeft(Option.empty[ExecutionError]) {
+          case (err @ Some(_), _) => err
+          case (None, (v, idx)) =>
+            Option(v) match {
+              case None => arr(idx) = 0L; None
+              case Some(x) if cast.isDefinedAt(x) =>
+                try { arr(idx) = cast(x); None }
+                catch {
+                  case _: ArithmeticException =>
+                    Some(ExecutionError.TypeMismatch("Decimal(Long)", x.toString, "Column.fromValues"))
+                }
+              case Some(x) =>
+                Some(ExecutionError.TypeMismatch("Decimal", x.getClass.getSimpleName, "Column.fromValues"))
+            }
+        }
+        error.toLeft(DecimalColumn(arr, p, s, nullIndices))
+      case ColumnType.DecimalType(_, _) =>
+        Right(AnyColumn(values.toArray, nullIndices))
       case ColumnType.BinaryType =>
         val cast: PartialFunction[Any, Array[Byte]] = { case ba: Array[Byte @unchecked] => ba }
         val validated = values.zipWithIndex.foldLeft[Either[ExecutionError, Vector[Array[Byte]]]](Right(Vector.empty)) {
@@ -509,6 +555,7 @@ object Column {
         case DayTimeIntervalColumn(data, _) => java.lang.Long.compare(data(a), data(b))
         case BinaryColumn(data, offsets, _) =>
           java.util.Arrays.compare(data, offsets(a), offsets(a + 1), data, offsets(b), offsets(b + 1))
+        case DecimalColumn(data, _, _, _) => java.lang.Long.compare(data(a), data(b))
         case StringColumn(data, _) => data(a).nn.compareTo(data(b))
         case DateColumn(data, _) => Integer.compare(data(a), data(b))
         case BooleanColumn(data, _) => java.lang.Boolean.compare(data(a), data(b))
@@ -536,6 +583,7 @@ object Column {
       case DateColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case bc: BinaryColumn =>
         (0 until rowCount).sortWith((a, b) => compareAt(bc, a, b) < 0).toArray
+      case DecimalColumn(data, _, _, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case BooleanColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => !a && b)
       case AnyColumn(data, _) =>
         sort(IArray.unsafeFromArray(data))((a, b) => String.valueOf(a).compareTo(String.valueOf(b)) < 0)

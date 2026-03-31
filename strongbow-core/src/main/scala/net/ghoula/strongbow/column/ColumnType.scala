@@ -19,6 +19,7 @@ enum ColumnType derives CanEqual {
   case YearMonthIntervalType
   case DayTimeIntervalType
   case BinaryType
+  case DecimalType(precision: Int, scale: Int)
   case CharType(length: Int)
   case VarcharType(maxLength: Int)
   case OptionType(inner: ColumnType)

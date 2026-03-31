@@ -112,11 +112,7 @@ object RowConverter {
         Column.binaryFromArrays(byteArrays, nulls)
 
       case ColumnType.DecimalType(p, s) if p <= 18 =>
-        val arr = Array.tabulate(rowCount) { i =>
-          if (nulls.contains(i)) 0L
-          else rows(i).getDecimal(colIdx).setScale(s).unscaledValue().longValueExact()
-        }
-        Column.decimal(arr, p, s, nulls)
+        extract(0L, (r, c) => r.getDecimal(c).unscaledValue().longValueExact(), Column.decimal(_, p, s, _))
 
       case ColumnType.DecimalType(_, _) =>
         Column.any(

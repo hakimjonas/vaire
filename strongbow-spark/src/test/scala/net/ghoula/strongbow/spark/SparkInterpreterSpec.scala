@@ -370,6 +370,37 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     assertParity(ds)
   }
 
+  // --- Decimal type ---
+
+  "Decimal datasets" should "round-trip through Spark as DecimalColumn" in {
+    import org.apache.spark.sql.types.{DecimalType => SparkDecimalType, StructField, StructType}
+    import org.apache.spark.sql.Row
+
+    val rows = java.util.Arrays.asList(
+      Row(java.math.BigDecimal.valueOf(150, 2)),
+      Row(java.math.BigDecimal.valueOf(250, 2)),
+      Row(java.math.BigDecimal.valueOf(350, 2))
+    )
+    val structType = StructType(Array(StructField("value", SparkDecimalType(10, 2), nullable = false)))
+    val nativeDf = spark.createDataFrame(rows, structType)
+
+    val schema = Schema.decimalWith(10, 2)
+    val ds = SparkDatasets.fromDataFrame(nativeDf, schema)
+    val result = sparkInterpreter.execute(ds)
+    result.isRight shouldBe true
+    val materialized = result.toOption.get
+    materialized.rowCount shouldBe 3
+    materialized.columns.head match {
+      case Column.DecimalColumn(data, p, s, _) =>
+        p shouldBe 10
+        s shouldBe 2
+        data(0) shouldBe 150L
+        data(1) shouldBe 250L
+        data(2) shouldBe 350L
+      case other => fail(s"Expected DecimalColumn, got ${other.getClass.getSimpleName}")
+    }
+  }
+
   // --- toDataFrame ---
 
   "toDataFrame" should "return a valid DataFrame for Root" in {

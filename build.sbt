@@ -1,5 +1,5 @@
 ThisBuild / organization := "net.ghoula"
-ThisBuild / scalaVersion := "3.8.2"
+ThisBuild / scalaVersion := "3.8.3"
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
@@ -25,8 +25,8 @@ lazy val sharedScalacOptions = Seq(
 )
 
 // Dependencies
-val saratiVersion = "0.1.0+2-c539575a"
-val rumilVersion = "0.2.0+4-6ac28897"
+val saratiVersion = "0.2.2"
+val rumilVersion = "0.3.0"
 val sparkVersion = "4.1.1"
 
 lazy val root = project

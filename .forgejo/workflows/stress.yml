@@ -1,0 +1,29 @@
+name: Stress
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Weekly, Mondays 04:00 UTC
+    - cron: "0 4 * * 1"
+
+env:
+  JAVA_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
+  SBT_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
+
+jobs:
+  stress:
+    name: Heavy suites (5M-row stress + TPC-H)
+    runs-on: codeberg-medium
+    env:
+      FORGEJO_HOST: forgejo
+    steps:
+      - name: Checkout
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_REF}:${GITHUB_REF}"
+          git checkout -f "${GITHUB_SHA}"
+
+      - name: Run heavy suites
+        run: sbt testSlow
+        timeout-minutes: 40

@@ -28,6 +28,9 @@ project/project/
 hs_err_pid*
 core.*
 
+# Local developer JVM tuning (CI uses the workflow env instead)
+.jvmopts
+
 # AI tool config (not user-facing)
 CLAUDE.md
 

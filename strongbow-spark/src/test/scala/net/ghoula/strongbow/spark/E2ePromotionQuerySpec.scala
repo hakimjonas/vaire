@@ -20,7 +20,7 @@ import net.ghoula.strongbow.prelude.*
   *
   * Tests distributed equi-join + filter + CASE WHEN + LIKE + SumDouble.
   */
-class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase {
+class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase with SlowTests {
 
   import E2eTestData.{LineItem, Part, lineItemSchema, partSchema}
 

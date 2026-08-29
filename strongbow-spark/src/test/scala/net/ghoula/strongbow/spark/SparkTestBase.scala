@@ -1,21 +1,26 @@
 package net.ghoula.strongbow.spark
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 import org.apache.spark.sql.SparkSession
 import org.scalatest.{BeforeAndAfterAll, Suite}
 
-/** Shared test trait providing a singleton SparkSession for all Spark tests.
+/** Singleton Spark session shared by the whole Spark test suite.
   *
-  * By default, tests run in local[2] mode. To run against a Spark standalone cluster, pass
-  * `-Dspark.test.master=spark://127.0.0.1:7077` to the JVM.
+  * One local SparkSession per JVM, reused across every suite — the same pattern as Spark's own
+  * `SharedSparkContext`. Starting a SparkContext (~2-3s) is the dominant cost of this suite, so a
+  * single shared session keeps the PR gate fast and its memory/CPU footprint small. The session is
+  * stopped once, at JVM shutdown.
   */
-trait SparkTestBase extends BeforeAndAfterAll { self: Suite =>
-
+object SparkTestSession {
   private val master: String =
     sys.props.getOrElse("spark.test.master", "local[2]").nn
 
   private val isCluster: Boolean = master.startsWith("spark://")
 
-  protected lazy val spark: SparkSession = {
+  private val initialized = new AtomicBoolean(false)
+
+  private lazy val session: SparkSession = {
     val builder = SparkSession
       .builder()
       .master(master)
@@ -37,10 +42,24 @@ trait SparkTestBase extends BeforeAndAfterAll { self: Suite =>
     builder.getOrCreate()
   }
 
-  protected lazy val sparkInterpreter: SparkInterpreter = SparkInterpreter(spark)
+  Runtime.getRuntime.addShutdownHook(new Thread("strongbow-spark-shutdown") {
+    override def run(): Unit = if (initialized.get()) session.stop()
+  })
 
-  override def afterAll(): Unit = {
-    spark.stop()
-    super.afterAll()
+  def spark: SparkSession = {
+    initialized.set(true)
+    session
   }
+}
+
+/** Shared test trait providing a singleton SparkSession for all Spark tests.
+  *
+  * By default, tests run in local[2] mode. To run against a Spark standalone cluster, pass
+  * `-Dspark.test.master=spark://127.0.0.1:7077` to the JVM.
+  */
+trait SparkTestBase extends BeforeAndAfterAll { self: Suite =>
+
+  protected lazy val spark: SparkSession = SparkTestSession.spark
+
+  protected lazy val sparkInterpreter: SparkInterpreter = SparkInterpreter(spark)
 }

@@ -20,7 +20,7 @@ import net.ghoula.strongbow.prelude.*
   * This is the simplest TPC-H query — filter + single aggregate. After adding SumDouble to Expr,
   * this is fully expressible in strongbow using distributed Expr-based operations.
   */
-class E2eRevenueQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase {
+class E2eRevenueQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase with SlowTests {
 
   import E2eTestData.LineItem
 

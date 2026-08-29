@@ -1,4 +1,0 @@
--Xms2G
--Xmx8G
--Xss4M
--XX:+UseZGC

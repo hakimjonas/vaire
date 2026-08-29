@@ -4,11 +4,51 @@ ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
+ThisBuild / licenses := List("MIT" -> uri("https://opensource.org/licenses/MIT"))
+ThisBuild / homepage := Some(uri("https://codeberg.org/hakim/strongbow"))
+ThisBuild / description := "A type-safe columnar dataset library for Scala 3 with Spark integration"
+ThisBuild / developers := List(
+  Developer(
+    id = "hakimjonas",
+    name = "Hakim Jonas Ghoula",
+    email = "hakim@ghoula.net",
+    url = uri("https://codeberg.org/hakim")
+  )
+)
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    uri("https://codeberg.org/hakim/strongbow"),
+    "scm:git@codeberg.org:hakim/strongbow.git"
+  )
+)
+
+// ===== Publishing Settings =====
 val forgejoHost = sys.env.getOrElse("FORGEJO_HOST", "localhost")
 val forgejoUrl = s"http://$forgejoHost:3000"
+
+ThisBuild / publishTo := {
+  if (sys.env.contains("CODEBERG_TOKEN"))
+    Some("codeberg" at "https://codeberg.org/api/packages/hakim/maven")
+  else
+    Some(("local-forgejo" at s"$forgejoUrl/api/packages/hakim/maven").withAllowInsecureProtocol(true))
+}
+ThisBuild / publishMavenStyle := true
+ThisBuild / Test / publishArtifact := false
+
 ThisBuild / resolvers ++= Seq(
+  "codeberg" at "https://codeberg.org/api/packages/hakim/maven",
   ("local-forgejo" at s"$forgejoUrl/api/packages/hakim/maven").withAllowInsecureProtocol(true)
 )
+
+ThisBuild / credentials ++= sys.env
+  .get("CODEBERG_TOKEN")
+  .map(token => Credentials("Gitea Package API", "codeberg.org", "hakim", token))
+  .toSeq
+
+ThisBuild / credentials ++= sys.env
+  .get("FORGEJO_TOKEN")
+  .map(token => Credentials("Gitea Package API", forgejoHost, "hakim", token))
+  .toSeq
 
 // Java 25
 ThisBuild / javacOptions ++= Seq("--release", "25")
@@ -74,6 +114,11 @@ lazy val spark = project
     Test / fork := true,
     Test / parallelExecution := false,
     Test / testOptions += Tests.Argument("-l", "net.ghoula.strongbow.Benchmark"),
+    Test / testOptions ++= {
+      if (sys.env.contains("FAST_TESTS"))
+        Seq(Tests.Argument("-l", "net.ghoula.strongbow.Slow"))
+      else Seq.empty
+    },
     // Scala 3.8's unified scala-library uses TASTY metadata instead of ScalaSig annotations.
     // scala-reflect 2.13 (used by Spark internals) reads ScalaSig to resolve types like
     // Array.apply. Without ScalaSig, it fails: "class Array does not have a member apply".
@@ -135,3 +180,6 @@ lazy val spark = project
 
 // Command aliases
 addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; Test/compile")
+addCommandAlias("check", "core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck")
+addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull")
+addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.strongbow.Slow")

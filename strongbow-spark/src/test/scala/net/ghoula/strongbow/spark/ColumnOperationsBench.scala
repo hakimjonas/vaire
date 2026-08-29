@@ -32,18 +32,18 @@ class ColumnOperationsBench extends AnyFlatSpec with Matchers {
   private val Warmup = 3
   private val Measured = 5
 
-  private val randomIndices: Array[Int] = {
+  private lazy val randomIndices: Array[Int] = {
     val rng = new java.util.Random(42)
     (0 until N).filter(_ => rng.nextBoolean()).toArray
   }
 
-  private val intCol = Column.int(Array.tabulate(N)(i => i))
-  private val floatCol = Column.float(Array.tabulate(N)(i => i.toFloat))
-  private val longCol = Column.long(Array.tabulate(N)(i => i.toLong))
-  private val decimalCol = Column.decimal(Array.tabulate(N)(i => i.toLong), 10, 2)
-  private val timestampCol = Column.timestamp(Array.tabulate(N)(i => i.toLong * 1000))
-  private val stringCol = Column.string(Array.tabulate(N)(i => f"val$i%07d"))
-  private val binaryCol = Column.binaryFromArrays(
+  private lazy val intCol = Column.int(Array.tabulate(N)(i => i))
+  private lazy val floatCol = Column.float(Array.tabulate(N)(i => i.toFloat))
+  private lazy val longCol = Column.long(Array.tabulate(N)(i => i.toLong))
+  private lazy val decimalCol = Column.decimal(Array.tabulate(N)(i => i.toLong), 10, 2)
+  private lazy val timestampCol = Column.timestamp(Array.tabulate(N)(i => i.toLong * 1000))
+  private lazy val stringCol = Column.string(Array.tabulate(N)(i => f"val$i%07d"))
+  private lazy val binaryCol = Column.binaryFromArrays(
     Array.tabulate(N)(i => {
       val buf = java.nio.ByteBuffer.allocate(8)
       buf.putLong(i.toLong)

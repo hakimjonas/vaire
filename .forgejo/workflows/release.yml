@@ -1,0 +1,47 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+env:
+  JAVA_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
+  SBT_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
+
+jobs:
+  publish:
+    runs-on: codeberg-medium
+    env:
+      # Job level, not step level: sbt starts a server on its first invocation,
+      # and later steps connect to that same server, whose environment is fixed
+      # at startup.
+      FORGEJO_HOST: forgejo
+    steps:
+      - name: Checkout
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_REF}:${GITHUB_REF}"
+          git checkout -f "${GITHUB_SHA}"
+
+      - name: Run all checks (style, formatting)
+        run: sbt check
+
+      - name: Run full test suite (including slow suites)
+        run: sbt testAll
+        timeout-minutes: 40
+
+      - name: Publish to Forgejo Maven (skip if version exists)
+        env:
+          # The sbt build reads the env name FORGEJO_TOKEN, but the secret must
+          # be referenced as RELEASE_TOKEN: the FORGEJO_TOKEN name is reserved
+          # by the runner for the run token.
+          FORGEJO_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          version="${GITHUB_REF#refs/tags/v}"
+          if curl -sf -o /dev/null \
+            "http://${FORGEJO_HOST}:3000/api/packages/hakim/maven/net/ghoula/strongbow-core_3/${version}/strongbow-core_3-${version}.pom"; then
+            echo "Version ${version} already published on the registry — skipping publish."
+          else
+            sbt publish
+          fi

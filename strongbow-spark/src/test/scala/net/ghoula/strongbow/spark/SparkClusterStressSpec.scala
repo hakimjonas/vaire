@@ -23,6 +23,11 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
     spark.conf.set("spark.sql.shuffle.partitions", "8")
   }
 
+  override def afterAll(): Unit = {
+    spark.conf.set("spark.sql.shuffle.partitions", "2")
+    super.afterAll()
+  }
+
   private val N = 5_000_000
   private val Half = N / 2
   private val Third = N / 3
@@ -44,7 +49,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 1: Large expression-based filter
   // ---------------------------------------------------------------------------
 
-  "Distributed filter" should s"handle $N rows via Expr predicate" taggedAs Benchmark in {
+  "Distributed filter" should s"handle $N rows via Expr predicate" taggedAs Slow in {
     val threshold = (N * 0.9).toInt
     val ds = intDataset(fullData).filter(
       Expr.Gt(valueExpr, Expr.Const(threshold), summon[Ordering[Int]])
@@ -61,7 +66,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 2: Union + Distinct
   // ---------------------------------------------------------------------------
 
-  "Union then distinct" should "deduplicate with 50% overlap" taggedAs Benchmark in {
+  "Union then distinct" should "deduplicate with 50% overlap" taggedAs Slow in {
     val ds = intDataset(halfData1).union(intDataset(halfData2)).distinct
 
     val df = sparkInterpreter.toDataFrame(ds).toOption.get
@@ -74,7 +79,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 3: Intersect
   // ---------------------------------------------------------------------------
 
-  "Intersect" should "find common elements between two datasets" taggedAs Benchmark in {
+  "Intersect" should "find common elements between two datasets" taggedAs Slow in {
     val ds = intDataset(halfData1).intersect(intDataset(halfData2))
 
     val df = sparkInterpreter.toDataFrame(ds).toOption.get
@@ -87,7 +92,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 4: Except
   // ---------------------------------------------------------------------------
 
-  "Except" should "compute set difference" taggedAs Benchmark in {
+  "Except" should "compute set difference" taggedAs Slow in {
     val ds = intDataset(halfData1).except(intDataset(halfData2))
 
     val df = sparkInterpreter.toDataFrame(ds).toOption.get
@@ -99,7 +104,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 5: Expression-based join
   // ---------------------------------------------------------------------------
 
-  "JoinOn" should "perform distributed hash join" taggedAs Benchmark in {
+  "JoinOn" should "perform distributed hash join" taggedAs Slow in {
     given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
 
     val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
@@ -123,7 +128,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 6: Multi-stage pipeline — filter → union → distinct
   // ---------------------------------------------------------------------------
 
-  "Chained distributed operations" should "execute a 3-stage pipeline" taggedAs Benchmark in {
+  "Chained distributed operations" should "execute a 3-stage pipeline" taggedAs Slow in {
     val quarter = N / 4
     val threshold = Half - quarter - 1
 
@@ -151,7 +156,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 7: SelectExprs — Catalyst code generation
   // ---------------------------------------------------------------------------
 
-  "SelectExprs" should "evaluate expressions via Catalyst" taggedAs Benchmark in {
+  "SelectExprs" should "evaluate expressions via Catalyst" taggedAs Slow in {
     val doubled = Expr
       .Add(
         Expr.Mul(valueExpr, Expr.Const(2)),
@@ -179,7 +184,7 @@ class SparkClusterStressSpec extends AnyFlatSpec with Matchers with SparkTestBas
   // Test 8: Large string dataset
   // ---------------------------------------------------------------------------
 
-  "String filter" should "handle string rows via Expr predicate" taggedAs Benchmark in {
+  "String filter" should "handle string rows via Expr predicate" taggedAs Slow in {
     val strSize = N / 3
     val data = Array.tabulate[String | Null](strSize)(i => f"record-$i%08d")
     val ds = Dataset

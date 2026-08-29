@@ -1,0 +1,39 @@
+name: Scala CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  JAVA_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
+  SBT_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
+
+jobs:
+  build:
+    runs-on: codeberg-medium
+    env:
+      # Resolve Rumil/Sarati from the local Forgejo Maven registry; in the runner
+      # the Forgejo container is reachable at the `forgejo` hostname.
+      FORGEJO_HOST: forgejo
+      # Fast PR gate: exclude the Slow-tagged suites (5M-row stress + TPC-H),
+      # which run in the dedicated `stress` workflow instead.
+      FAST_TESTS: "1"
+    steps:
+      - name: Checkout
+        run: |
+          git init .
+          git remote add origin "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          git fetch --depth 1 origin "${GITHUB_REF}:${GITHUB_REF}"
+          git checkout -f "${GITHUB_SHA}"
+
+      - name: Run all checks (style, formatting)
+        run: sbt check
+
+      - name: Run core tests
+        run: sbt core/Test/testFull
+
+      - name: Run Spark tests (slow suites excluded)
+        run: sbt spark/Test/testFull
+        timeout-minutes: 20

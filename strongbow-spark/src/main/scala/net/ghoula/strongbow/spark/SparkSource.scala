@@ -2,7 +2,7 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.DataFrame
 
-import net.ghoula.strongbow.DataSource
+import net.ghoula.strongbow.dataset.DataSource
 
 /** Data source backed by a Spark DataFrame.
   *

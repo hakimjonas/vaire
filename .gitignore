@@ -28,5 +28,8 @@ project/project/
 hs_err_pid*
 core.*
 
+# AI tool config (not user-facing)
+CLAUDE.md
+
 # Docker local overrides
 docker/spark-cluster/.env

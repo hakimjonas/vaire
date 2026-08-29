@@ -2,7 +2,9 @@ package net.ghoula.strongbow.spark
 
 import org.apache.spark.sql.{DataFrame, Row, SparkSession}
 
-import net.ghoula.strongbow.{Column => SBColumn, MaterializedDataset, Schema}
+import net.ghoula.strongbow.Schema
+import net.ghoula.strongbow.column.{Column => SBColumn}
+import net.ghoula.strongbow.dataset.MaterializedDataset
 
 /** Helper to create Spark DataFrames from Strongbow's columnar storage. */
 object DataFrameBuilder {
@@ -14,7 +16,6 @@ object DataFrameBuilder {
   ): DataFrame = {
     val structType = SchemaConverter.toStructType(dataset.schema)
     val cols = dataset.columns
-    val colCount = cols.length
     val rows = Array.tabulate(dataset.rowCount) { rowIdx =>
       Row.fromSeq(cols.map(_.getValue(rowIdx)))
     }
@@ -30,7 +31,6 @@ object DataFrameBuilder {
   ): DataFrame = {
     val structType = SchemaConverter.toStructType(schema)
     val rowCount = if (columns.isEmpty) 0 else columns.head.length
-    val colCount = columns.length
     val rows = Array.tabulate(rowCount) { rowIdx =>
       Row.fromSeq(columns.map(_.getValue(rowIdx)))
     }

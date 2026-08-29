@@ -2,8 +2,8 @@ package net.ghoula.strongbow.types
 
 /** Zero-cost date wrapper over java.time.LocalDate.
   *
-  * Provides a strongbow-native date type so users never need to import java.time directly. Compiles
-  * to java.time.LocalDate at runtime with no allocation overhead.
+  * Provides a strongbow-native date type, so users never need to import java.time directly.
+  * Compiles to java.time.LocalDate at runtime with no allocation overhead.
   */
 opaque type Date = java.time.LocalDate
 

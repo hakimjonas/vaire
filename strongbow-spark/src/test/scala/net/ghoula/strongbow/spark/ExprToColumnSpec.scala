@@ -3,8 +3,7 @@ package net.ghoula.strongbow.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import net.ghoula.strongbow.{Column, ColumnType, Dataset, DatasetInterpreter, Expr, Schema}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** Tests that ExprToColumn correctly translates all Expr cases to Spark Column expressions. */
 class ExprToColumnSpec extends AnyFlatSpec with Matchers with SparkTestBase {

@@ -8,9 +8,7 @@ import java.lang.management.ManagementFactory
 import scala.jdk.CollectionConverters.*
 import scala.util.Random
 
-import net.ghoula.strongbow.{ColumnType, Dataset, Expr, Schema}
-import net.ghoula.strongbow.specs.{AggSpec, KeySpec, SortSpec}
-import net.ghoula.strongbow.types.ColumnIndex
+import net.ghoula.strongbow.prelude.*
 
 /** Head-to-head Spark benchmark matching dwh-core's SparkComparativeBenchmark.
   *
@@ -335,8 +333,8 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     writeToFile(block)
   }
 
-  "Strongbow Spark comparative" should "benchmark at 10K rows" in { runScale(10000, 100) }
-  it should "benchmark at 100K rows" in { runScale(100000, 1000) }
-  it should "benchmark at 200K rows" in { runScale(200000, 2000) }
-  it should "benchmark at 400K rows" in { runScale(400000, 4000) }
+  "Strongbow Spark comparative" should "benchmark at 10K rows" taggedAs Benchmark in { runScale(10000, 100) }
+  it should "benchmark at 100K rows" taggedAs Benchmark in { runScale(100000, 1000) }
+  it should "benchmark at 200K rows" taggedAs Benchmark in { runScale(200000, 2000) }
+  it should "benchmark at 400K rows" taggedAs Benchmark in { runScale(400000, 4000) }
 }

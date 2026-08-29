@@ -41,15 +41,15 @@ The same Dataset plan executes on the in-memory columnar interpreter or pushes t
 
 All Spark 4.2 types covered with typed, unboxed storage:
 
-| Category | Types | Storage |
-|---|---|---|
-| Primitive | Int, Long, Double, Float, Short, Byte | `Array[T]` (unboxed) |
-| String | String, Char(n), Varchar(n) | `Array[String\|Null]` |
-| Boolean | Boolean | `Array[Boolean]` |
-| Temporal | Date, Timestamp, TimestampNTZ, YearMonthInterval, DayTimeInterval | Opaque types over `Array[Int/Long]` |
-| Binary | Binary | Flat Arrow-style layout (`Array[Byte]` + offset array) |
-| Decimal | Decimal(p, s) where p <= 18 | Unscaled `Array[Long]` + precision/scale metadata |
-| Semi-structured | Variant | `AnyColumn` (Spark VariantVal round-trip) |
+| Category        | Types                                                             | Storage                                                |
+|-----------------|-------------------------------------------------------------------|--------------------------------------------------------|
+| Primitive       | Int, Long, Double, Float, Short, Byte                             | `Array[T]` (unboxed)                                   |
+| String          | String, Char(n), Varchar(n)                                       | `Array[String\|Null]`                                  |
+| Boolean         | Boolean                                                           | `Array[Boolean]`                                       |
+| Temporal        | Date, Timestamp, TimestampNTZ, YearMonthInterval, DayTimeInterval | Opaque types over `Array[Int/Long]`                    |
+| Binary          | Binary                                                            | Flat Arrow-style layout (`Array[Byte]` + offset array) |
+| Decimal         | Decimal(p, s) where p <= 18                                       | Unscaled `Array[Long]` + precision/scale metadata      |
+| Semi-structured | Variant                                                           | `AnyColumn` (Spark VariantVal round-trip)              |
 
 BitSet null tracking — SQL NULL as metadata, not values. All evaluation is columnar — no per-row dispatch. `Array.tabulate` and `foldLeft` throughout.
 
@@ -59,13 +59,13 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
 - GroupByAgg pushes to Spark groupBy + agg
 - Window functions push to Spark window specs
 - No UDFs — everything goes through Catalyst optimization
-- Overhead at 5M rows: 0.97x-1.12x vs native Spark (within measurement noise)
+- Overhead at 5M rows: 0.97x-1.12x vs. native Spark (within measurement noise)
 
 ## Modules
 
-| Module | Dependencies | Purpose |
-|---|---|---|
-| `strongbow-core` | Rumil, Sarati | Dataset/Expr/Column GADT, interpreters, Schema |
+| Module            | Dependencies    | Purpose                                             |
+|-------------------|-----------------|-----------------------------------------------------|
+| `strongbow-core`  | Rumil, Sarati   | Dataset/Expr/Column GADT, interpreters, Schema      |
 | `strongbow-spark` | Spark SQL 4.2.0 | Spark backend, ExprToColumn translation, benchmarks |
 
 ## Compiler Settings
@@ -80,19 +80,19 @@ Scala 3.8.4 on JDK 25 (core) / JDK 21 (Spark module).
 
 167 Expr cases covering Spark SQL's function surface:
 
-| Category | Examples |
-|---|---|
-| Arithmetic | Add, Sub, Mul, Div, Mod, Abs, Negate, Round, Floor, Ceil |
-| String | Lower, Upper, Trim, Substring, Replace, RegexpReplace, Split, Like |
-| Comparison | Gt, Lt, Eq, Neq, Between, In, IsNull, Coalesce |
-| Math | Sqrt, Pow, Log, Exp, Sin, Cos, Atan2, Signum |
-| Date | DateAddDays, DateDiff, ExtractYear, Quarter, DateTrunc, DateFormat |
-| Aggregation | Sum, Avg, Max, Min, Count, StdDev, Variance, Corr, Median, Mode |
-| Window | RowNumber, Rank, DenseRank, Lag, Lead, NTile, PercentRank |
-| Collection | ArraySize, ArrayContains, Flatten, MapKeys, MapValues, MapConcat |
-| Hashing | Md5, Sha1, Sha2, Hex, Base64Encode, UrlEncode |
-| JSON | GetJsonObject (via Rumil parser) |
-| Casting | CastToLong, CastToDouble, CastToString |
+| Category    | Examples                                                           |
+|-------------|--------------------------------------------------------------------|
+| Arithmetic  | Add, Sub, Mul, Div, Mod, Abs, Negate, Round, Floor, Ceil           |
+| String      | Lower, Upper, Trim, Substring, Replace, RegexpReplace, Split, Like |
+| Comparison  | Gt, Lt, Eq, Neq, Between, In, IsNull, Coalesce                     |
+| Math        | Sqrt, Pow, Log, Exp, Sin, Cos, Atan2, Signum                       |
+| Date        | DateAddDays, DateDiff, ExtractYear, Quarter, DateTrunc, DateFormat |
+| Aggregation | Sum, Avg, Max, Min, Count, StdDev, Variance, Corr, Median, Mode    |
+| Window      | RowNumber, Rank, DenseRank, Lag, Lead, NTile, PercentRank          |
+| Collection  | ArraySize, ArrayContains, Flatten, MapKeys, MapValues, MapConcat   |
+| Hashing     | Md5, Sha1, Sha2, Hex, Base64Encode, UrlEncode                      |
+| JSON        | GetJsonObject (via Rumil parser)                                   |
+| Casting     | CastToLong, CastToDouble, CastToString                             |
 
 ## Build
 

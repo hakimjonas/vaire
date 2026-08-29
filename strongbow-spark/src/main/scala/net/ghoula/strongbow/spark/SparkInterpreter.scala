@@ -61,7 +61,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
             case Right((sparkCol, _)) =>
               Right(SparkPlan(parent.df.filter(sparkCol), parent.schema))
             case Left(_) =>
-              Right(applyFilterViaMap(parent, filt.predicate))
+              applyFilterViaMap(parent, filt.predicate)
           }
         }
 
@@ -254,21 +254,25 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     plan.df.collect().iterator.map(r => RowConverter.fromRowUnsafe(r, plan.schema)).toVector
   }
 
-  private def applyFilterViaMap[T](parent: SparkPlan[T], predicate: Expr[T, Boolean]): SparkPlan[T] = {
-    val values = collectValues(parent)
-    val filtered = values.filter { v =>
-      val encoded = parent.schema.encode(v)
-      val cols = encoded.zipWithIndex.map { case (value, idx) =>
-        Column.fromValues(Vector(value), parent.schema.columnTypes(idx))
-      }.collect { case Right(c) => c }
-
-      ExprInterpreter.evalColumn(predicate, cols, ColumnType.BooleanType) match {
-        case Right(Column.BooleanColumn(data, nulls)) =>
-          data.length > 0 && !nulls.contains(0) && data(0)
-        case _ => false
+  private def applyFilterViaMap[T](
+    parent: SparkPlan[T],
+    predicate: Expr[T, Boolean]
+  ): Either[ExecutionError, SparkPlan[T]] = {
+    val rows = parent.df.collect()
+    RowConverter.toMaterialized(rows, parent.schema).flatMap { materialized =>
+      ExprInterpreter.evalColumn(predicate, materialized.columns, ColumnType.BooleanType).flatMap {
+        case Column.BooleanColumn(data, _) =>
+          val filtered = data.indices
+            .filter(data(_))
+            .map { i =>
+              RowConverter.fromRowUnsafe(rows(i), parent.schema)
+            }
+            .toVector
+          Right(SparkPlan(createDataFrame(filtered, parent.schema), parent.schema))
+        case other =>
+          Left(ExecutionError.TypeMismatch("BooleanColumn", other.columnType.toString, "filter fallback"))
       }
     }
-    SparkPlan(createDataFrame(filtered, parent.schema), parent.schema)
   }
 
   private def collectAndTransform[A, B](
@@ -455,7 +459,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     import org.apache.spark.sql.functions.monotonically_increasing_id
     val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
     val colCount = parent.schema.columnNames.length
-    val uidDf = parent.df.withColumn("_uid", monotonically_increasing_id())
+    val uidColName = s"_strongbow_${java.util.UUID.randomUUID().nn.toString.replace("-", "")}"
+    val uidDf = parent.df.withColumn(uidColName, monotonically_increasing_id())
     val values = uidDf
       .collect()
       .iterator

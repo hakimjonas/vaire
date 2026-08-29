@@ -39,7 +39,7 @@ The same Dataset plan executes on the in-memory columnar interpreter or pushes t
 
 **Columnar Storage**
 
-All Spark 4.1 types covered with typed, unboxed storage:
+All Spark 4.2 types covered with typed, unboxed storage:
 
 | Category | Types | Storage |
 |---|---|---|
@@ -66,7 +66,7 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
 | Module | Dependencies | Purpose |
 |---|---|---|
 | `strongbow-core` | Rumil, Sarati | Dataset/Expr/Column GADT, interpreters, Schema |
-| `strongbow-spark` | Spark SQL 4.1.1 | Spark backend, ExprToColumn translation, benchmarks |
+| `strongbow-spark` | Spark SQL 4.2.0 | Spark backend, ExprToColumn translation, benchmarks |
 
 ## Compiler Settings
 
@@ -74,7 +74,7 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
 -Werror -Wunused:all -language:strictEquality -Yexplicit-nulls -no-indent
 ```
 
-Scala 3.8.2 on JDK 25 (core) / JDK 21 (Spark module).
+Scala 3.8.4 on JDK 25 (core) / JDK 21 (Spark module).
 
 ## Expression Coverage
 
@@ -97,10 +97,12 @@ Scala 3.8.2 on JDK 25 (core) / JDK 21 (Spark module).
 ## Build
 
 ```bash
-sbt prepare       # scalafmt + scalafix + compile
-sbt core/test      # 457 tests
-sbt spark/test     # 118 tests (includes Spark round-trip parity)
+sbt prepare          # scalafmt + scalafix + compile
+sbt core/testFull    # 457 tests
+sbt spark/testFull   # 118 tests (includes Spark round-trip parity)
 ```
+
+sbt 2.0 runs `test` incrementally and caches results; use `testFull` for a full run.
 
 ## Part of the Arda Ecosystem
 

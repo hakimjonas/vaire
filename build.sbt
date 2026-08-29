@@ -1,5 +1,5 @@
 ThisBuild / organization := "net.ghoula"
-ThisBuild / scalaVersion := "3.8.3"
+ThisBuild / scalaVersion := "3.8.4"
 ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
@@ -25,9 +25,9 @@ lazy val sharedScalacOptions = Seq(
 )
 
 // Dependencies
-val saratiVersion = "0.2.2"
-val rumilVersion = "0.3.0"
-val sparkVersion = "4.1.1"
+val saratiVersion = "0.3.2"
+val rumilVersion = "0.3.5"
+val sparkVersion = "4.2.0"
 
 lazy val root = project
   .in(file("."))
@@ -46,7 +46,7 @@ lazy val core = project
       "net.ghoula" %% "rumil-parsers" % rumilVersion,
       "net.ghoula" %% "sarati" % saratiVersion,
       "org.scalatest" %% "scalatest" % "3.2.20" % Test,
-      "org.scalacheck" %% "scalacheck" % "1.19.0" % Test
+      "org.scalacheck" %% "scalacheck" % "1.20.0" % Test
     )
   )
 
@@ -72,6 +72,7 @@ lazy val spark = project
       "org.scalatest" %% "scalatest" % "3.2.20" % Test
     ),
     Test / fork := true,
+    Test / parallelExecution := false,
     Test / testOptions += Tests.Argument("-l", "net.ghoula.strongbow.Benchmark"),
     // Scala 3.8's unified scala-library uses TASTY metadata instead of ScalaSig annotations.
     // scala-reflect 2.13 (used by Spark internals) reads ScalaSig to resolve types like
@@ -81,17 +82,20 @@ lazy val spark = project
     // the annotation format that scala-reflect reads.
     Test / fullClasspath := {
       val cp = (Test / fullClasspath).value
+      val converter = fileConverter.value
       val scalaReflectJar = cp
-        .find(_.data.getName.startsWith("scala-reflect-"))
+        .find(_.data.name.startsWith("scala-reflect-"))
         .getOrElse(
           sys.error("scala-reflect jar not found on test classpath")
         )
       // Derive the 2.13.x version from the scala-reflect jar already on the classpath.
       // Coursier cache: .../org/scala-lang/scala-reflect/<ver>/ → .../org/scala-lang/scala-library/<ver>/
-      val reflectVersion = scalaReflectJar.data.getName.stripPrefix("scala-reflect-").stripSuffix(".jar")
-      val scalaLangDir = scalaReflectJar.data.getParentFile.getParentFile.getParentFile
-      val scalaLib213 = Attributed.blank(
-        scalaLangDir / "scala-library" / reflectVersion / s"scala-library-$reflectVersion.jar"
+      val reflectVersion = scalaReflectJar.data.name.stripPrefix("scala-reflect-").stripSuffix(".jar")
+      val scalaLangDir = converter.toPath(scalaReflectJar.data).getParent.getParent.getParent
+      val scalaLib213 = Attributed.blank[xsbti.HashedVirtualFileRef](
+        converter.toVirtualFile(
+          scalaLangDir.resolve("scala-library").resolve(reflectVersion).resolve(s"scala-library-$reflectVersion.jar")
+        )
       )
       scalaLib213 +: cp
     },

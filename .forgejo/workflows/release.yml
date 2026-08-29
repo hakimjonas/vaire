@@ -43,5 +43,8 @@ jobs:
             "http://${FORGEJO_HOST}:3000/api/packages/hakim/maven/net/ghoula/strongbow-core_3/${version}/strongbow-core_3-${version}.pom"; then
             echo "Version ${version} already published on the registry — skipping publish."
           else
-            sbt publish
+            # Pin the version to the tag: dynver's `git describe` can resolve to a
+            # different tag when two tags point at the same commit, causing a
+            # "destination file exists" double-publish error.
+            sbt "set ThisBuild / version := \"${version}\"; publish"
           fi

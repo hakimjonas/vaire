@@ -451,4 +451,34 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     eval(expr, columns, 0) shouldBe Right(0)
     eval(expr, columns, 1).map(v => v == SqlNull.value) shouldBe Right(true)
   }
+
+  "ZipWith" should "pad the shorter array with null binders on both sides" in {
+    val leftData: Array[Any] = Array(Seq(1, 2, 3), Seq(1), Seq.empty[Int], SqlNull.value)
+    val rightData: Array[Any] = Array(Seq(10, 20), Seq(30, 40, 50), Seq(60), Seq(70))
+    val leftCol = Column.any(leftData)
+    val rightCol = Column.any(rightData)
+    val leftCell = Expr.Cell[Any, Seq[Int]]("l", ColumnIndex(0))
+    val rightCell = Expr.Cell[Any, Seq[Int]]("r", ColumnIndex(1))
+    val columns = Vector(leftCol, rightCol)
+    val expr = leftCell.zipWith(rightCell)((x, y) => x.getOrElse(0) + y.getOrElse(0))
+    val results = (0 until 4).map(i => eval(expr, columns, i))
+    results shouldBe Seq(
+      Right(Seq(11, 22, 3)),
+      Right(Seq(31, 40, 50)),
+      Right(Seq(60)),
+      Right(SqlNull.value)
+    )
+  }
+
+  it should "map null input arrays to null results" in {
+    val leftData: Array[Any] = Array(SqlNull.value)
+    val rightData: Array[Any] = Array(Seq(1))
+    val leftCol = Column.any(leftData)
+    val rightCol = Column.any(rightData)
+    val leftCell = Expr.Cell[Any, Seq[Int]]("l", ColumnIndex(0))
+    val rightCell = Expr.Cell[Any, Seq[Int]]("r", ColumnIndex(1))
+    val columns = Vector(leftCol, rightCol)
+    val expr = leftCell.zipWith(rightCell)((x, y) => x.getOrElse(0) + y.getOrElse(0))
+    eval(expr, columns, 0).map(v => v == SqlNull.value) shouldBe Right(true)
+  }
 }

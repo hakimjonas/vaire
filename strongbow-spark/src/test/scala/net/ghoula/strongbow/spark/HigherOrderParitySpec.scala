@@ -18,16 +18,16 @@ import net.ghoula.strongbow.prelude.*
   */
 class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  case class Doc(xs: Seq[Int], c: Int)
+  case class Doc(xs: Seq[Int], ys: Seq[Int], c: Int)
   given Schema[Doc] = Schema.derived
 
   private lazy val base: DataFrame = spark.sql("""
       SELECT inline(array(
-        struct(array(1, 2, 3), 10),
-        struct(array(4, 5), 20),
-        struct(array(), 30),
-        struct(null, 40)
-      )) AS (xs_value, c_value)
+        struct(array(1, 2, 3), array(10, 20), 10),
+        struct(array(4, 5), array(30, 40, 50), 20),
+        struct(array(), array(60), 30),
+        struct(null, array(70), 40)
+      )) AS (xs_value, ys_value, c_value)
     """)
 
   private lazy val materialized = {
@@ -36,7 +36,8 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
   }
 
   private def xsCell: Expr[Doc, Seq[Int]] = Expr.cell("xs_value", ColumnIndex(0))
-  private def cCell: Expr[Doc, Int] = Expr.cell("c_value", ColumnIndex(1))
+  private def ysCell: Expr[Doc, Seq[Int]] = Expr.cell("ys_value", ColumnIndex(1))
+  private def cCell: Expr[Doc, Int] = Expr.cell("c_value", ColumnIndex(2))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],
@@ -154,6 +155,19 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
       xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x),
       ColumnType.AnyType,
       Vector(6, 9, 0, null) // scalafix:ok DisableSyntax.null
+    )
+  }
+
+  "zip_with" should "pad the shorter array with null binders on both backends" in {
+    checkParity(
+      xsCell.zipWith(ysCell)((x, y) => x.getOrElse(0) + y.getOrElse(0)),
+      ColumnType.AnyType,
+      Vector(
+        Seq(11, 22, 3),
+        Seq(34, 45, 50),
+        Seq(60),
+        null // scalafix:ok DisableSyntax.null
+      )
     )
   }
 

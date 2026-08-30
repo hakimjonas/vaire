@@ -1320,6 +1320,47 @@ object ExprInterpreter {
             }
           }
 
+        case zw: Expr.ZipWith[Row, _, _, _] =>
+          val leftType = inferExprColumnType(zw.left, columns)
+          val rightType = inferExprColumnType(zw.right, columns)
+          evalColumn(zw.left, columns, leftType)(using lambdaScope).flatMap { leftCol =>
+            evalColumn(zw.right, columns, rightType)(using lambdaScope).flatMap { rightCol =>
+              val n = leftCol.length
+              val flatLeft = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
+              val flatRight = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
+              val rowOf = scala.collection.mutable.ArrayBuffer.empty[Int]
+              val offsets = new Array[Int](n + 1)
+              val outNulls = scala.collection.mutable.BitSet.empty
+              (0 until n).foreach { i =>
+                val lOpt: Option[Seq[?]] = leftCol.getValue(i) match { case s: Seq[?] => Some(s); case _ => None }
+                val rOpt: Option[Seq[?]] = rightCol.getValue(i) match { case s: Seq[?] => Some(s); case _ => None }
+                (lOpt, rOpt) match {
+                  case (Some(ls), Some(rs)) =>
+                    val m = math.max(ls.length, rs.length)
+                    (0 until m).foreach { p =>
+                      flatLeft += (if (p < ls.length) ls(p) else zipPadding())
+                      flatRight += (if (p < rs.length) rs(p) else zipPadding())
+                      rowOf += i
+                    }
+                    offsets(i + 1) = offsets(i) + m
+                  case _ =>
+                    outNulls += i
+                    offsets(i + 1) = offsets(i)
+                }
+              }
+              val total = flatLeft.length
+              val scope = lambdaScope
+                .updated(zw.leftBinder, optionElementColumn(flatLeft.toVector))
+                .updated(zw.rightBinder, optionElementColumn(flatRight.toVector))
+              evalColumn(zw.body, columns.map(_.slice(rowOf.toArray)), ColumnType.AnyType)(using
+                scope
+              ).map { bodyCol =>
+                val flat = Array.tabulate[Any | Null](total)(j => bodyCol.getValue(j))
+                Column.array(Column.any(flat), offsets, BitSet.empty ++ outNulls)
+              }
+            }
+          }
+
         case md: Expr.Md5[Row] =>
           vectorizedStringHash(md.expr, columns)("MD5")
 
@@ -4198,6 +4239,16 @@ object ExprInterpreter {
         Column.boolean(data, BitSet.empty ++ outNulls)
       }
     }
+
+  /** The padding value for the shorter side of a zip: Spark binds null to the overhang. */
+  private def zipPadding(): Any | Null = null // scalafix:ok DisableSyntax.null
+
+  /** An Option-boxed column of the given flat values, used as a lambda binding whose binder is
+    * typed `Option[A]` (zip_with padding, map_zip_with missing keys). Option-typed columns store
+    * `Some`/`None` boxes so option combinators (`getOrElse`, `isDefined`) see them.
+    */
+  private def optionElementColumn(flatElems: Vector[Any | Null]): Column[?] =
+    Column.any(Array.tabulate[Any](flatElems.length)(i => Option(flatElems(i)): Any))
 
   /** A typed column of the given flat element values, used as a lambda binding.
     *

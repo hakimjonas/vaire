@@ -49,13 +49,16 @@ import parsers.json.parseJson
   *   json_tuple on compound values (null vs JSON text).
   * }}}
   *
-  * Decision (recorded for the parity handover): representation A — `Expr[Row, Seq[String]]` with
-  * values boxed in AnyColumn, Spark mapping `array(get_json_object(col, "$['key']"))`. Criterion
-  * (b): the common case is a handful of keys where in-memory eval is parse-dominated and the two
-  * representations are indistinguishable. Criterion (c): no new column variants, no dynamic-shape
-  * Schema machinery, and the Spark mapping is byte-equal to native json_tuple on all value kinds
-  * (verified against Spark 4.2: scalars, compounds -> JSON text, JSON null, absent, dotted keys,
-  * invalid JSON, null rows).
+  * Decision (recorded for the parity handover): representation A — `Expr[Row, Seq[String | Null]]`
+  * with values boxed in AnyColumn, Spark mapping `array(get_json_object(col, "$['key']"))`.
+  * Criterion (b): the common case is a handful of keys where in-memory eval is parse-dominated and
+  * the two representations are indistinguishable. Criterion (c): no new column variants, no
+  * dynamic-shape Schema machinery, and the Spark mapping is equal to native json_tuple for the
+  * value kinds verified against Spark 4.2 (strings, booleans, compounds -> JSON text, JSON null,
+  * absent keys, dotted keys, invalid JSON, null rows). Number formatting diverges on edge-case
+  * doubles (pre-existing GetJsonObject gap; follow-up filed for JsonValue raw tokens) and keys
+  * mixing a single quote with a dot or bracket are unaddressable on Spark — see JsonTupleParitySpec
+  * for the pinned divergences.
   */
 class JsonTupleBench extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -292,7 +295,7 @@ class JsonTupleBench extends AnyFlatSpec with Matchers with SparkTestBase {
       val keys = requested(n)
       val jsonCol = df.col("j")
       val nativeStructMs = planMs(df, json_tuple(jsonCol, keys*))
-      val gjoArrayMs = planMs(df, array(keys.map(k => get_json_object(jsonCol, s"$$.$k"))*))
+      val gjoArrayMs = planMs(df, array(keys.map(k => get_json_object(jsonCol, s"$$['$k']"))*))
       println(
         f"$label%-22s ($n keys) json_tuple struct: $nativeStructMs%9.1f | " +
           f"get_json_object x$n -> array: $gjoArrayMs%9.1f ms"

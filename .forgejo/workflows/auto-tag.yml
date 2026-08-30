@@ -1,13 +1,15 @@
 name: Auto-tag patch release
 
-# On every push to main, cut the next patch tag when the push is a merge
-# (PR merged into main). The tag push then triggers release.yml, which runs
-# checks, tests, and publishes the clean, tag-derived version.
+# On every push to main, cut the next patch tag when the push is a PR merge.
+# Both merge-commit and squash merges are detected: a 2-parent merge commit, or
+# a squash commit whose message carries the PR reference "(#N)". The tag push
+# then triggers release.yml, which runs checks, tests, and publishes the clean,
+# tag-derived version.
 #
 # Version policy (patch level):
 #   v1.2.3      -> v1.2.4
 #   v1.0.0-RC1  -> v1.0.0-RC2
-# Direct (non-merge) pushes are skipped defensively; main is branch-protected
+# Direct (non-PR) pushes are skipped defensively; main is branch-protected
 # so they should not happen at all.
 on:
   push:
@@ -24,17 +26,20 @@ jobs:
           git fetch --depth 2 origin "${GITHUB_REF}:${GITHUB_REF}"
           git checkout -f "${GITHUB_SHA}"
 
-      - name: Cut patch tag (merge commits only)
+      - name: Cut patch tag (PR merges only)
         env:
           # RELEASE_TOKEN is a repo secret with write access. The FORGEJO_TOKEN
           # name must NOT be used here: the runner reserves it for the run
           # token, which cannot push, shadowing any repo secret of that name.
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          # A merge commit has two parents; a direct push has one.
+          # A PR merge is either a 2-parent merge commit, or a squash commit whose
+          # message carries the PR reference "(#N)". A direct push (1 parent, no
+          # PR ref) is skipped.
           parents=$(git rev-list --parents -n 1 HEAD | awk '{print NF - 1}')
-          if [ "$parents" -lt 2 ]; then
-            echo "Direct push (not a merge) — no release tag."
+          message=$(git log -1 --format=%s HEAD)
+          if [ "$parents" -lt 2 ] && ! echo "$message" | grep -qE '\(#[0-9]+\)'; then
+            echo "Direct push (not a PR merge) — no release tag."
             exit 0
           fi
 

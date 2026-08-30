@@ -1253,19 +1253,16 @@ object ExprInterpreter {
                 if (rowNulls.contains(i)) {
                   newOffsets(i + 1) = newOffsets(i)
                 } else {
-                  var count = 0
-                  (offsets(i) until offsets(i + 1)).foreach { j =>
+                  val range = offsets(i) until offsets(i + 1)
+                  val keptInRange = range.filter { j =>
                     // Spark drops elements whose predicate is false or null (null unboxes to false)
-                    val keep = !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
+                    !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
                       case b: Boolean => b
                       case _ => false
                     })
-                    if (keep) {
-                      kept += flatElems(j)
-                      count += 1
-                    }
                   }
-                  newOffsets(i + 1) = newOffsets(i) + count
+                  keptInRange.foreach(j => kept += flatElems(j))
+                  newOffsets(i + 1) = newOffsets(i) + keptInRange.length
                 }
               }
               Column.array(elementColumn(kept.toVector), newOffsets, BitSet.empty ++ keptNulls)

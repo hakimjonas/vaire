@@ -124,4 +124,20 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
       )
     )
   }
+
+  "exists" should "follow Spark's three-valued logic on both backends" in {
+    checkParity(
+      xsCell.exists(x => x > Expr.const(1)),
+      ColumnType.BooleanType,
+      Vector(true, true, false, null) // scalafix:ok DisableSyntax.null
+    )
+  }
+
+  "forall" should "follow Spark's three-valued logic on both backends" in {
+    checkParity(
+      xsCell.forall(x => x > Expr.const(1)),
+      ColumnType.BooleanType,
+      Vector(false, true, true, null) // scalafix:ok DisableSyntax.null
+    )
+  }
 }

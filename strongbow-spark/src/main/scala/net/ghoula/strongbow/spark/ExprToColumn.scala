@@ -464,6 +464,40 @@ object ExprToColumn {
           failure.get().toLeft((filtered, ColumnType.AnyType))
         }
 
+      case ex: Expr.Exists[Row, _] =>
+        convert(ex.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = exists(
+            arr,
+            (elem: SparkColumn) =>
+              convert(ex.body)(using scope.updated(ex.binder, elem)).map { case (c, _) => c }.fold(
+                { err =>
+                  failure.set(Some(err))
+                  lit(false)
+                },
+                identity
+              )
+          )
+          failure.get().toLeft((result, ColumnType.BooleanType))
+        }
+
+      case fa: Expr.ForAll[Row, _] =>
+        convert(fa.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = forall(
+            arr,
+            (elem: SparkColumn) =>
+              convert(fa.body)(using scope.updated(fa.binder, elem)).map { case (c, _) => c }.fold(
+                { err =>
+                  failure.set(Some(err))
+                  lit(true)
+                },
+                identity
+              )
+          )
+          failure.get().toLeft((result, ColumnType.BooleanType))
+        }
+
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
       case s2: Expr.Sha2[Row] => convertUnary(s2.expr, sha2(_, s2.bitLength), ColumnType.StringType)

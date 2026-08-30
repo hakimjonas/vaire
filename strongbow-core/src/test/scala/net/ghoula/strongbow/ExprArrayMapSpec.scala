@@ -359,4 +359,59 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     eval(expr, columns, 1).map(v => v == SqlNull.value) shouldBe Right(true)
     eval(expr, columns, 2) shouldBe Right(Seq.empty)
   }
+
+  "Exists" should "follow Spark's three-valued logic" in {
+    val expr = arrCell.exists(x => x > Expr.const(1))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(true), Right(true), Right(true))
+  }
+
+  it should "yield null when no predicate is true and some is null" in {
+    val data: Array[Any] = Array(Seq(1, SqlNull.value), Seq(1, 2), Seq(SqlNull.value))
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val columns = Vector(col)
+    val expr = cell.exists(x => x > Expr.const(1))
+    eval(expr, columns, 0).map(v => v == SqlNull.value) shouldBe Right(true)
+    eval(expr, columns, 1) shouldBe Right(true)
+    eval(expr, columns, 2).map(v => v == SqlNull.value) shouldBe Right(true)
+  }
+
+  it should "return false for empty arrays" in {
+    val data: Array[Any] = Array(Seq.empty[Int])
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    eval(cell.exists(x => x > Expr.const(1)), Vector(col), 0) shouldBe Right(false)
+  }
+
+  it should "map null arrays to null" in {
+    val data: Array[Any] = Array(SqlNull.value)
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    eval(cell.exists(x => x > Expr.const(1)), Vector(col), 0).map(v => v == SqlNull.value) shouldBe Right(true)
+  }
+
+  "ForAll" should "follow Spark's three-valued logic" in {
+    val expr = arrCell.forall(x => x > Expr.const(1))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(false), Right(true), Right(false))
+  }
+
+  it should "yield null when no predicate is false and some is null" in {
+    val data: Array[Any] = Array(Seq(2, SqlNull.value), Seq(2, 3), Seq(2, 1))
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val columns = Vector(col)
+    val expr = cell.forall(x => x > Expr.const(1))
+    eval(expr, columns, 0).map(v => v == SqlNull.value) shouldBe Right(true)
+    eval(expr, columns, 1) shouldBe Right(true)
+    eval(expr, columns, 2) shouldBe Right(false)
+  }
+
+  it should "return true for empty arrays" in {
+    val data: Array[Any] = Array(Seq.empty[Int])
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    eval(cell.forall(x => x > Expr.const(1)), Vector(col), 0) shouldBe Right(true)
+  }
 }

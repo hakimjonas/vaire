@@ -1269,6 +1269,12 @@ object ExprInterpreter {
             }
           }
 
+        case ex: Expr.Exists[Row, _] =>
+          existsForAllArm(ex.array, ex.binder, ex.body, lambdaScope, columns, isExists = true)
+
+        case fa: Expr.ForAll[Row, _] =>
+          existsForAllArm(fa.array, fa.binder, fa.body, lambdaScope, columns, isExists = false)
+
         case md: Expr.Md5[Row] =>
           vectorizedStringHash(md.expr, columns)("MD5")
 
@@ -4104,6 +4110,49 @@ object ExprInterpreter {
     }
     (elems.toVector, rowOf.toArray, offsets, BitSet.empty ++ rowNulls)
   }
+
+  /** `exists`/`forall` over an array column with three-valued predicate logic, mirroring Spark's
+    * truth tables: exists is true when any predicate is true and null when none is true but some is
+    * null; forall is false when any predicate is false and null when none is false but some is
+    * null. Null arrays yield null; empty arrays yield false/true.
+    */
+  private def existsForAllArm[Row](
+    array: Expr[Row, Seq[?]],
+    binder: Binder[?],
+    body: Expr[Row, Boolean],
+    lambdaScope: LambdaScope,
+    columns: Vector[Column[?]],
+    isExists: Boolean
+  ): Either[ExecutionError, Column[?]] =
+    evalColumn(array, columns, inferExprColumnType(array, columns))(using lambdaScope).flatMap { arrCol =>
+      val (flatElems, rowOf, offsets, rowNulls) = flatArrayLayout(arrCol, arrCol.length)
+      val n = arrCol.length
+      val scope = lambdaScope.updated(binder, elementColumn(flatElems))
+      evalColumn(body, columns.map(_.slice(rowOf)), ColumnType.BooleanType)(using scope).map { bodyCol =>
+        def pred(j: Int): Option[Boolean] =
+          if (bodyCol.isNull(RowIndex(j))) None
+          else bodyCol.getValue(j) match { case b: Boolean => Some(b); case _ => None }
+        val outNulls = scala.collection.mutable.BitSet.empty
+        val data = Array.tabulate(n) { i =>
+          if (rowNulls.contains(i)) {
+            outNulls += i
+            false
+          } else {
+            val results = (offsets(i) until offsets(i + 1)).map(pred)
+            if (isExists) {
+              if (results.contains(Some(true))) true
+              else if (results.contains(None)) { outNulls += i; false }
+              else false
+            } else {
+              if (results.contains(Some(false))) false
+              else if (results.contains(None)) { outNulls += i; false }
+              else true
+            }
+          }
+        }
+        Column.boolean(data, BitSet.empty ++ outNulls)
+      }
+    }
 
   /** A typed column of the given flat element values, used as a lambda binding.
     *

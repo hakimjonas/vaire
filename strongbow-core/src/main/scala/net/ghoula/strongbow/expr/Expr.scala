@@ -18,16 +18,6 @@ import net.ghoula.strongbow.types.{
   YearMonthInterval
 }
 
-/** Type-safe expression language for dataset operations.
-  *
-  * Expr[Row, A] is a GADT that carries type evidence through pattern matching. No casts
-  * needed—types are refined correctly in each case.
-  *
-  * @tparam Row
-  *   The row type this expression operates on
-  * @tparam A
-  *   The result type of evaluating this expression
-  */
 /** A lambda variable binder for higher-order expressions.
   *
   * The phantom type on [[Binder]] gives `LambdaVar(binder: Binder[A])` type `Expr[Row, A]` by
@@ -41,6 +31,16 @@ import net.ghoula.strongbow.types.{
   */
 final class Binder[A] private[expr] ()
 
+/** Type-safe expression language for dataset operations.
+  *
+  * Expr[Row, A] is a GADT that carries type evidence through pattern matching. No casts
+  * needed—types are refined correctly in each case.
+  *
+  * @tparam Row
+  *   The row type this expression operates on
+  * @tparam A
+  *   The result type of evaluating this expression
+  */
 enum Expr[Row, +A] {
   case Cell[Row, A](name: String, index: ColumnIndex) extends Expr[Row, A]
   case Const[Row, A](value: A) extends Expr[Row, A]
@@ -240,7 +240,7 @@ enum Expr[Row, +A] {
     body: Expr[Row, B]
   ) extends Expr[Row, Seq[B]]
 
-  /** Higher-order: keep the elements (and optionally indexes) whose lambda result is true. */
+  /** Higher-order: keep the elements (and optionally the index) whose lambda result is true. */
   case Filter[Row, A](
     array: Expr[Row, Seq[A]],
     binder: Binder[A],

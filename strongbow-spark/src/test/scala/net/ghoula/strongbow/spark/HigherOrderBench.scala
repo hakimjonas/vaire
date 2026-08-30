@@ -85,15 +85,15 @@ class HigherOrderBench extends AnyFlatSpec with Matchers with SparkTestBase {
 
       // Dataset.map-equivalent fallback: a plain per-row Scala function over the raw Seqs.
       val rows = rowsFor(k)
-      def fallback: Long = {
-        var n = 0L
-        var i = 0
-        while (i < rows) {
-          n += data(i).asInstanceOf[Seq[Int]].size
-          i += 1
-        }
-        n
-      }
+      def fallback: Long =
+        data
+          .take(rows)
+          .iterator
+          .map {
+            case s: Seq[?] => s.size
+            case _ => 0
+          }
+          .sum
 
       val tTransform = bench(evalExpr(transformExpr, columns))
       val tFilter = bench(evalExpr(filterExpr, columns))

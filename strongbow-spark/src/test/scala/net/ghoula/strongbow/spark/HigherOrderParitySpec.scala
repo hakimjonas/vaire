@@ -70,7 +70,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(2, 3, 4),
         Seq(5, 6),
         Seq.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -83,7 +83,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(0, 2, 6),
         Seq(0, 5),
         Seq.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -96,7 +96,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(11, 12, 13),
         Seq(24, 25),
         Seq.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -109,7 +109,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(2, 3),
         Seq(4, 5),
         Seq.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -122,7 +122,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(1, 2, 3),
         Seq(4, 5),
         Seq.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -131,7 +131,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     checkParity(
       xsCell.exists(x => x > Expr.const(1)),
       ColumnType.BooleanType,
-      Vector(true, true, false, null) // scalafix:ok DisableSyntax.null
+      Vector(true, true, false, SqlNull.value)
     )
   }
 
@@ -139,7 +139,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     checkParity(
       xsCell.forall(x => x > Expr.const(1)),
       ColumnType.BooleanType,
-      Vector(false, true, true, null) // scalafix:ok DisableSyntax.null
+      Vector(false, true, true, SqlNull.value)
     )
   }
 
@@ -147,7 +147,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     checkParity(
       xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x, acc => acc * Expr.const(10)),
       ColumnType.AnyType,
-      Vector(60, 90, 0, null) // scalafix:ok DisableSyntax.null
+      Vector(60, 90, 0, SqlNull.value)
     )
   }
 
@@ -155,7 +155,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     checkParity(
       xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x),
       ColumnType.AnyType,
-      Vector(6, 9, 0, null) // scalafix:ok DisableSyntax.null
+      Vector(6, 9, 0, SqlNull.value)
     )
   }
 
@@ -167,7 +167,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(11, 22, 3),
         Seq(34, 45, 50),
         Seq(60),
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -180,7 +180,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Map("b" -> 2, "c" -> 3),
         Map("x" -> 10),
         Map.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -193,7 +193,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Map("a_v" -> 1, "b_v" -> 2, "c_v" -> 3),
         Map("x_v" -> 10),
         Map.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -206,7 +206,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Map("a" -> 10, "b" -> 20, "c" -> 30),
         Map("x" -> 100),
         Map.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -219,7 +219,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Map("a" -> 2, "b" -> 4, "c" -> 6),
         Map("x" -> 20),
         Map.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -232,7 +232,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(3, 2, 1),
         Seq(5, 4),
         Seq.empty,
-        null // scalafix:ok DisableSyntax.null
+        SqlNull.value
       )
     )
   }
@@ -241,7 +241,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     checkParity(
       xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x + cCell),
       ColumnType.AnyType,
-      Vector(36, 49, 0, null) // scalafix:ok DisableSyntax.null
+      Vector(36, 49, 0, SqlNull.value)
     )
   }
 }

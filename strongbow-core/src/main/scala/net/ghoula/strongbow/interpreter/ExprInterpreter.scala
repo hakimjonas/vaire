@@ -1235,6 +1235,43 @@ object ExprInterpreter {
             }
           }
 
+        case fl: Expr.Filter[Row, _] =>
+          val arrType = inferExprColumnType(fl.array, columns)
+          evalColumn(fl.array, columns, arrType).flatMap { arrCol =>
+            val (flatElems, rowOf, offsets, rowNulls) = flatArrayLayout(arrCol, arrCol.length)
+            val total = flatElems.length
+            val binds: Vector[(Binder[?], Column[?])] =
+              (fl.binder, elementColumn(flatElems): Column[?]) +: fl.indexBinder.toVector.map { ib =>
+                (ib, Column.int(Array.tabulate(total)(j => j - offsets(rowOf(j)))))
+              }
+            val scope = binds.foldLeft(lambdaScope)((s, b) => s.updated(b._1, b._2))
+            evalColumn(fl.body, columns.map(_.slice(rowOf)), ColumnType.BooleanType)(using scope).map { bodyCol =>
+              val kept = new scala.collection.mutable.ArrayBuffer[Any | Null]
+              val newOffsets = new Array[Int](offsets.length)
+              val keptNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
+              (0 until arrCol.length).foreach { i =>
+                if (rowNulls.contains(i)) {
+                  newOffsets(i + 1) = newOffsets(i)
+                } else {
+                  var count = 0
+                  (offsets(i) until offsets(i + 1)).foreach { j =>
+                    // Spark drops elements whose predicate is false or null (null unboxes to false)
+                    val keep = !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
+                      case b: Boolean => b
+                      case _ => false
+                    })
+                    if (keep) {
+                      kept += flatElems(j)
+                      count += 1
+                    }
+                  }
+                  newOffsets(i + 1) = newOffsets(i) + count
+                }
+              }
+              Column.array(elementColumn(kept.toVector), newOffsets, BitSet.empty ++ keptNulls)
+            }
+          }
+
         case md: Expr.Md5[Row] =>
           vectorizedStringHash(md.expr, columns)("MD5")
 

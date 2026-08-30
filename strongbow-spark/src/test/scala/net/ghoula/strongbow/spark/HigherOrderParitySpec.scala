@@ -98,4 +98,30 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
       )
     )
   }
+
+  "filter" should "keep elements whose predicate holds on both backends" in {
+    checkParity(
+      xsCell.filter(x => x > Expr.const(1)),
+      ColumnType.AnyType,
+      Vector(
+        Seq(2, 3),
+        Seq(4, 5),
+        Seq.empty,
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
+
+  it should "bind the element index in the two-argument form" in {
+    checkParity(
+      xsCell.filter((x, i) => x > i),
+      ColumnType.AnyType,
+      Vector(
+        Seq(1, 2, 3),
+        Seq(4, 5),
+        Seq.empty,
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
 }

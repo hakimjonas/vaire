@@ -327,4 +327,36 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     eval(expr, columns, 1).map(v => v == SqlNull.value) shouldBe Right(true)
     eval(expr, columns, 2) shouldBe Right(Seq.empty)
   }
+
+  "Filter" should "keep elements whose predicate holds" in {
+    val expr = arrCell.filter(x => x > Expr.const(1))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(Seq(2, 3)), Right(Seq(4, 5)), Right(Seq(2, 2, 3)))
+  }
+
+  it should "bind the element index in the two-argument form" in {
+    val expr = arrCell.filter((x, i) => x > i)
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(Seq(1, 2, 3)), Right(Seq(4, 5)), Right(Seq(1, 2)))
+  }
+
+  it should "drop elements with null elements under the predicate" in {
+    val data: Array[Any] = Array(Seq(1, SqlNull.value, 3))
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val columns = Vector(col)
+    val expr = cell.filter(x => x > Expr.const(1))
+    eval(expr, columns, 0) shouldBe Right(Seq(3))
+  }
+
+  it should "map null arrays to null and empty arrays to empty" in {
+    val data: Array[Any] = Array(Seq(1, 2), SqlNull.value, Seq.empty[Int])
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val columns = Vector(col)
+    val expr = cell.filter(x => x > Expr.const(1))
+    eval(expr, columns, 0) shouldBe Right(Seq(2))
+    eval(expr, columns, 1).map(v => v == SqlNull.value) shouldBe Right(true)
+    eval(expr, columns, 2) shouldBe Right(Seq.empty)
+  }
 }

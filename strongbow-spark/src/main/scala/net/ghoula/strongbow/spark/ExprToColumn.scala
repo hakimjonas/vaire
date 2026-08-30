@@ -425,6 +425,45 @@ object ExprToColumn {
           failure.get().toLeft((mapped, ColumnType.AnyType))
         }
 
+      case fl: Expr.Filter[Row, _] =>
+        convert(fl.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val bound: (SparkColumn, SparkColumn) => Either[ExecutionError, SparkColumn] = (elem, idx) => {
+            val scope2 = fl.indexBinder match {
+              case Some(ib) => scope.updated(fl.binder, elem).updated(ib, idx)
+              case None => scope.updated(fl.binder, elem)
+            }
+            convert(fl.body)(using scope2).map { case (c, _) => c }
+          }
+          val filtered = fl.indexBinder match {
+            case Some(_) =>
+              filter(
+                arr,
+                (elem: SparkColumn, idx: SparkColumn) =>
+                  bound(elem, idx).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(false)
+                    },
+                    identity
+                  )
+              )
+            case None =>
+              filter(
+                arr,
+                (elem: SparkColumn) =>
+                  bound(elem, lit(0)).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(false)
+                    },
+                    identity
+                  )
+              )
+          }
+          failure.get().toLeft((filtered, ColumnType.AnyType))
+        }
+
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
       case s2: Expr.Sha2[Row] => convertUnary(s2.expr, sha2(_, s2.bitLength), ColumnType.StringType)

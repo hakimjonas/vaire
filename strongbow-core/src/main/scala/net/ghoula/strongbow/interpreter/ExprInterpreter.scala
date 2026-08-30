@@ -1361,6 +1361,137 @@ object ExprInterpreter {
             }
           }
 
+        case mf: Expr.MapFilter[Row, _, _] =>
+          val mapType = inferExprColumnType(mf.map, columns)
+          evalColumn(mf.map, columns, mapType).map { mapCol =>
+            Column.any(Array.tabulate[Any | Null](rowCount) { i =>
+              mapCol.getValue(i) match {
+                case m: Map[?, ?] =>
+                  val rowColumns = columns.map(_.slice(Array(i)))
+                  val kept = m.toSeq.flatMap { case (k, v) =>
+                    evalMapEntry(mf.body, mf.keyBinder, mf.valueBinder, k, v, rowColumns, lambdaScope).map { r =>
+                      Some((k, v, r))
+                    }.toOption
+                  }.flatten.flatMap { case (k, v, r) =>
+                    r match {
+                      case b: Boolean => if (b) Some(k -> v) else None
+                      case _ => None
+                    }
+                  }
+                  kept.toMap
+                case _ => null // scalafix:ok DisableSyntax.null
+              }
+            })
+          }
+
+        case tk: Expr.TransformKeys[Row, _, _, _] =>
+          val mapType = inferExprColumnType(tk.map, columns)
+          evalColumn(tk.map, columns, mapType).flatMap { mapCol =>
+            val out = new Array[Any | Null](rowCount)
+            val outNulls = scala.collection.mutable.BitSet.empty ++ mapCol.nullSet
+            val error = (0 until rowCount).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
+              err match {
+                case some @ Some(_) => some
+                case None =>
+                  mapCol.getValue(i) match {
+                    case m: Map[?, ?] =>
+                      val rowColumns = columns.map(_.slice(Array(i)))
+                      val seen = scala.collection.mutable.ArrayBuffer.empty[Any]
+                      val entriesE = m.toSeq.foldLeft[Either[ExecutionError, Seq[(Any, Any)]]](Right(Seq.empty)) {
+                        (accE, kv) =>
+                          accE.flatMap { acc =>
+                            evalMapEntry(
+                              tk.body,
+                              tk.keyBinder,
+                              tk.valueBinder,
+                              kv._1,
+                              kv._2,
+                              rowColumns,
+                              lambdaScope
+                            ).flatMap { newKey =>
+                              if (seen.contains(newKey))
+                                Left(ExecutionError.InvalidValue("transform_keys produced duplicate keys"))
+                              else {
+                                seen += newKey
+                                Right(acc :+ ((newKey, kv._2)))
+                              }
+                            }
+                          }
+                      }
+                      entriesE match {
+                        case Left(e) => Some(e)
+                        case Right(pairs) => out(i) = pairs.toMap; None
+                      }
+                    case _ => outNulls += i; None
+                  }
+              }
+            }
+            error.toLeft(Column.any(out, BitSet.empty ++ outNulls))
+          }
+
+        case tv: Expr.TransformValues[Row, _, _, _] =>
+          val mapType = inferExprColumnType(tv.map, columns)
+          evalColumn(tv.map, columns, mapType).map { mapCol =>
+            Column.any(
+              Array.tabulate[Any | Null](rowCount) { i =>
+                mapCol.getValue(i) match {
+                  case m: Map[?, ?] =>
+                    val rowColumns = columns.map(_.slice(Array(i)))
+                    m.toSeq.flatMap { case (k, v) =>
+                      evalMapEntry(tv.body, tv.keyBinder, tv.valueBinder, k, v, rowColumns, lambdaScope)
+                        .map(nv => Some(k -> nv))
+                        .toOption
+                    }.flatten.toMap
+                  case _ => null // scalafix:ok DisableSyntax.null
+                }
+              },
+              mapCol.nullSet
+            )
+          }
+
+        case mzw: Expr.MapZipWith[Row, _, _, _, _] =>
+          val leftType = inferExprColumnType(mzw.left, columns)
+          val rightType = inferExprColumnType(mzw.right, columns)
+          for {
+            leftCol <- evalColumn(mzw.left, columns, leftType)(using lambdaScope)
+            rightCol <- evalColumn(mzw.right, columns, rightType)(using lambdaScope)
+          } yield {
+            Column.any(
+              Array.tabulate[Any | Null](rowCount) { i =>
+                if (leftCol.isNull(RowIndex(i)) || rightCol.isNull(RowIndex(i))) null // scalafix:ok DisableSyntax.null
+                else {
+                  val lOpt: Option[Map[?, ?]] = leftCol.getValue(i) match {
+                    case m: Map[?, ?] => Some(m); case _ => None
+                  }
+                  val rOpt: Option[Map[?, ?]] = rightCol.getValue(i) match {
+                    case m: Map[?, ?] => Some(m); case _ => None
+                  }
+                  (lOpt, rOpt) match {
+                    case (Some(lm), Some(rm)) =>
+                      val rowColumns = columns.map(_.slice(Array(i)))
+                      val lMap: Map[Any, Any] = lm.toSeq.map(kv => (kv._1: Any, kv._2: Any)).toMap
+                      val rMap: Map[Any, Any] = rm.toSeq.map(kv => (kv._1: Any, kv._2: Any)).toMap
+                      val keys: Seq[Any] = (lMap.keys.toSeq ++ rMap.keys.toSeq).distinct
+                      keys.flatMap { k =>
+                        val v1: Option[Any] = lMap.get(k)
+                        val v2: Option[Any] = rMap.get(k)
+                        val scope2 = lambdaScope
+                          .updated(mzw.keyBinder, elementColumn(Vector(k)))
+                          .updated(mzw.leftBinder, optionElementColumn(Vector(v1.orNull)))
+                          .updated(mzw.rightBinder, optionElementColumn(Vector(v2.orNull)))
+                        evalColumn(mzw.body, rowColumns, ColumnType.AnyType)(using scope2)
+                          .map(_.getValue(0))
+                          .toOption
+                          .map(k -> _)
+                      }.toMap
+                    case _ => Map.empty
+                  }
+                }
+              },
+              leftCol.nullSet | rightCol.nullSet
+            )
+          }
+
         case md: Expr.Md5[Row] =>
           vectorizedStringHash(md.expr, columns)("MD5")
 
@@ -4242,6 +4373,24 @@ object ExprInterpreter {
 
   /** The padding value for the shorter side of a zip: Spark binds null to the overhang. */
   private def zipPadding(): Any | Null = null // scalafix:ok DisableSyntax.null
+
+  /** Evaluate a per-entry map lambda body with key and value bindings, returning the body's
+    * single-row value. Used by the map family; errors propagate to the caller.
+    */
+  private def evalMapEntry[Row](
+    body: Expr[Row, ?],
+    keyBinder: Binder[?],
+    valueBinder: Binder[?],
+    key: Any,
+    value: Any,
+    rowColumns: Vector[Column[?]],
+    lambdaScope: LambdaScope
+  ): Either[ExecutionError, Any | Null] = {
+    val scope2 = lambdaScope
+      .updated(keyBinder, elementColumn(Vector(key)))
+      .updated(valueBinder, elementColumn(Vector(value)))
+    evalColumn(body, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+  }
 
   /** An Option-boxed column of the given flat values, used as a lambda binding whose binder is
     * typed `Option[A]` (zip_with padding, map_zip_with missing keys). Option-typed columns store

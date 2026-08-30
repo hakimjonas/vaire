@@ -555,6 +555,86 @@ object ExprToColumn {
           }
         }
 
+      case mf: Expr.MapFilter[Row, _, _] =>
+        convert(mf.map).flatMap { case (m, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = map_filter(
+            m,
+            (k: SparkColumn, v: SparkColumn) =>
+              convert(mf.body)(using scope.updated(mf.keyBinder, k).updated(mf.valueBinder, v)).map { case (c, _) => c }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(true)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
+      case tk: Expr.TransformKeys[Row, _, _, _] =>
+        convert(tk.map).flatMap { case (m, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = transform_keys(
+            m,
+            (k: SparkColumn, v: SparkColumn) =>
+              convert(tk.body)(using scope.updated(tk.keyBinder, k).updated(tk.valueBinder, v)).map { case (c, _) => c }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
+      case tv: Expr.TransformValues[Row, _, _, _] =>
+        convert(tv.map).flatMap { case (m, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = transform_values(
+            m,
+            (k: SparkColumn, v: SparkColumn) =>
+              convert(tv.body)(using scope.updated(tv.keyBinder, k).updated(tv.valueBinder, v)).map { case (c, _) => c }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
+      case mzw: Expr.MapZipWith[Row, _, _, _, _] =>
+        convert(mzw.left).flatMap { case (l, _) =>
+          convert(mzw.right).flatMap { case (r, _) =>
+            val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+            val result = map_zip_with(
+              l,
+              r,
+              (k: SparkColumn, v1: SparkColumn, v2: SparkColumn) =>
+                convert(mzw.body)(using
+                  scope
+                    .updated(mzw.keyBinder, k)
+                    .updated(mzw.leftBinder, v1)
+                    .updated(mzw.rightBinder, v2)
+                ).map { case (c, _) => c }
+                  .fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+            )
+            failure.get().toLeft((result, ColumnType.AnyType))
+          }
+        }
+
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
       case s2: Expr.Sha2[Row] => convertUnary(s2.expr, sha2(_, s2.bitLength), ColumnType.StringType)

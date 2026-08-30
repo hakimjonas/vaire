@@ -18,16 +18,16 @@ import net.ghoula.strongbow.prelude.*
   */
 class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  case class Doc(xs: Seq[Int], ys: Seq[Int], c: Int)
+  case class Doc(xs: Seq[Int], ys: Seq[Int], c: Int, m: Map[String, Int])
   given Schema[Doc] = Schema.derived
 
   private lazy val base: DataFrame = spark.sql("""
       SELECT inline(array(
-        struct(array(1, 2, 3), array(10, 20), 10),
-        struct(array(4, 5), array(30, 40, 50), 20),
-        struct(array(), array(60), 30),
-        struct(null, array(70), 40)
-      )) AS (xs_value, ys_value, c_value)
+        struct(array(1, 2, 3), array(10, 20), 10, map('a', 1, 'b', 2, 'c', 3)),
+        struct(array(4, 5), array(30, 40, 50), 20, map('x', 10)),
+        struct(array(), array(60), 30, map()),
+        struct(null, array(70), 40, null)
+      )) AS (xs_value, ys_value, c_value, m_value)
     """)
 
   private lazy val materialized = {
@@ -38,6 +38,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
   private def xsCell: Expr[Doc, Seq[Int]] = Expr.cell("xs_value", ColumnIndex(0))
   private def ysCell: Expr[Doc, Seq[Int]] = Expr.cell("ys_value", ColumnIndex(1))
   private def cCell: Expr[Doc, Int] = Expr.cell("c_value", ColumnIndex(2))
+  private def mCell: Expr[Doc, Map[String, Int]] = Expr.cell("m_value", ColumnIndex(3))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],
@@ -166,6 +167,58 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         Seq(11, 22, 3),
         Seq(34, 45, 50),
         Seq(60),
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
+
+  "map_filter" should "keep entries whose predicate holds on both backends" in {
+    checkParity(
+      mCell.mapFilter((_, v) => v > Expr.const(1)),
+      ColumnType.AnyType,
+      Vector(
+        Map("b" -> 2, "c" -> 3),
+        Map("x" -> 10),
+        Map.empty,
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
+
+  "transform_keys" should "transform map keys on both backends" in {
+    checkParity(
+      mCell.transformKeys((k, _) => k ++ Expr.const("_v")),
+      ColumnType.AnyType,
+      Vector(
+        Map("a_v" -> 1, "b_v" -> 2, "c_v" -> 3),
+        Map("x_v" -> 10),
+        Map.empty,
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
+
+  "transform_values" should "transform map values on both backends" in {
+    checkParity(
+      mCell.transformValues((_, v) => v * Expr.const(10)),
+      ColumnType.AnyType,
+      Vector(
+        Map("a" -> 10, "b" -> 20, "c" -> 30),
+        Map("x" -> 100),
+        Map.empty,
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
+
+  "map_zip_with" should "merge two maps with null binders for missing keys on both backends" in {
+    checkParity(
+      mCell.mapZipWith(mCell)((_, v1, v2) => v1.getOrElse(0) + v2.getOrElse(0)),
+      ColumnType.AnyType,
+      Vector(
+        Map("a" -> 2, "b" -> 4, "c" -> 6),
+        Map("x" -> 20),
+        Map.empty,
         null // scalafix:ok DisableSyntax.null
       )
     )

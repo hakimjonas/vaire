@@ -481,4 +481,70 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     val expr = leftCell.zipWith(rightCell)((x, y) => x.getOrElse(0) + y.getOrElse(0))
     eval(expr, columns, 0).map(v => v == SqlNull.value) shouldBe Right(true)
   }
+
+  private val hofMapData: Array[Any] = Array(
+    Map("a" -> 1, "b" -> 2, "c" -> 3),
+    Map("x" -> 10),
+    Map.empty[String, Int]
+  )
+  private val hofMapCol = Column.any(hofMapData)
+  private val mapCell2 = Expr.Cell[Any, Map[String, Int]]("m", ColumnIndex(0))
+  private val hofMapColumns = Vector(hofMapCol)
+
+  "MapFilter" should "keep entries whose predicate holds" in {
+    val expr = mapCell2.mapFilter((_, v) => v > Expr.const(1))
+    val results = (0 until 3).map(i => eval(expr, hofMapColumns, i))
+    results shouldBe Seq(Right(Map("b" -> 2, "c" -> 3)), Right(Map("x" -> 10)), Right(Map.empty))
+  }
+
+  it should "map null maps to null" in {
+    val data: Array[Any] = Array(SqlNull.value)
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Map[String, Int]]("m", ColumnIndex(0))
+    val expr = cell.mapFilter((_, v) => v > Expr.const(1))
+    eval(expr, Vector(col), 0).map(v => v == SqlNull.value) shouldBe Right(true)
+  }
+
+  "TransformKeys" should "transform map keys" in {
+    val expr = mapCell2.transformKeys((k, _) => k ++ Expr.const("_v"))
+    val results = (0 until 3).map(i => eval(expr, hofMapColumns, i))
+    results shouldBe Seq(
+      Right(Map("a_v" -> 1, "b_v" -> 2, "c_v" -> 3)),
+      Right(Map("x_v" -> 10)),
+      Right(Map.empty)
+    )
+  }
+
+  it should "fail on duplicate transformed keys" in {
+    val expr = mapCell2.transformKeys((_, _) => Expr.const("same"))
+    val result = eval(expr, hofMapColumns, 0)
+    result.isLeft shouldBe true
+  }
+
+  "TransformValues" should "transform map values" in {
+    val expr = mapCell2.transformValues((_, v) => v * Expr.const(10))
+    val results = (0 until 3).map(i => eval(expr, hofMapColumns, i))
+    results shouldBe Seq(
+      Right(Map("a" -> 10, "b" -> 20, "c" -> 30)),
+      Right(Map("x" -> 100)),
+      Right(Map.empty)
+    )
+  }
+
+  it should "reference keys in the body" in {
+    val expr = mapCell2.transformValues((_, v) => v + Expr.const(100))
+    eval(expr, hofMapColumns, 1) shouldBe Right(Map("x" -> 110))
+  }
+
+  "MapZipWith" should "merge two maps with null binders for missing keys" in {
+    val leftData: Array[Any] = Array(Map("a" -> 1, "b" -> 2))
+    val rightData: Array[Any] = Array(Map("b" -> 20, "c" -> 30))
+    val leftCol = Column.any(leftData)
+    val rightCol = Column.any(rightData)
+    val leftCell = Expr.Cell[Any, Map[String, Int]]("l", ColumnIndex(0))
+    val rightCell = Expr.Cell[Any, Map[String, Int]]("r", ColumnIndex(1))
+    val columns = Vector(leftCol, rightCol)
+    val expr = leftCell.mapZipWith(rightCell)((_, v1, v2) => v1.getOrElse(0) + v2.getOrElse(0))
+    eval(expr, columns, 0) shouldBe Right(Map("a" -> 1, "b" -> 22, "c" -> 30))
+  }
 }

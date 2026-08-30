@@ -498,6 +498,40 @@ object ExprToColumn {
           failure.get().toLeft((result, ColumnType.BooleanType))
         }
 
+      case ag: Expr.Aggregate[Row, _, _] =>
+        convert(ag.array).flatMap { case (arr, _) =>
+          convert(ag.zero).flatMap { case (zero, _) =>
+            val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+            val merged = (acc: SparkColumn, elem: SparkColumn) =>
+              convert(ag.merge)(using scope.updated(ag.accBinder, acc).updated(ag.elemBinder, elem)).map {
+                case (c, _) => c
+              }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+            val resultE = ag.finish match {
+              case None =>
+                Right((aggregate(arr, zero, merged), ColumnType.AnyType))
+              case Some((finishBinder, finishBody)) =>
+                val finished = (acc: SparkColumn) =>
+                  convert(finishBody)(using scope.updated(finishBinder, acc)).map { case (c, _) => c }
+                    .fold(
+                      { err =>
+                        failure.set(Some(err))
+                        lit(0)
+                      },
+                      identity
+                    )
+                Right((aggregate(arr, zero, merged, finished), ColumnType.AnyType))
+            }
+            resultE.flatMap(r => failure.get().toLeft(r))
+          }
+        }
+
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
       case s2: Expr.Sha2[Row] => convertUnary(s2.expr, sha2(_, s2.bitLength), ColumnType.StringType)

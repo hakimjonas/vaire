@@ -1275,6 +1275,51 @@ object ExprInterpreter {
         case fa: Expr.ForAll[Row, _] =>
           existsForAllArm(fa.array, fa.binder, fa.body, lambdaScope, columns, isExists = false)
 
+        case ag: Expr.Aggregate[Row, _, _] =>
+          val arrType = inferExprColumnType(ag.array, columns)
+          evalColumn(ag.array, columns, arrType).flatMap { arrCol =>
+            val (flatElems, _, offsets, rowNulls) = flatArrayLayout(arrCol, arrCol.length)
+            val n = arrCol.length
+            evalColumn(ag.zero, columns, ColumnType.AnyType)(using lambdaScope).flatMap { zeroCol =>
+              val outNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
+              val out = new Array[Any | Null](n)
+              val error = (0 until n).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
+                err match {
+                  case some @ Some(_) => some
+                  case None =>
+                    if (rowNulls.contains(i)) None // result stays null
+                    else {
+                      // Outer cells are constant within the row: slice them to length 1 once.
+                      val rowColumns = columns.map(_.slice(Array(i)))
+                      val merged = (offsets(i) until offsets(i + 1)).foldLeft[Either[ExecutionError, Any | Null]](
+                        Right(zeroCol.getValue(i))
+                      ) { (accE, j) =>
+                        accE.flatMap { acc =>
+                          val scope2 = lambdaScope
+                            .updated(ag.accBinder, elementColumn(Vector(acc)))
+                            .updated(ag.elemBinder, elementColumn(Vector(flatElems(j))))
+                          evalColumn(ag.merge, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+                        }
+                      }
+                      val finished = merged.flatMap { acc =>
+                        ag.finish match {
+                          case None => Right(acc)
+                          case Some((finishBinder, finishBody)) =>
+                            val scope2 = lambdaScope.updated(finishBinder, elementColumn(Vector(acc)))
+                            evalColumn(finishBody, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+                        }
+                      }
+                      finished match {
+                        case Right(v) => out(i) = v; None
+                        case Left(e) => Some(e)
+                      }
+                    }
+                }
+              }
+              error.toLeft(Column.any(out, BitSet.empty ++ outNulls))
+            }
+          }
+
         case md: Expr.Md5[Row] =>
           vectorizedStringHash(md.expr, columns)("MD5")
 

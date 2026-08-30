@@ -140,4 +140,28 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
       Vector(false, true, true, null) // scalafix:ok DisableSyntax.null
     )
   }
+
+  "aggregate" should "fold with a merge lambda and apply finish on both backends" in {
+    checkParity(
+      xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x, acc => acc * Expr.const(10)),
+      ColumnType.AnyType,
+      Vector(60, 90, 0, null) // scalafix:ok DisableSyntax.null
+    )
+  }
+
+  it should "fold without finish (Spark reduce semantics) on both backends" in {
+    checkParity(
+      xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x),
+      ColumnType.AnyType,
+      Vector(6, 9, 0, null) // scalafix:ok DisableSyntax.null
+    )
+  }
+
+  it should "let the merge reference outer columns" in {
+    checkParity(
+      xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x + cCell),
+      ColumnType.AnyType,
+      Vector(36, 49, 0, null) // scalafix:ok DisableSyntax.null
+    )
+  }
 }

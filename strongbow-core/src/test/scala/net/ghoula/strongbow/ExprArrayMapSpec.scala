@@ -414,4 +414,41 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
     eval(cell.forall(x => x > Expr.const(1)), Vector(col), 0) shouldBe Right(true)
   }
+
+  "Aggregate" should "fold the array from zero with the merge lambda" in {
+    val expr = arrCell.aggregate(Expr.const(0))((acc, x) => acc + x)
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(6), Right(9), Right(8))
+  }
+
+  it should "apply the finish lambda when given" in {
+    val expr = arrCell.aggregate(Expr.const(0))((acc, x) => acc + x, acc => acc * Expr.const(10))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(60), Right(90), Right(80))
+  }
+
+  it should "bind the accumulator and element in order" in {
+    val expr = arrCell.aggregate(Expr.const(0))((acc, x) => acc * Expr.const(10) + x)
+    eval(expr, arrColumns, 0) shouldBe Right(123)
+  }
+
+  it should "let the merge reference outer columns" in {
+    val addData = Array(1, 2, 3)
+    val addCol = Column.int(addData)
+    val addCell = Expr.Cell[Any, Int]("add", ColumnIndex(1))
+    val columns = Vector(arrCol, addCol)
+    val expr = arrCell.aggregate(Expr.const(0))((acc, x) => acc + x + addCell)
+    val results = (0 until 3).map(i => eval(expr, columns, i))
+    results shouldBe Seq(Right(9), Right(13), Right(20))
+  }
+
+  it should "fold empty arrays to zero and null arrays to null" in {
+    val data: Array[Any] = Array(Seq.empty[Int], SqlNull.value)
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val columns = Vector(col)
+    val expr = cell.aggregate(Expr.const(0))((acc, x) => acc + x)
+    eval(expr, columns, 0) shouldBe Right(0)
+    eval(expr, columns, 1).map(v => v == SqlNull.value) shouldBe Right(true)
+  }
 }

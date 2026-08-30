@@ -44,12 +44,16 @@ object ExprInterpreter {
     * Vectorized: operates on entire arrays instead of row-by-row where possible. For Cell
     * references, returns the column directly (zero work). For arithmetic/comparisons/string ops, It
     * uses while-loops on typed arrays.
+    *
+    * `lambdaScope` carries the lambda-variable bindings of the nearest enclosing higher-order
+    * expression; ordinary arms pass it through unchanged (implicit), and higher-order arms extend
+    * it around body evaluation.
     */
   def evalColumn[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column[?]],
     columnType: ColumnType
-  ): Either[ExecutionError, Column[?]] = {
+  )(implicit lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Column[?]] = {
     if (columns.isEmpty || columns.head.length == 0) {
       Right(Column.empty(columnType))
     } else {
@@ -62,6 +66,13 @@ object ExprInterpreter {
 
         case named: Expr.Named[_, _] =>
           evalColumn(named.expr, columns, columnType)
+
+        case lv: Expr.LambdaVar[Row, _] =>
+          lambdaScope.get(lv.binder) match {
+            case Some(col) => Right(col)
+            case None =>
+              Left(ExecutionError.InvalidValue("Lambda variable used outside its binding expression"))
+          }
 
         case c: Expr.Const[_, _] =>
           c.value match {

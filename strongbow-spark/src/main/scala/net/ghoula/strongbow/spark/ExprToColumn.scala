@@ -50,13 +50,24 @@ object ExprToColumn {
 
   /** Convert a Strongbow Expr to a Spark Column paired with its output ColumnType.
     *
-    * Returns Left for unsupported expressions.
+    * Returns Left for unsupported expressions. `scope` carries the lambda-variable bindings of the
+    * nearest enclosing higher-order expression; ordinary arms pass it through unchanged (implicit),
+    * and higher-order arms extend it around body conversion.
     */
-  def convert[Row, A](expr: Expr[Row, A]): Either[ExecutionError, (SparkColumn, ColumnType)] = {
+  def convert[Row, A](expr: Expr[Row, A])(implicit
+    scope: LambdaColumnScope = LambdaColumnScope.empty
+  ): Either[ExecutionError, (SparkColumn, ColumnType)] = {
     (expr: @unchecked) match {
 
       case cell: Expr.Cell[Row, _] =>
         Right((col(cell.name), ColumnType.AnyType))
+
+      case lv: Expr.LambdaVar[Row, _] =>
+        scope.get(lv.binder) match {
+          case Some(sparkCol) => Right((sparkCol, ColumnType.AnyType))
+          case None =>
+            Left(ExecutionError.InvalidValue("Lambda variable used outside its binding expression"))
+        }
 
       case c: Expr.Const[Row, _] =>
         Right((toLit(c.value), ColumnType.AnyType))

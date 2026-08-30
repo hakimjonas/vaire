@@ -1492,6 +1492,53 @@ object ExprInterpreter {
             )
           }
 
+        case asc: Expr.ArraySortComparator[Row, _] =>
+          val arrType = inferExprColumnType(asc.array, columns)
+          evalColumn(asc.array, columns, arrType).flatMap { arrCol =>
+            val out = new Array[Any | Null](rowCount)
+            val outNulls = scala.collection.mutable.BitSet.empty ++ arrCol.nullSet
+            val error = (0 until rowCount).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
+              err match {
+                case some @ Some(_) => some
+                case None =>
+                  arrCol.getValue(i) match {
+                    case es: Seq[?] =>
+                      val rowColumns = columns.map(_.slice(Array(i)))
+                      val cmpError = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+                      def compare(a: Any | Null, b: Any | Null): Int = {
+                        val scope2 = lambdaScope
+                          .updated(asc.leftBinder, elementColumn(Vector(a)))
+                          .updated(asc.rightBinder, elementColumn(Vector(b)))
+                        evalColumn(asc.body, rowColumns, ColumnType.AnyType)(using scope2) match {
+                          case Right(col) =>
+                            if (col.isNull(RowIndex(0))) {
+                              // Spark fails the query when the comparator returns null
+                              cmpError.set(Some(ExecutionError.InvalidValue("array_sort comparator returned null")))
+                              0
+                            } else
+                              col.getValue(0) match {
+                                case iv: Int => iv
+                                case _ =>
+                                  cmpError.set(Some(ExecutionError.InvalidValue("array_sort comparator returned null")))
+                                  0
+                              }
+                          case Left(e) => cmpError.set(Some(e)); 0
+                        }
+                      }
+                      val sorted = es.sortWith((a, b) => compare(a, b) < 0)
+                      cmpError.get() match {
+                        case Some(e) => Some(e)
+                        case None => out(i) = sorted; None
+                      }
+                    case _ =>
+                      outNulls += i
+                      None
+                  }
+              }
+            }
+            error.toLeft(Column.any(out, BitSet.empty ++ outNulls))
+          }
+
         case md: Expr.Md5[Row] =>
           vectorizedStringHash(md.expr, columns)("MD5")
 

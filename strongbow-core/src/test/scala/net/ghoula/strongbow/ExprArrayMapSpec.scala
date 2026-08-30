@@ -536,6 +536,36 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     eval(expr, hofMapColumns, 1) shouldBe Right(Map("x" -> 110))
   }
 
+  "ArraySortComparator" should "sort with an ascending comparator lambda" in {
+    val expr = arrCell.arraySortBy((l, r) => l - r)
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(Seq(1, 2, 3)), Right(Seq(4, 5)), Right(Seq(1, 2, 2, 3)))
+  }
+
+  it should "sort with a descending comparator lambda" in {
+    val expr = arrCell.arraySortBy((l, r) => r - l)
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(Seq(3, 2, 1)), Right(Seq(5, 4)), Right(Seq(3, 2, 2, 1)))
+  }
+
+  it should "fail when the comparator returns null" in {
+    val nullData = Array(5, 0, 0)
+    val nullCol = Column.int(nullData, scala.collection.immutable.BitSet(1, 2))
+    val nullCell = Expr.Cell[Any, Int]("n", ColumnIndex(1))
+    val columns = Vector(arrCol, nullCol)
+    val expr = arrCell.arraySortBy((_, r) => r - nullCell)
+    val result = eval(expr, columns, 0)
+    result.isLeft shouldBe true
+  }
+
+  it should "map null arrays to null" in {
+    val data: Array[Any] = Array(SqlNull.value)
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val expr = cell.arraySortBy((l, r) => l - r)
+    eval(expr, Vector(col), 0).map(v => v == SqlNull.value) shouldBe Right(true)
+  }
+
   "MapZipWith" should "merge two maps with null binders for missing keys" in {
     val leftData: Array[Any] = Array(Map("a" -> 1, "b" -> 2))
     val rightData: Array[Any] = Array(Map("b" -> 20, "c" -> 30))

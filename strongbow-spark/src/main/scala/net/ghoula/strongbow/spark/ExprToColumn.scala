@@ -635,6 +635,26 @@ object ExprToColumn {
           }
         }
 
+      case asc: Expr.ArraySortComparator[Row, _] =>
+        convert(asc.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = array_sort(
+            arr,
+            (le: SparkColumn, re: SparkColumn) =>
+              convert(asc.body)(using scope.updated(asc.leftBinder, le).updated(asc.rightBinder, re)).map {
+                case (c, _) => c
+              }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
       case s2: Expr.Sha2[Row] => convertUnary(s2.expr, sha2(_, s2.bitLength), ColumnType.StringType)

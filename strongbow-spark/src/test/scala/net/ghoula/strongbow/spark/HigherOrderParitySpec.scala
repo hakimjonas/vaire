@@ -224,6 +224,19 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     )
   }
 
+  "array_sort" should "sort with a comparator lambda on both backends" in {
+    checkParity(
+      xsCell.arraySortBy((l, r) => r - l),
+      ColumnType.AnyType,
+      Vector(
+        Seq(3, 2, 1),
+        Seq(5, 4),
+        Seq.empty,
+        null // scalafix:ok DisableSyntax.null
+      )
+    )
+  }
+
   it should "let the merge reference outer columns" in {
     checkParity(
       xsCell.aggregate(Expr.const[Doc, Int](0))((acc, x) => acc + x + cCell),

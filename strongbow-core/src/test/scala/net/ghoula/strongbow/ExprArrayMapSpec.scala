@@ -277,4 +277,54 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     mapCell.mapKeys.outputType shouldBe Some(ColumnType.AnyType)
     mapCell.mapValues.outputType shouldBe Some(ColumnType.AnyType)
   }
+
+  it should "return AnyType for lambda-family expressions and BooleanType for predicates" in {
+    arrCell.transform(x => x + Expr.const(1)).outputType shouldBe Some(ColumnType.AnyType)
+    arrCell.filter(x => x > Expr.const(1)).outputType shouldBe Some(ColumnType.AnyType)
+    arrCell.exists(x => x > Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+    arrCell.forall(x => x > Expr.const(1)).outputType shouldBe Some(ColumnType.BooleanType)
+  }
+
+  "Transform" should "apply a lambda to every element" in {
+    val expr = arrCell.transform(x => x + Expr.const(1))
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(Seq(2, 3, 4)), Right(Seq(5, 6)), Right(Seq(2, 3, 3, 4)))
+  }
+
+  it should "bind the element index in the two-argument form" in {
+    val expr = arrCell.transform((x, i) => x + i)
+    val results = (0 until 3).map(i => eval(expr, arrColumns, i))
+    results shouldBe Seq(Right(Seq(1, 3, 5)), Right(Seq(4, 6)), Right(Seq(1, 3, 4, 6)))
+  }
+
+  it should "let the body reference outer columns" in {
+    val addData = Array(10, 20, 30)
+    val addCol = Column.int(addData)
+    val addCell = Expr.Cell[Any, Int]("add", ColumnIndex(1))
+    val columns = Vector(arrCol, addCol)
+    val expr = arrCell.transform(x => x + addCell)
+    val results = (0 until 3).map(i => eval(expr, columns, i))
+    results shouldBe Seq(Right(Seq(11, 12, 13)), Right(Seq(24, 25)), Right(Seq(31, 32, 32, 33)))
+  }
+
+  it should "support nested transforms" in {
+    val nestedData: Array[Any] = Array(Seq(Seq(1, 2), Seq(3)), Seq(Seq(4)))
+    val nestedCol = Column.any(nestedData)
+    val nestedCell = Expr.Cell[Any, Seq[Seq[Int]]]("nested", ColumnIndex(0))
+    val columns = Vector(nestedCol)
+    val expr = nestedCell.transform(xs => xs.transform(y => y * Expr.const(2)))
+    val results = (0 until 2).map(i => eval(expr, columns, i))
+    results shouldBe Seq(Right(Seq(Seq(2, 4), Seq(6))), Right(Seq(Seq(8))))
+  }
+
+  it should "map null arrays to null and empty arrays to empty" in {
+    val data: Array[Any] = Array(Seq(1, 2), SqlNull.value, Seq.empty[Int])
+    val col = Column.any(data)
+    val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
+    val columns = Vector(col)
+    val expr = cell.transform(x => x + Expr.const(1))
+    eval(expr, columns, 0) shouldBe Right(Seq(2, 3))
+    eval(expr, columns, 1).map(v => v == SqlNull.value) shouldBe Right(true)
+    eval(expr, columns, 2) shouldBe Right(Seq.empty)
+  }
 }

@@ -7,7 +7,7 @@ import scala.collection.immutable.BitSet
 
 import net.ghoula.strongbow.column.{Column, ColumnType}
 import net.ghoula.strongbow.errors.ExecutionError
-import net.ghoula.strongbow.expr.Expr
+import net.ghoula.strongbow.expr.{Binder, Expr}
 import net.ghoula.strongbow.types.{Date, DayTimeInterval, RowIndex, Time, YearMonthInterval}
 
 /** Zero-cast expression interpreter using typed columnar storage.
@@ -53,7 +53,7 @@ object ExprInterpreter {
     expr: Expr[Row, A],
     columns: Vector[Column[?]],
     columnType: ColumnType
-  )(implicit lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Column[?]] = {
     if (columns.isEmpty || columns.head.length == 0) {
       Right(Column.empty(columnType))
     } else {
@@ -1217,6 +1217,22 @@ object ExprInterpreter {
                 case _ => Map.empty
               }
             })
+          }
+
+        case t: Expr.Transform[Row, _, _] =>
+          val arrType = inferExprColumnType(t.array, columns)
+          evalColumn(t.array, columns, arrType).flatMap { arrCol =>
+            val (flatElems, rowOf, offsets, rowNulls) = flatArrayLayout(arrCol, arrCol.length)
+            val total = flatElems.length
+            val binds: Vector[(Binder[?], Column[?])] =
+              (t.binder, elementColumn(flatElems): Column[?]) +: t.indexBinder.toVector.map { ib =>
+                (ib, Column.int(Array.tabulate(total)(j => j - offsets(rowOf(j)))))
+              }
+            val scope = binds.foldLeft(lambdaScope)((s, b) => s.updated(b._1, b._2))
+            evalColumn(t.body, columns.map(_.slice(rowOf)), ColumnType.AnyType)(using scope).map { bodyCol =>
+              val flat = Array.tabulate[Any | Null](total)(j => bodyCol.getValue(j))
+              Column.array(Column.any(flat), offsets, rowNulls)
+            }
           }
 
         case md: Expr.Md5[Row] =>
@@ -2711,7 +2727,7 @@ object ExprInterpreter {
     columns: Vector[Column[?]],
     rowCount: Int,
     isMax: Boolean
-  ): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Column[?]] = {
     val colResults = exprs.map(e => evalColumn(e, columns, inferExprColumnType(e, columns)))
     val firstErr = colResults.collectFirst { case Left(err) => err }
     firstErr match {
@@ -2749,7 +2765,7 @@ object ExprInterpreter {
     columns: Vector[Column[?]],
     rowCount: Int,
     isMax: Boolean
-  ): Either[ExecutionError, Column[?]] =
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Column[?]] =
     evalColumn(arrExpr, columns, ColumnType.AnyType).map { col =>
       Column.any(
         Array.tabulate[Any | Null](rowCount) { i =>
@@ -2777,7 +2793,7 @@ object ExprInterpreter {
     right: Expr[Row, Long],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Long, Long) => Option[Long]): Either[ExecutionError, Column[?]] =
+  )(using lambdaScope: LambdaScope)(op: (Long, Long) => Option[Long]): Either[ExecutionError, Column[?]] =
     for {
       leftCol <- evalColumn(left, columns, ColumnType.LongType)
       rightCol <- evalColumn(right, columns, ColumnType.LongType)
@@ -2800,7 +2816,7 @@ object ExprInterpreter {
     intExpr: Expr[Row, Int],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (String, Int) => String): Either[ExecutionError, Column[?]] =
+  )(using lambdaScope: LambdaScope)(op: (String, Int) => String): Either[ExecutionError, Column[?]] =
     for {
       strCol <- evalColumn(strExpr, columns, ColumnType.StringType)
       intCol <- evalColumn(intExpr, columns, ColumnType.IntType)
@@ -2824,7 +2840,7 @@ object ExprInterpreter {
     columns: Vector[Column[?]],
     rowCount: Int,
     isLpad: Boolean
-  ): Either[ExecutionError, Column[?]] =
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Column[?]] =
     for {
       strCol <- evalColumn(strExpr, columns, ColumnType.StringType)
       lenCol <- evalColumn(lenExpr, columns, ColumnType.IntType)
@@ -2984,7 +3000,7 @@ object ExprInterpreter {
     right: Expr[Row, Int],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Int, Int) => Int): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope)(op: (Int, Int) => Int): Either[ExecutionError, Column[?]] = {
     for {
       leftCol <- evalColumn(left, columns, ColumnType.IntType)
       rightCol <- evalColumn(right, columns, ColumnType.IntType)
@@ -3021,7 +3037,7 @@ object ExprInterpreter {
     right: Expr[Row, Long],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Long, Long) => Long): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope)(op: (Long, Long) => Long): Either[ExecutionError, Column[?]] = {
     for {
       leftCol <- evalColumn(left, columns, ColumnType.LongType)
       rightCol <- evalColumn(right, columns, ColumnType.LongType)
@@ -3047,7 +3063,7 @@ object ExprInterpreter {
     right: Expr[Row, Double],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(op: (Double, Double) => Double): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope)(op: (Double, Double) => Double): Either[ExecutionError, Column[?]] = {
     for {
       leftCol <- evalColumn(left, columns, ColumnType.DoubleType)
       rightCol <- evalColumn(right, columns, ColumnType.DoubleType)
@@ -3073,6 +3089,8 @@ object ExprInterpreter {
     right: Expr[Row, A],
     columns: Vector[Column[?]],
     rowCount: Int
+  )(using
+    lambdaScope: LambdaScope
   )(
     intCmp: (Int, Int) => Boolean,
     longCmp: (Long, Long) => Boolean,
@@ -3116,7 +3134,7 @@ object ExprInterpreter {
     right: Expr[Row, A],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(cmp: (Any, Any) => Boolean): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope)(cmp: (Any, Any) => Boolean): Either[ExecutionError, Column[?]] = {
     val opType = inferExprColumnType(left, columns)
     for {
       leftCol <- evalColumn(left, columns, opType)
@@ -3140,7 +3158,7 @@ object ExprInterpreter {
     expr: Expr[Row, Double],
     columns: Vector[Column[?]],
     rowCount: Int
-  )(op: Double => Double): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope)(op: Double => Double): Either[ExecutionError, Column[?]] = {
     evalColumn(expr, columns, ColumnType.DoubleType).map {
       case Column.DoubleColumn(data, nulls) =>
         Column.double(Array.tabulate(rowCount)(i => op(data(i))), nulls)
@@ -3152,7 +3170,7 @@ object ExprInterpreter {
   private def vectorizedStringHash[Row](
     expr: Expr[Row, String],
     columns: Vector[Column[?]]
-  )(algorithm: String): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope)(algorithm: String): Either[ExecutionError, Column[?]] = {
     val digest = java.security.MessageDigest.getInstance(algorithm).nn
     evalColumn(expr, columns, ColumnType.StringType).map {
       case sc: Column.StringColumn =>
@@ -3176,7 +3194,7 @@ object ExprInterpreter {
   def evalAggregation[Row, A](
     expr: Expr[Row, A],
     columns: Vector[Column[?]]
-  ): Either[ExecutionError, Any] = {
+  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Any] = {
     if (columns.isEmpty || columns.head.length == 0) {
       (expr: @unchecked) match {
         case _: Expr.Count[Row] => Right(0L)
@@ -3557,7 +3575,7 @@ object ExprInterpreter {
   private def aggregateDoubleExpr[Row](
     subExpr: Expr[Row, Double],
     columns: Vector[Column[?]]
-  )(f: (Array[Double], BitSet) => Double): Either[ExecutionError, Double] = {
+  )(using lambdaScope: LambdaScope)(f: (Array[Double], BitSet) => Double): Either[ExecutionError, Double] = {
     evalColumn(subExpr, columns, ColumnType.DoubleType).map {
       case Column.DoubleColumn(data, nulls) => f(data, nulls)
       case _ => 0.0
@@ -3633,7 +3651,7 @@ object ExprInterpreter {
     xExpr: Expr[Row, Double],
     columns: Vector[Column[?]],
     rowCount: Int
-  ): Either[ExecutionError, Option[RegrStats]] =
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Option[RegrStats]] =
     for {
       yCol <- evalColumn(yExpr, columns, ColumnType.DoubleType)
       xCol <- evalColumn(xExpr, columns, ColumnType.DoubleType)
@@ -3840,7 +3858,7 @@ object ExprInterpreter {
     expr: Expr[Row, ?],
     columns: Vector[Column[?]],
     rowCount: Int
-  ): Either[ExecutionError, Option[Any | Null]] = {
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Option[Any | Null]] = {
     val colType = inferExprColumnType(expr, columns)
     evalColumn(expr, columns, colType).map { col =>
       (0 until rowCount).find(i => !col.isNull(RowIndex(i))).map(col.getValue)
@@ -3863,6 +3881,8 @@ object ExprInterpreter {
     rightExpr: Expr[Row, Double],
     columns: Vector[Column[?]],
     minCount: Int
+  )(using
+    lambdaScope: LambdaScope
   )(f: (Array[Double], Array[Double], BitSet, Double, Double, Int) => Double): Either[ExecutionError, Double] =
     for {
       leftCol <- evalColumn(leftExpr, columns, ColumnType.DoubleType)
@@ -3892,7 +3912,7 @@ object ExprInterpreter {
     expr: Expr[Row, ?],
     columns: Vector[Column[?]],
     rowCount: Int
-  ): Either[ExecutionError, Long] = {
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Long] = {
     val colType = inferExprColumnType(expr, columns)
     evalColumn(expr, columns, colType).map { col =>
       (0 until rowCount).filter(i => !col.isNull(RowIndex(i))).map(col.getValue).toSet.size.toLong
@@ -4018,6 +4038,79 @@ object ExprInterpreter {
   private def jsonTupleNulls(n: Int): Vector[Any | Null] =
     Vector.fill(n)(null) // scalafix:ok DisableSyntax.null
 
+  /** Flat element layout of an array-valued column: every non-null row's elements in order, the
+    * mapping from flat position back to row position, per-row element boundaries, and the set of
+    * rows whose array is null (or not an array). Rows with empty arrays contribute no flat
+    * positions.
+    */
+  private def flatArrayLayout(
+    arrCol: Column[?],
+    n: Int
+  ): (Vector[Any | Null], Array[Int], Array[Int], BitSet) = {
+    val elems = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
+    val rowOf = scala.collection.mutable.ArrayBuffer.empty[Int]
+    val offsets = new Array[Int](n + 1)
+    val rowNulls = scala.collection.mutable.BitSet.empty
+    (0 until n).foreach { i =>
+      if (arrCol.isNull(RowIndex(i))) {
+        rowNulls += i
+        offsets(i + 1) = offsets(i)
+      } else
+        arrCol.getValue(i) match {
+          case es: Seq[?] =>
+            es.foreach { e =>
+              elems += (e: Any | Null)
+              rowOf += i
+            }
+            offsets(i + 1) = offsets(i) + es.length
+          case _ =>
+            rowNulls += i
+            offsets(i + 1) = offsets(i)
+        }
+    }
+    (elems.toVector, rowOf.toArray, offsets, BitSet.empty ++ rowNulls)
+  }
+
+  /** A typed column of the given flat element values, used as a lambda binding.
+    *
+    * Higher-order bodies are evaluated by the same typed arms as ordinary expressions, so the bound
+    * element column must be an IntColumn for `x + 1`-style bodies, not a boxed AnyColumn. The
+    * element runtime type is sampled once per evaluation; null and unclassifiable positions are
+    * recorded in the column's null set with the type's placeholder value.
+    */
+  private def elementColumn(flatElems: Vector[Any | Null]): Column[?] = {
+    val n = flatElems.length
+    def build[T: scala.reflect.ClassTag](wrap: (Array[T], BitSet) => Column[?], zero: T)(
+      pick: Any => Option[T]
+    ): Column[?] = {
+      val nulls = scala.collection.mutable.BitSet.empty
+      val data = Array.tabulate(n) { j =>
+        pick(flatElems(j)) match {
+          case Some(v) => v
+          case None => nulls += j; zero
+        }
+      }
+      wrap(data, BitSet.empty ++ nulls)
+    }
+    flatElems.find(e => Option(e).isDefined) match {
+      case Some(_: Int) => build[Int](Column.int(_, _), 0) { case i: Int => Some(i); case _ => None }
+      case Some(_: Long) => build[Long](Column.long(_, _), 0L) { case l: Long => Some(l); case _ => None }
+      case Some(_: Double) => build[Double](Column.double(_, _), 0.0) { case d: Double => Some(d); case _ => None }
+      case Some(_: Float) => build[Float](Column.float(_, _), 0.0f) { case f: Float => Some(f); case _ => None }
+      case Some(_: Boolean) =>
+        build[Boolean](Column.boolean(_, _), false) { case b: Boolean => Some(b); case _ => None }
+      case Some(_: Short) => build[Short](Column.short(_, _), 0: Short) { case s: Short => Some(s); case _ => None }
+      case Some(_: Byte) => build[Byte](Column.byte(_, _), 0: Byte) { case b: Byte => Some(b); case _ => None }
+      case Some(_: String) =>
+        build[String | Null](Column.string(_, _), null) {
+          case s: String => Some(s); case _ => None
+        } // scalafix:ok DisableSyntax.null
+      case Some(_: java.time.LocalDate) =>
+        build[Int](Column.date(_, _), 0) { case d: java.time.LocalDate => Some(d.toEpochDay.toInt); case _ => None }
+      case _ => Column.any(Array.tabulate[Any | Null](n)(flatElems(_)))
+    }
+  }
+
   private def walkJsonPath(value: JsonValue, segments: List[String]): Option[JsonValue] = {
     segments match {
       case Nil => Some(value)
@@ -4036,7 +4129,7 @@ object ExprInterpreter {
     columns: Vector[Column[?]],
     rowCount: Int,
     tryMode: Boolean
-  ): Either[ExecutionError, Column[?]] = {
+  )(using lambdaScope: LambdaScope): Either[ExecutionError, Column[?]] = {
     val innerType = inferExprColumnType(expr, columns)
     evalColumn(expr, columns, innerType).flatMap { col =>
       parseVariantPath(path) match {

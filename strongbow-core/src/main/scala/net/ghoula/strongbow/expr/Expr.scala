@@ -35,8 +35,11 @@ import net.ghoula.strongbow.types.{
   * ([[Expr.transform]], [[Expr.aggregate]], ...); a `LambdaVar` is evaluated against the binding
   * established by the nearest enclosing higher-order expression, so unbound use fails evaluation
   * rather than compiling away.
+  *
+  * Identity semantics (reference equality) are load-bearing: nested and sibling lambdas must not
+  * collide in the binding scope, so Binder is a plain class, not a case class.
   */
-final case class Binder[A] private[expr] ()
+final class Binder[A] private[expr] ()
 
 enum Expr[Row, +A] {
   case Cell[Row, A](name: String, index: ColumnIndex) extends Expr[Row, A]

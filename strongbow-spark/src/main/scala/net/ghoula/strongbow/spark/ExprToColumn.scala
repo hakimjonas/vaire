@@ -21,7 +21,7 @@ object ExprToColumn {
     right: Expr[Row, B],
     op: (SparkColumn, SparkColumn) => SparkColumn,
     resultType: ColumnType
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] =
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     for {
       (l, _) <- convert(left)
       (r, _) <- convert(right)
@@ -31,7 +31,7 @@ object ExprToColumn {
     expr: Expr[Row, A],
     op: SparkColumn => SparkColumn,
     resultType: ColumnType
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] =
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     convert(expr).map { case (sparkCol, _) => (op(sparkCol), resultType) }
 
   /** Spark path for a literal json_tuple key. Spark's JsonPathParser has no escape mechanism: the
@@ -54,7 +54,7 @@ object ExprToColumn {
     * nearest enclosing higher-order expression; ordinary arms pass it through unchanged (implicit),
     * and higher-order arms extend it around body conversion.
     */
-  def convert[Row, A](expr: Expr[Row, A])(implicit
+  def convert[Row, A](expr: Expr[Row, A])(using
     scope: LambdaColumnScope = LambdaColumnScope.empty
   ): Either[ExecutionError, (SparkColumn, ColumnType)] = {
     (expr: @unchecked) match {
@@ -385,6 +385,45 @@ object ExprToColumn {
       case mfa: Expr.MapFromArrays[Row, _, _] =>
         convertBinary(mfa.keys, mfa.values, map_from_arrays, ColumnType.AnyType)
       case mc: Expr.MapConcat[Row, _, _] => convertBinary(mc.left, mc.right, map_concat(_, _), ColumnType.AnyType)
+
+      case t: Expr.Transform[Row, _, _] =>
+        convert(t.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val bound: (SparkColumn, SparkColumn) => Either[ExecutionError, SparkColumn] = (elem, idx) => {
+            val scope2 = t.indexBinder match {
+              case Some(ib) => scope.updated(t.binder, elem).updated(ib, idx)
+              case None => scope.updated(t.binder, elem)
+            }
+            convert(t.body)(using scope2).map { case (c, _) => c }
+          }
+          val mapped = t.indexBinder match {
+            case Some(_) =>
+              transform(
+                arr,
+                (elem: SparkColumn, idx: SparkColumn) =>
+                  bound(elem, idx).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+              )
+            case None =>
+              transform(
+                arr,
+                (elem: SparkColumn) =>
+                  bound(elem, lit(0)).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+              )
+          }
+          failure.get().toLeft((mapped, ColumnType.AnyType))
+        }
 
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
@@ -888,7 +927,7 @@ object ExprToColumn {
     exprs: Seq[Expr[Row, ?]],
     f: (Seq[SparkColumn], Seq[ColumnType]) => SparkColumn,
     defaultType: ColumnType
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] = {
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] = {
     val results = exprs.map(convert)
     val firstError = results.collectFirst { case Left(err) => err }
     firstError match {
@@ -907,7 +946,7 @@ object ExprToColumn {
     right: Expr[Row, net.ghoula.strongbow.types.Binary],
     lgNomEntries: Option[Int],
     mode: Option[String]
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] =
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     for {
       (l, _) <- convert(left)
       (r, _) <- convert(right)

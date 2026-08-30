@@ -18,5 +18,5 @@ final case class LambdaColumnScope private[spark] (bindings: Map[Binder[?], Spar
 }
 
 object LambdaColumnScope {
-  given empty: LambdaColumnScope = LambdaColumnScope(Map.empty)
+  val empty: LambdaColumnScope = LambdaColumnScope(Map.empty)
 }

@@ -235,6 +235,8 @@ enum Expr[Row, +A] {
 
   case GetJsonObject[Row](expr: Expr[Row, String], path: String) extends Expr[Row, String]
 
+  case JsonTuple[Row](expr: Expr[Row, String], keys: Vector[String]) extends Expr[Row, Seq[String]]
+
   case TimeToSeconds[Row](expr: Expr[Row, Time]) extends Expr[Row, Decimal]
   case TimeToMillis[Row](expr: Expr[Row, Time]) extends Expr[Row, Long]
   case TimeToMicros[Row](expr: Expr[Row, Time]) extends Expr[Row, Long]
@@ -1362,6 +1364,17 @@ object Expr {
   def jsonObjectKeys[Row](expr: Expr[Row, String], path: String = "$"): Expr[Row, Seq[String]] =
     JsonObjectKeys(expr, path)
 
+  /** Extract the values of the given top-level keys from a JSON object, one element per key.
+    *
+    * Scalar values become their string form, compound values their compact JSON text, and absent
+    * keys or JSON nulls become null elements, in the order of `keys`. Keys are literal top-level
+    * names (no path syntax). The result column is boxed (AnyColumn). The Spark backend maps to
+    * `array(get_json_object(...))` over bracket-quoted key paths, which matches Spark's native
+    * `json_tuple` on all value kinds (the native generator form cannot be nested in expressions).
+    */
+  def jsonTuple[Row](expr: Expr[Row, String], keys: String*): Expr[Row, Seq[String]] =
+    JsonTuple(expr, keys.toVector)
+
   /** Parse a JSON string into T; `schema` is the Spark DDL string for the Spark backend. */
   def fromJson[Row, T](expr: Expr[Row, String], schema: String)(using
     decoder: Decoder[JsonValue, T]
@@ -1424,7 +1437,7 @@ object Expr {
           _: Expr.RTrim[_] | _: Expr.Substring[_] | _: Expr.StringReplace[_] | _: Expr.RegexpReplace[_] |
           _: Expr.RegexpExtract[_] | _: Expr.ConcatWs[_] | _: Expr.CastToString[_, _] =>
         Some(ColumnType.StringType)
-      case _: Expr.StringSplit[_] => Some(ColumnType.AnyType)
+      case _: Expr.StringSplit[_] | _: Expr.JsonTuple[_] => Some(ColumnType.AnyType)
       case _: Expr.Length[_] => Some(ColumnType.IntType)
       case c: Expr.Coalesce[_, _] => c.exprs.headOption.flatMap(_.outputType)
       case g: Expr.GetOrElse[_, _] => g.expr.outputType

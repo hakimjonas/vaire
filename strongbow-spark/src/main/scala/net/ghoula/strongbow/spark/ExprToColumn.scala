@@ -377,6 +377,12 @@ object ExprToColumn {
       case ad: Expr.AesDecrypt[Row] => convertBinary(ad.expr, ad.key, aes_decrypt, ColumnType.StringType)
       case tad: Expr.TryAesDecrypt[Row] => convertBinary(tad.expr, tad.key, try_aes_decrypt, ColumnType.StringType)
       case gjo: Expr.GetJsonObject[Row] => convertUnary(gjo.expr, get_json_object(_, gjo.path), ColumnType.StringType)
+      case jt: Expr.JsonTuple[Row] =>
+        convertUnary(
+          jt.expr,
+          jsonCol => array(jt.keys.map(k => get_json_object(jsonCol, s"$$['$k']"))*),
+          ColumnType.ArrayType(ColumnType.StringType)
+        )
 
       case st: Expr.Struct[Row, _] =>
         val fieldResults = st.fields.map { case (name, fieldExpr, _) =>

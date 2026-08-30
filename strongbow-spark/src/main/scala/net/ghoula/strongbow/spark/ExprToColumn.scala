@@ -34,6 +34,20 @@ object ExprToColumn {
   ): Either[ExecutionError, (SparkColumn, ColumnType)] =
     convert(expr).map { case (sparkCol, _) => (op(sparkCol), resultType) }
 
+  /** Spark path for a literal json_tuple key. Spark's JsonPathParser has no escape mechanism: the
+    * bracket form `$['k']` rejects single quotes, and the dot form `$.k` rejects dots and brackets
+    * — a key containing both kinds of character is unaddressable.
+    */
+  private def jsonTuplePath(k: String): Either[ExecutionError, String] =
+    if (!k.contains('\'') && !k.contains('[')) Right(s"$$['$k']")
+    else if (!k.contains('.') && !k.contains('[')) Right(s"$$.$k")
+    else
+      Left(
+        ExecutionError.UnsupportedOperation(
+          s"json_tuple key cannot be addressed by a Spark get_json_object path: $k"
+        )
+      )
+
   /** Convert a Strongbow Expr to a Spark Column paired with its output ColumnType.
     *
     * Returns Left for unsupported expressions.
@@ -377,6 +391,18 @@ object ExprToColumn {
       case ad: Expr.AesDecrypt[Row] => convertBinary(ad.expr, ad.key, aes_decrypt, ColumnType.StringType)
       case tad: Expr.TryAesDecrypt[Row] => convertBinary(tad.expr, tad.key, try_aes_decrypt, ColumnType.StringType)
       case gjo: Expr.GetJsonObject[Row] => convertUnary(gjo.expr, get_json_object(_, gjo.path), ColumnType.StringType)
+      case jt: Expr.JsonTuple[Row] =>
+        val paths = jt.keys.map(jsonTuplePath)
+        paths.collectFirst { case Left(err) => err } match {
+          case Some(err) => Left(err)
+          case None =>
+            val ps = paths.collect { case Right(p) => p }
+            convertUnary(
+              jt.expr,
+              jsonCol => array(ps.map(p => get_json_object(jsonCol, p))*),
+              ColumnType.ArrayType(ColumnType.StringType)
+            )
+        }
 
       case st: Expr.Struct[Row, _] =>
         val fieldResults = st.fields.map { case (name, fieldExpr, _) =>

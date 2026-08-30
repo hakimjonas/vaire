@@ -162,6 +162,63 @@ class ExprHashEncodingSpec extends AnyFlatSpec with Matchers {
     )
   }
 
+  "JsonTuple" should "extract one element per key in order" in {
+    val jsonData: Array[String | Null] = Array("""{"a":"v","n":42,"b":true}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    eval(Expr.jsonTuple(jsonCell, "a", "n", "b"), jsonColumns, 0) shouldBe Right(
+      Seq("v", "42", "true")
+    )
+  }
+
+  it should "render compound values as compact JSON text" in {
+    val jsonData: Array[String | Null] = Array("""{"o":{"x":1},"r":[1,2]}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    eval(Expr.jsonTuple(jsonCell, "o", "r"), jsonColumns, 0) shouldBe Right(
+      Seq("""{"x":1}""", "[1,2]")
+    )
+  }
+
+  it should "return null elements for absent, null and invalid rows" in {
+    val jsonData: Array[String | Null] =
+      Array("""{"a":"v","z":null}""", """["arr"]""", "not json")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    val result = eval(Expr.jsonTuple(jsonCell, "a", "z", "missing"), jsonColumns, 0)
+    result match {
+      case Right(values: Seq[?]) =>
+        values should have size 3
+        values(0) shouldBe "v"
+        values(1) shouldBe SqlNull.value
+        values(2) shouldBe SqlNull.value
+      case other => fail(s"unexpected: $other")
+    }
+    eval(Expr.jsonTuple(jsonCell, "a", "z", "missing"), jsonColumns, 1) shouldBe Right(
+      Seq(SqlNull.value, SqlNull.value, SqlNull.value)
+    )
+    eval(Expr.jsonTuple(jsonCell, "a", "z", "missing"), jsonColumns, 2) shouldBe Right(
+      Seq(SqlNull.value, SqlNull.value, SqlNull.value)
+    )
+  }
+
+  it should "look up keys literally without path syntax" in {
+    val jsonData: Array[String | Null] = Array("""{"a.b":"dotted","a":"plain"}""")
+    val jsonCol = Column.string(jsonData)
+    val jsonColumns = Vector(jsonCol)
+    val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
+    eval(Expr.jsonTuple(jsonCell, "a.b", "a"), jsonColumns, 0) shouldBe Right(
+      Seq("dotted", "plain")
+    )
+  }
+
+  it should "report AnyType outputType" in {
+    Expr.jsonTuple(cell, "a").outputType shouldBe Some(ColumnType.AnyType)
+  }
+
   "outputType" should "return StringType for all Phase 4 expressions" in {
     cell.md5.outputType shouldBe Some(ColumnType.StringType)
     cell.sha1.outputType shouldBe Some(ColumnType.StringType)

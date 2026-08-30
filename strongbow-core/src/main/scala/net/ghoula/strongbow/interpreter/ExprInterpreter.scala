@@ -1295,6 +1295,23 @@ object ExprInterpreter {
             case _ => Column.string(Array.empty[String | Null])
           }
 
+        case jt: Expr.JsonTuple[Row] =>
+          evalColumn(jt.expr, columns, ColumnType.StringType).map {
+            case Column.StringColumn(data, nulls) =>
+              Column.any(
+                Array.tabulate[Any | Null](rowCount) { i =>
+                  if (nulls.contains(i)) jsonTupleNulls(jt.keys.size)
+                  else
+                    parseJson(data(i).nn) match {
+                      case parser.core.Result.Success(v: JsonValue, _) =>
+                        jt.keys.map(key => jsonTupleScalar(walkJsonPath(v, List(key))))
+                      case _ => jsonTupleNulls(jt.keys.size)
+                    }
+                }
+              )
+            case _ => Column.any(Array.empty[Any | Null])
+          }
+
         case st: Expr.Struct[Row, _] =>
           val fieldResults = st.fields.map { case (_, fieldExpr, fieldCt) =>
             evalColumn(fieldExpr, columns, fieldCt)
@@ -3976,6 +3993,19 @@ object ExprInterpreter {
     val stripped = if (path.startsWith("$.")) path.drop(2) else if (path.startsWith("$")) path.drop(1) else path
     stripped.split('.').filter(_.nonEmpty).toList
   }
+
+  private def jsonTupleScalar(pathResult: Option[JsonValue]): Any | Null = pathResult match {
+    case Some(JsonValue.Str(s)) => s
+    case Some(JsonValue.Bool(b)) => b.toString
+    case Some(JsonValue.Null) => null // scalafix:ok DisableSyntax.null
+    case Some(JsonValue.Number(n)) =>
+      if (n == n.toLong.toDouble) n.toLong.toString else n.toString
+    case Some(compound) => formatJson(compound)
+    case None => null // scalafix:ok DisableSyntax.null
+  }
+
+  private def jsonTupleNulls(n: Int): Vector[Any | Null] =
+    Vector.fill(n)(null) // scalafix:ok DisableSyntax.null
 
   private def walkJsonPath(value: JsonValue, segments: List[String]): Option[JsonValue] = {
     segments match {

@@ -17,7 +17,7 @@ object DataFrameBuilder {
     val structType = SchemaConverter.toStructType(dataset.schema)
     val cols = dataset.columns
     val rows = Array.tabulate(dataset.rowCount) { rowIdx =>
-      Row.fromSeq(cols.map(_.getValue(rowIdx)))
+      Row.fromSeq(cols.map(SparkValues.columnValue(_, rowIdx)))
     }
     val javaRows = java.util.Arrays.asList(rows*)
     spark.createDataFrame(javaRows, structType)
@@ -32,7 +32,7 @@ object DataFrameBuilder {
     val structType = SchemaConverter.toStructType(schema)
     val rowCount = if (columns.isEmpty) 0 else columns.head.length
     val rows = Array.tabulate(rowCount) { rowIdx =>
-      Row.fromSeq(columns.map(_.getValue(rowIdx)))
+      Row.fromSeq(columns.map(SparkValues.columnValue(_, rowIdx)))
     }
     val javaRows = java.util.Arrays.asList(rows*)
     spark.createDataFrame(javaRows, structType)

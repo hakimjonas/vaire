@@ -171,7 +171,8 @@ lazy val spark = project
       "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
       "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
       "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
-      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
     ),
     Test / javaOptions ++= {
       sys.props.get("spark.test.master").map(v => s"-Dspark.test.master=$v").toSeq

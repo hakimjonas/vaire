@@ -14,6 +14,7 @@ enum ColumnType derives CanEqual {
   case StringType
   case BooleanType
   case DateType
+  case TimeType
   case TimestampType
   case TimestampNTZType
   case YearMonthIntervalType
@@ -22,6 +23,7 @@ enum ColumnType derives CanEqual {
   case DecimalType(precision: Int, scale: Int)
   case CharType(length: Int)
   case VarcharType(maxLength: Int)
+  case StructType(fields: Vector[(String, ColumnType)])
   case OptionType(inner: ColumnType)
   case ArrayType(elementType: ColumnType)
   case MapType(keyType: ColumnType, valueType: ColumnType)

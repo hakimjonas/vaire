@@ -1,9 +1,22 @@
 package net.ghoula.strongbow.expr
 
+import net.ghoula.sarati.ast.json.JsonValue
+import net.ghoula.sarati.codec.{Decoder, Encoder}
+
 import scala.annotation.targetName
 
+import net.ghoula.strongbow.Schema
 import net.ghoula.strongbow.column.ColumnType
-import net.ghoula.strongbow.types.{ColumnIndex, Date}
+import net.ghoula.strongbow.types.{
+  Binary,
+  ColumnIndex,
+  Date,
+  DayTimeInterval,
+  Decimal,
+  Time,
+  Timestamp,
+  YearMonthInterval
+}
 
 /** Type-safe expression language for dataset operations.
   *
@@ -213,7 +226,248 @@ enum Expr[Row, +A] {
   case Base64Decode[Row](expr: Expr[Row, String]) extends Expr[Row, String]
   case Hex[Row](expr: Expr[Row, String]) extends Expr[Row, String]
 
+  case Crc32[Row](expr: Expr[Row, String]) extends Expr[Row, Long]
+  case XxHash64[Row](expr: Expr[Row, String]) extends Expr[Row, Long]
+  case Hash[Row](expr: Expr[Row, String]) extends Expr[Row, Int]
+  case AesEncrypt[Row](expr: Expr[Row, String], key: Expr[Row, String]) extends Expr[Row, Binary]
+  case AesDecrypt[Row](expr: Expr[Row, String], key: Expr[Row, String]) extends Expr[Row, String]
+  case TryAesDecrypt[Row](expr: Expr[Row, String], key: Expr[Row, String]) extends Expr[Row, String]
+
   case GetJsonObject[Row](expr: Expr[Row, String], path: String) extends Expr[Row, String]
+
+  case TimeToSeconds[Row](expr: Expr[Row, Time]) extends Expr[Row, Decimal]
+  case TimeToMillis[Row](expr: Expr[Row, Time]) extends Expr[Row, Long]
+  case TimeToMicros[Row](expr: Expr[Row, Time]) extends Expr[Row, Long]
+  case TimeFromSeconds[Row](expr: Expr[Row, Double]) extends Expr[Row, Time]
+  case TimeFromMillis[Row](expr: Expr[Row, Long]) extends Expr[Row, Time]
+  case TimeFromMicros[Row](expr: Expr[Row, Long]) extends Expr[Row, Time]
+  case TimeBucket[Row](
+    bucketSize: Expr[Row, DayTimeInterval],
+    ts: Expr[Row, Timestamp],
+    origin: Expr[Row, Timestamp]
+  ) extends Expr[Row, Timestamp]
+
+  case CurrentPath[Row]() extends Expr[Row, String]
+
+  case Initcap[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+  case Instr[Row](str: Expr[Row, String], substr: Expr[Row, String]) extends Expr[Row, Int]
+  case SubstringIndex[Row](str: Expr[Row, String], delim: String, count: Int) extends Expr[Row, String]
+  case LeftStr[Row](str: Expr[Row, String], n: Expr[Row, Int]) extends Expr[Row, String]
+  case RightStr[Row](str: Expr[Row, String], n: Expr[Row, Int]) extends Expr[Row, String]
+  case Repeat[Row](str: Expr[Row, String], n: Expr[Row, Int]) extends Expr[Row, String]
+  case Reverse[Row](str: Expr[Row, String]) extends Expr[Row, String]
+  case Lpad[Row](str: Expr[Row, String], len: Expr[Row, Int], pad: String) extends Expr[Row, String]
+  case Rpad[Row](str: Expr[Row, String], len: Expr[Row, Int], pad: String) extends Expr[Row, String]
+  case Translate[Row](str: Expr[Row, String], matching: String, replace: String) extends Expr[Row, String]
+  case FormatString[Row](format: String, args: Vector[Expr[Row, Any]]) extends Expr[Row, String]
+  case Ascii[Row](str: Expr[Row, String]) extends Expr[Row, Int]
+  case Chr[Row](expr: Expr[Row, Int]) extends Expr[Row, String]
+  case Levenshtein[Row](left: Expr[Row, String], right: Expr[Row, String]) extends Expr[Row, Int]
+  case Rlike[Row](str: Expr[Row, String], pattern: String) extends Expr[Row, Boolean]
+  case RegexpExtractAll[Row](str: Expr[Row, String], pattern: String, groupIdx: Int) extends Expr[Row, Seq[String]]
+  case SplitPart[Row](str: Expr[Row, String], delim: String, part: Expr[Row, Int]) extends Expr[Row, String]
+  case ParseUrl[Row](url: Expr[Row, String], part: String) extends Expr[Row, String]
+  case NumberToChar[Row](expr: Expr[Row, Double], format: String) extends Expr[Row, String]
+
+  case Cbrt[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Hypot[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case Bin[Row](expr: Expr[Row, Long]) extends Expr[Row, String]
+  case Unhex[Row](expr: Expr[Row, String]) extends Expr[Row, Binary]
+  case Bround[Row](expr: Expr[Row, Double], scale: Int) extends Expr[Row, Double]
+  case Conv[Row](num: Expr[Row, String], fromBase: Int, toBase: Int) extends Expr[Row, String]
+  case Factorial[Row](expr: Expr[Row, Int]) extends Expr[Row, Long]
+  case Sinh[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Cosh[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Tanh[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Asinh[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Acosh[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Atanh[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Degrees[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Radians[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Pi[Row]() extends Expr[Row, Double]
+  case Euler[Row]() extends Expr[Row, Double]
+  case WidthBucket[Row](
+    value: Expr[Row, Double],
+    min: Expr[Row, Double],
+    max: Expr[Row, Double],
+    buckets: Expr[Row, Int]
+  ) extends Expr[Row, Int]
+  case Randn[Row](seed: Long) extends Expr[Row, Double]
+  case PmodInt[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
+  case PmodLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case Log1p[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case Expm1[Row](expr: Expr[Row, Double]) extends Expr[Row, Double]
+  case TryAddLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case TrySubtractLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case TryMultiplyLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Long]
+  case TryDivideLong[Row](left: Expr[Row, Long], right: Expr[Row, Long]) extends Expr[Row, Double]
+  case TryDivideDouble[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+  case TryAddInt[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
+
+  case UnixTimestamp[Row](expr: Expr[Row, Timestamp]) extends Expr[Row, Long]
+  case FromUnixtime[Row](expr: Expr[Row, Long]) extends Expr[Row, String]
+  case ToTimestamp[Row](expr: Expr[Row, String]) extends Expr[Row, Timestamp]
+  case ToDate[Row](expr: Expr[Row, String]) extends Expr[Row, Date]
+  case CurrentDate[Row]() extends Expr[Row, Date]
+  case Now[Row]() extends Expr[Row, Timestamp]
+  case TimestampSeconds[Row](expr: Expr[Row, Double]) extends Expr[Row, Timestamp]
+  case TimestampMillis[Row](expr: Expr[Row, Long]) extends Expr[Row, Timestamp]
+  case TimestampMicros[Row](expr: Expr[Row, Long]) extends Expr[Row, Timestamp]
+  case MakeTimestamp[Row](
+    year: Expr[Row, Int],
+    month: Expr[Row, Int],
+    day: Expr[Row, Int],
+    hour: Expr[Row, Int],
+    minute: Expr[Row, Int],
+    sec: Expr[Row, Double]
+  ) extends Expr[Row, Timestamp]
+  case MakeDtInterval[Row](
+    days: Expr[Row, Long],
+    hours: Expr[Row, Int],
+    minutes: Expr[Row, Int],
+    seconds: Expr[Row, Double]
+  ) extends Expr[Row, DayTimeInterval]
+  case MakeYmInterval[Row](years: Expr[Row, Int], months: Expr[Row, Int]) extends Expr[Row, YearMonthInterval]
+  case HourOf[Row](expr: Expr[Row, Timestamp]) extends Expr[Row, Int]
+  case MinuteOf[Row](expr: Expr[Row, Timestamp]) extends Expr[Row, Int]
+  case SecondOf[Row](expr: Expr[Row, Timestamp]) extends Expr[Row, Int]
+  case FromUtcTimestamp[Row](expr: Expr[Row, Timestamp], tz: String) extends Expr[Row, Timestamp]
+  case ToUtcTimestamp[Row](expr: Expr[Row, Timestamp], tz: String) extends Expr[Row, Timestamp]
+  case TimestampAdd[Row](unit: String, qty: Expr[Row, Int], ts: Expr[Row, Timestamp]) extends Expr[Row, Timestamp]
+  case TimestampDiff[Row](unit: String, start: Expr[Row, Timestamp], end: Expr[Row, Timestamp]) extends Expr[Row, Long]
+  case ConvertTimezone[Row](expr: Expr[Row, Timestamp], fromTz: String, toTz: String) extends Expr[Row, Timestamp]
+  case Weekday[Row](expr: Expr[Row, Date]) extends Expr[Row, Int]
+
+  case ArrayAppend[Row, A](arr: Expr[Row, Seq[A]], elem: Expr[Row, A]) extends Expr[Row, Seq[A]]
+  case ArrayPrepend[Row, A](arr: Expr[Row, Seq[A]], elem: Expr[Row, A]) extends Expr[Row, Seq[A]]
+  case ArrayInsert[Row, A](arr: Expr[Row, Seq[A]], pos: Expr[Row, Int], elem: Expr[Row, A]) extends Expr[Row, Seq[A]]
+  case ArrayRemove[Row, A](arr: Expr[Row, Seq[A]], elem: Expr[Row, A]) extends Expr[Row, Seq[A]]
+  case ArrayRepeat[Row, A](elem: Expr[Row, A], count: Expr[Row, Int]) extends Expr[Row, Seq[A]]
+  case ArrayJoin[Row](arr: Expr[Row, Seq[String]], delimiter: String, nullReplacement: Option[String])
+      extends Expr[Row, String]
+  case ArrayMax[Row, A](arr: Expr[Row, Seq[A]], ordering: Ordering[A]) extends Expr[Row, A]
+  case ArrayMin[Row, A](arr: Expr[Row, Seq[A]], ordering: Ordering[A]) extends Expr[Row, A]
+  case ArrayCompact[Row, A](arr: Expr[Row, Seq[A]]) extends Expr[Row, Seq[A]]
+  case ArrayPosition[Row, A](arr: Expr[Row, Seq[A]], elem: Expr[Row, A]) extends Expr[Row, Int]
+  case ArraysZip[Row](arrays: Vector[Expr[Row, Seq[?]]]) extends Expr[Row, Seq[Map[String, Any]]]
+  case ArraysOverlap[Row, A](left: Expr[Row, Seq[A]], right: Expr[Row, Seq[A]]) extends Expr[Row, Boolean]
+  case MapFromEntries[Row, K, V](arr: Expr[Row, Seq[(K, V)]]) extends Expr[Row, Map[K, V]]
+  case GetArray[Row, A](arr: Expr[Row, Seq[A]], index: Expr[Row, Int]) extends Expr[Row, A]
+
+  case Posexplode[Row](expr: Expr[Row, Seq[?]]) extends Expr[Row, Any]
+  case ExplodeOuter[Row](expr: Expr[Row, Seq[?]]) extends Expr[Row, Any]
+  case Inline[Row](expr: Expr[Row, Seq[?]]) extends Expr[Row, Any]
+
+  case RegrAvgx[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrAvgy[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrCount[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Long]]
+  case RegrIntercept[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrR2[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrSlope[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrSxx[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrSxy[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case RegrSyy[Row](y: Expr[Row, Double], x: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case Kurtosis[Row](expr: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case Skewness[Row](expr: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case Percentile[Row](expr: Expr[Row, Double], percentage: Expr[Row, Double]) extends Expr[Row, Option[Double]]
+  case SumDistinct[Row](expr: Expr[Row, Long]) extends Expr[Row, Option[Long]]
+
+  /** Spark-only: numeric histogram with at most nBins bins, as an array of (x, y) structs.
+    *
+    * Deliberate deviation from the parity plan: Spark's histogram algorithm is not reimplemented
+    * in-memory; the in-memory interpreter returns Left(Unsupported).
+    */
+  case HistogramNumeric[Row](expr: Expr[Row, Double], nBins: Expr[Row, Int]) extends Expr[Row, Any]
+
+  /** Spark-only: grouping indicator for GROUPING SETS / ROLLUP / CUBE.
+    *
+    * Deliberate deviation: Strongbow's model has no grouping-sets context, so the in-memory
+    * interpreter returns Left(Unsupported).
+    */
+  case Grouping[Row](expr: Expr[Row, Any]) extends Expr[Row, Int]
+
+  /** Spark-only: bit vector of grouping indicators over the given columns.
+    *
+    * Deliberate deviation: requires a grouping-sets context absent from Strongbow's model;
+    * in-memory returns Left(Unsupported).
+    */
+  case GroupingId[Row](exprs: Vector[Expr[Row, Any]]) extends Expr[Row, Long]
+
+  /** DDL schema of the JSON document, e.g. "STRUCT<a: BIGINT, b: STRING>". */
+  case SchemaOfJson[Row](expr: Expr[Row, String]) extends Expr[Row, String]
+
+  /** Number of elements in the JSON array at `path` (defaults to the root, "$"). */
+  case JsonArrayLength[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Long]
+
+  /** Keys of the JSON object at `path` (defaults to the root, "$"), as an array of strings. */
+  case JsonObjectKeys[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Seq[String]]
+
+  /** Parse a JSON string into T via a Sarati decoder.
+    *
+    * @param schema
+    *   Spark DDL schema string used by the Spark backend (e.g. "STRUCT<id: BIGINT>").
+    */
+  case FromJson[Row, T](expr: Expr[Row, String], schema: String, decoder: Decoder[JsonValue, T]) extends Expr[Row, T]
+
+  /** Serialize T to a JSON string via a Sarati encoder. */
+  case ToJson[Row, T](expr: Expr[Row, T], encoder: Encoder[T, JsonValue]) extends Expr[Row, String]
+
+  case Greatest[Row, A](exprs: Vector[Expr[Row, A]], ordering: Ordering[A]) extends Expr[Row, A]
+  case Least[Row, A](exprs: Vector[Expr[Row, A]], ordering: Ordering[A]) extends Expr[Row, A]
+  case NullIf[Row, A](left: Expr[Row, A], right: Expr[Row, A]) extends Expr[Row, A]
+  case Nvl2[Row, T, A](test: Expr[Row, T], value: Expr[Row, A], alt: Expr[Row, A]) extends Expr[Row, A]
+  case Nanvl[Row](left: Expr[Row, Double], right: Expr[Row, Double]) extends Expr[Row, Double]
+
+  case BitCount[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case BitGet[Row](expr: Expr[Row, Int], pos: Expr[Row, Int]) extends Expr[Row, Int]
+  case ShiftLeft[Row](expr: Expr[Row, Int], n: Expr[Row, Int]) extends Expr[Row, Int]
+  case ShiftRight[Row](expr: Expr[Row, Int], n: Expr[Row, Int]) extends Expr[Row, Int]
+  case ShiftRightUnsigned[Row](expr: Expr[Row, Int], n: Expr[Row, Int]) extends Expr[Row, Int]
+  case BitwiseNot[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case BitAndAgg[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case BitOrAgg[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+  case BitXorAgg[Row](expr: Expr[Row, Int]) extends Expr[Row, Int]
+
+  case ParseJson[Row](expr: Expr[Row, String]) extends Expr[Row, Any]
+  case VariantGet[Row](expr: Expr[Row, Any], path: String, targetType: String) extends Expr[Row, Any]
+  case TryVariantGet[Row](expr: Expr[Row, Any], path: String, targetType: String) extends Expr[Row, Any]
+  case IsVariantNull[Row](expr: Expr[Row, Any]) extends Expr[Row, Boolean]
+  case SchemaOfVariant[Row](expr: Expr[Row, Any]) extends Expr[Row, String]
+  case IsValidVariant[Row](expr: Expr[Row, String]) extends Expr[Row, Boolean]
+  case VariantExplode[Row](expr: Expr[Row, Any]) extends Expr[Row, Any]
+
+  case SketchEstimate[Row](fn: String, sketch: Expr[Row, Binary]) extends Expr[Row, Long]
+  case SketchSummary[Row](fn: String, sketch: Expr[Row, Binary], mode: Option[String]) extends Expr[Row, Double]
+  case SketchTheta[Row](fn: String, sketch: Expr[Row, Binary]) extends Expr[Row, Double]
+  case SketchBinaryOp[Row](
+    fn: String,
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    lgNomEntries: Option[Int],
+    mode: Option[String]
+  ) extends Expr[Row, Binary]
+  case TupleSketchAgg[Row](
+    fn: String,
+    key: Expr[Row, ?],
+    summary: Expr[Row, ?],
+    lgNomEntries: Option[Int],
+    mode: Option[String]
+  ) extends Expr[Row, Binary]
+  case SketchSetAgg[Row](
+    fn: String,
+    sketch: Expr[Row, Binary],
+    lgNomEntries: Option[Int],
+    mode: Option[String]
+  ) extends Expr[Row, Binary]
+  case KllSketchAgg[Row](fn: String, value: Expr[Row, ?], k: Option[Int]) extends Expr[Row, Binary]
+  case KllQuantile[Row](fn: String, sketch: Expr[Row, Binary], rank: Expr[Row, Double]) extends Expr[Row, Any]
+  case KllRank[Row](fn: String, sketch: Expr[Row, Binary], quantile: Expr[Row, ?]) extends Expr[Row, Double]
+
+  case Struct[Row, T](
+    fields: Vector[(String, Expr[Row, ?], ColumnType)],
+    schema: Schema[T]
+  ) extends Expr[Row, T]
+  case GetField[Row, T, F](struct: Expr[Row, T], fieldIndex: ColumnIndex, fieldName: String) extends Expr[Row, F]
 }
 
 object Expr {
@@ -520,6 +774,12 @@ object Expr {
     inline def base64Encode: Expr[Row, String] = Base64Encode(left)
     inline def base64Decode: Expr[Row, String] = Base64Decode(left)
     inline def hex: Expr[Row, String] = Hex(left)
+    inline def crc32: Expr[Row, Long] = Crc32(left)
+    inline def xxhash64: Expr[Row, Long] = XxHash64(left)
+    inline def hash: Expr[Row, Int] = Hash(left)
+    inline def aesEncrypt(key: Expr[Row, String]): Expr[Row, Binary] = AesEncrypt(left, key)
+    inline def aesDecrypt(key: Expr[Row, String]): Expr[Row, String] = AesDecrypt(left, key)
+    inline def tryAesDecrypt(key: Expr[Row, String]): Expr[Row, String] = TryAesDecrypt(left, key)
     inline def getJsonObject(path: String): Expr[Row, String] = GetJsonObject(left, path)
   }
 
@@ -550,6 +810,28 @@ object Expr {
     inline def between(lower: Expr[Row, A], upper: Expr[Row, A]): Expr[Row, Boolean] =
       Between(left, lower, upper, summon[Ordering[A]])
   }
+
+  extension [Row](t: Expr[Row, Time]) {
+    inline def timeToSeconds: Expr[Row, Decimal] = TimeToSeconds(t)
+    inline def timeToMillis: Expr[Row, Long] = TimeToMillis(t)
+    inline def timeToMicros: Expr[Row, Long] = TimeToMicros(t)
+  }
+
+  /** Create a TIME from seconds since midnight (fractional seconds allowed). */
+  def timeFromSeconds[Row](seconds: Expr[Row, Double]): Expr[Row, Time] = TimeFromSeconds(seconds)
+
+  /** Create a TIME from milliseconds since midnight. */
+  def timeFromMillis[Row](millis: Expr[Row, Long]): Expr[Row, Time] = TimeFromMillis(millis)
+
+  /** Create a TIME from microseconds since midnight. */
+  def timeFromMicros[Row](micros: Expr[Row, Long]): Expr[Row, Time] = TimeFromMicros(micros)
+
+  /** Bucket a timestamp into fixed-size day-time interval buckets aligned to `origin`. */
+  def timeBucket[Row](
+    bucketSize: Expr[Row, DayTimeInterval],
+    ts: Expr[Row, Timestamp],
+    origin: Expr[Row, Timestamp]
+  ): Expr[Row, Timestamp] = TimeBucket(bucketSize, ts, origin)
 
   extension [Row](d: Expr[Row, Date]) {
     inline def addDays(days: Expr[Row, Int]): Expr[Row, Date] = DateAddDays(d, days)
@@ -595,8 +877,526 @@ object Expr {
     inline def mapConcat(other: Expr[Row, Map[K, V]]): Expr[Row, Map[K, V]] = MapConcat(e, other)
   }
 
+  def currentPath[Row](): Expr[Row, String] = CurrentPath()
+
+  def tupleSketchAggDouble[Row](
+    key: Expr[Row, ?],
+    summary: Expr[Row, ?],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = TupleSketchAgg("tuple_sketch_agg_double", key, summary, lgNomEntries, mode)
+
+  def tupleSketchAggInteger[Row](
+    key: Expr[Row, ?],
+    summary: Expr[Row, ?],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = TupleSketchAgg("tuple_sketch_agg_integer", key, summary, lgNomEntries, mode)
+
+  def tupleSketchEstimateDouble[Row](sketch: Expr[Row, Binary]): Expr[Row, Long] =
+    SketchEstimate("tuple_sketch_estimate_double", sketch)
+
+  def tupleSketchEstimateInteger[Row](sketch: Expr[Row, Binary]): Expr[Row, Long] =
+    SketchEstimate("tuple_sketch_estimate_integer", sketch)
+
+  def tupleSketchSummaryDouble[Row](sketch: Expr[Row, Binary], mode: Option[String] = None): Expr[Row, Double] =
+    SketchSummary("tuple_sketch_summary_double", sketch, mode)
+
+  def tupleSketchSummaryInteger[Row](sketch: Expr[Row, Binary], mode: Option[String] = None): Expr[Row, Double] =
+    SketchSummary("tuple_sketch_summary_integer", sketch, mode)
+
+  def tupleSketchThetaDouble[Row](sketch: Expr[Row, Binary]): Expr[Row, Double] =
+    SketchTheta("tuple_sketch_theta_double", sketch)
+
+  def tupleSketchThetaInteger[Row](sketch: Expr[Row, Binary]): Expr[Row, Double] =
+    SketchTheta("tuple_sketch_theta_integer", sketch)
+
+  def tupleUnionAggDouble[Row](
+    sketch: Expr[Row, Binary],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchSetAgg("tuple_union_agg_double", sketch, lgNomEntries, mode)
+
+  def tupleUnionAggInteger[Row](
+    sketch: Expr[Row, Binary],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchSetAgg("tuple_union_agg_integer", sketch, lgNomEntries, mode)
+
+  def tupleIntersectionAggDouble[Row](sketch: Expr[Row, Binary], mode: Option[String] = None): Expr[Row, Binary] =
+    SketchSetAgg("tuple_intersection_agg_double", sketch, None, mode)
+
+  def tupleIntersectionAggInteger[Row](sketch: Expr[Row, Binary], mode: Option[String] = None): Expr[Row, Binary] =
+    SketchSetAgg("tuple_intersection_agg_integer", sketch, None, mode)
+
+  def tupleUnionDouble[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_union_double", left, right, lgNomEntries, mode)
+
+  def tupleUnionInteger[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_union_integer", left, right, lgNomEntries, mode)
+
+  def tupleUnionThetaDouble[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_union_theta_double", left, right, lgNomEntries, mode)
+
+  def tupleUnionThetaInteger[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    lgNomEntries: Option[Int] = None,
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_union_theta_integer", left, right, lgNomEntries, mode)
+
+  def tupleIntersectionDouble[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_intersection_double", left, right, None, mode)
+
+  def tupleIntersectionInteger[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_intersection_integer", left, right, None, mode)
+
+  def tupleIntersectionThetaDouble[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_intersection_theta_double", left, right, None, mode)
+
+  def tupleIntersectionThetaInteger[Row](
+    left: Expr[Row, Binary],
+    right: Expr[Row, Binary],
+    mode: Option[String] = None
+  ): Expr[Row, Binary] = SketchBinaryOp("tuple_intersection_theta_integer", left, right, None, mode)
+
+  def tupleDifferenceDouble[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("tuple_difference_double", left, right, None, None)
+
+  def tupleDifferenceInteger[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("tuple_difference_integer", left, right, None, None)
+
+  def tupleDifferenceThetaDouble[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("tuple_difference_theta_double", left, right, None, None)
+
+  def tupleDifferenceThetaInteger[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("tuple_difference_theta_integer", left, right, None, None)
+
+  def kllSketchAggBigint[Row](value: Expr[Row, ?], k: Option[Int] = None): Expr[Row, Binary] =
+    KllSketchAgg("kll_sketch_agg_bigint", value, k)
+
+  def kllSketchAggFloat[Row](value: Expr[Row, ?], k: Option[Int] = None): Expr[Row, Binary] =
+    KllSketchAgg("kll_sketch_agg_float", value, k)
+
+  def kllSketchAggDouble[Row](value: Expr[Row, ?], k: Option[Int] = None): Expr[Row, Binary] =
+    KllSketchAgg("kll_sketch_agg_double", value, k)
+
+  def kllMergeAggBigint[Row](sketch: Expr[Row, Binary], k: Option[Int] = None): Expr[Row, Binary] =
+    SketchSetAgg("kll_merge_agg_bigint", sketch, k, None)
+
+  def kllMergeAggFloat[Row](sketch: Expr[Row, Binary], k: Option[Int] = None): Expr[Row, Binary] =
+    SketchSetAgg("kll_merge_agg_float", sketch, k, None)
+
+  def kllMergeAggDouble[Row](sketch: Expr[Row, Binary], k: Option[Int] = None): Expr[Row, Binary] =
+    SketchSetAgg("kll_merge_agg_double", sketch, k, None)
+
+  def kllSketchGetNBigint[Row](sketch: Expr[Row, Binary]): Expr[Row, Long] =
+    SketchEstimate("kll_sketch_get_n_bigint", sketch)
+
+  def kllSketchGetNFloat[Row](sketch: Expr[Row, Binary]): Expr[Row, Long] =
+    SketchEstimate("kll_sketch_get_n_float", sketch)
+
+  def kllSketchGetNDouble[Row](sketch: Expr[Row, Binary]): Expr[Row, Long] =
+    SketchEstimate("kll_sketch_get_n_double", sketch)
+
+  def kllSketchGetQuantileBigint[Row](sketch: Expr[Row, Binary], rank: Expr[Row, Double]): Expr[Row, Any] =
+    KllQuantile("kll_sketch_get_quantile_bigint", sketch, rank)
+
+  def kllSketchGetQuantileFloat[Row](sketch: Expr[Row, Binary], rank: Expr[Row, Double]): Expr[Row, Any] =
+    KllQuantile("kll_sketch_get_quantile_float", sketch, rank)
+
+  def kllSketchGetQuantileDouble[Row](sketch: Expr[Row, Binary], rank: Expr[Row, Double]): Expr[Row, Any] =
+    KllQuantile("kll_sketch_get_quantile_double", sketch, rank)
+
+  def kllSketchGetRankBigint[Row](sketch: Expr[Row, Binary], quantile: Expr[Row, ?]): Expr[Row, Double] =
+    KllRank("kll_sketch_get_rank_bigint", sketch, quantile)
+
+  def kllSketchGetRankFloat[Row](sketch: Expr[Row, Binary], quantile: Expr[Row, ?]): Expr[Row, Double] =
+    KllRank("kll_sketch_get_rank_float", sketch, quantile)
+
+  def kllSketchGetRankDouble[Row](sketch: Expr[Row, Binary], quantile: Expr[Row, ?]): Expr[Row, Double] =
+    KllRank("kll_sketch_get_rank_double", sketch, quantile)
+
+  def kllSketchMergeBigint[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("kll_sketch_merge_bigint", left, right, None, None)
+
+  def kllSketchMergeFloat[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("kll_sketch_merge_float", left, right, None, None)
+
+  def kllSketchMergeDouble[Row](left: Expr[Row, Binary], right: Expr[Row, Binary]): Expr[Row, Binary] =
+    SketchBinaryOp("kll_sketch_merge_double", left, right, None, None)
+
+  /** Parse a JSON string into a variant value. */
+  def parseJson[Row](expr: Expr[Row, String]): Expr[Row, Any] = ParseJson(expr)
+
+  /** Extract a value at a variant path (e.g. "$.a.b[0]"), cast to targetType (e.g. "BIGINT"). */
+  def variantGet[Row](expr: Expr[Row, Any], path: String, targetType: String): Expr[Row, Any] =
+    VariantGet(expr, path, targetType)
+
+  /** Like variantGet but returns null when the path or cast fails. */
+  def tryVariantGet[Row](expr: Expr[Row, Any], path: String, targetType: String): Expr[Row, Any] =
+    TryVariantGet(expr, path, targetType)
+
+  /** True when the variant value is a variant-typed null. */
+  def isVariantNull[Row](expr: Expr[Row, Any]): Expr[Row, Boolean] = IsVariantNull(expr)
+
+  /** SQL type string of a variant value. */
+  def schemaOfVariant[Row](expr: Expr[Row, Any]): Expr[Row, String] = SchemaOfVariant(expr)
+
+  /** True when the JSON string parses as a valid variant. */
+  def isValidVariant[Row](expr: Expr[Row, String]): Expr[Row, Boolean] = IsValidVariant(expr)
+
+  def variantExplode[Row](expr: Expr[Row, Any]): Expr[Row, Any] = VariantExplode(expr)
+
+  /** Row-wise greatest of the given expressions, skipping nulls. */
+  def greatest[Row, A: Ordering](exprs: Expr[Row, A]*): Expr[Row, A] =
+    Greatest(exprs.toVector, summon[Ordering[A]])
+
+  /** Row-wise least of the given expressions, skipping nulls. */
+  def least[Row, A: Ordering](exprs: Expr[Row, A]*): Expr[Row, A] =
+    Least(exprs.toVector, summon[Ordering[A]])
+
+  /** Returns null if left equals right, otherwise left. */
+  def nullif[Row, A](left: Expr[Row, A], right: Expr[Row, A]): Expr[Row, A] = NullIf(left, right)
+
+  /** Returns alt when test is null, otherwise value (SQL NVL2). */
+  def nvl2[Row, T, A](test: Expr[Row, T], value: Expr[Row, A], alt: Expr[Row, A]): Expr[Row, A] =
+    Nvl2(test, value, alt)
+
+  /** Returns the first expression unless it is NaN, in which case the second. */
+  def nanvl[Row](left: Expr[Row, Double], right: Expr[Row, Double]): Expr[Row, Double] = Nanvl(left, right)
+
+  /** Returns alt when expr is null, otherwise expr. */
+  def ifnull[Row, A](expr: Expr[Row, A], alt: Expr[Row, A]): Expr[Row, A] = Coalesce(Vector(expr, alt))
+
+  extension [Row](left: Expr[Row, Int]) {
+    inline def bitCount: Expr[Row, Int] = BitCount(left)
+    inline def bitGet(pos: Expr[Row, Int]): Expr[Row, Int] = BitGet(left, pos)
+    inline def shiftLeft(n: Expr[Row, Int]): Expr[Row, Int] = ShiftLeft(left, n)
+    inline def shiftRight(n: Expr[Row, Int]): Expr[Row, Int] = ShiftRight(left, n)
+    inline def shiftRightUnsigned(n: Expr[Row, Int]): Expr[Row, Int] = ShiftRightUnsigned(left, n)
+    inline def bitwiseNot: Expr[Row, Int] = BitwiseNot(left)
+  }
+
+  /** Aggregate bitwise AND of all non-null values. */
+  def bitAnd[Row](expr: Expr[Row, Int]): Expr[Row, Int] = BitAndAgg(expr)
+
+  /** Aggregate bitwise OR of all non-null values. */
+  def bitOr[Row](expr: Expr[Row, Int]): Expr[Row, Int] = BitOrAgg(expr)
+
+  /** Aggregate bitwise XOR of all non-null values. */
+  def bitXor[Row](expr: Expr[Row, Int]): Expr[Row, Int] = BitXorAgg(expr)
+
+  extension [Row](left: Expr[Row, String]) {
+    inline def initcap: Expr[Row, String] = Initcap(left)
+    inline def instr(substr: Expr[Row, String]): Expr[Row, Int] = Instr(left, substr)
+    inline def substringIndex(delim: String, count: Int): Expr[Row, String] = SubstringIndex(left, delim, count)
+    inline def leftStr(n: Expr[Row, Int]): Expr[Row, String] = LeftStr(left, n)
+    inline def rightStr(n: Expr[Row, Int]): Expr[Row, String] = RightStr(left, n)
+    inline def repeat(n: Expr[Row, Int]): Expr[Row, String] = Repeat(left, n)
+    inline def reverse: Expr[Row, String] = Reverse(left)
+    inline def lpad(len: Expr[Row, Int], pad: String): Expr[Row, String] = Lpad(left, len, pad)
+    inline def rpad(len: Expr[Row, Int], pad: String): Expr[Row, String] = Rpad(left, len, pad)
+    inline def translate(matching: String, replace: String): Expr[Row, String] = Translate(left, matching, replace)
+    inline def ascii: Expr[Row, Int] = Ascii(left)
+    inline def levenshtein(other: Expr[Row, String]): Expr[Row, Int] = Levenshtein(left, other)
+    inline def rlike(pattern: String): Expr[Row, Boolean] = Rlike(left, pattern)
+    inline def regexpExtractAll(pattern: String, groupIdx: Int): Expr[Row, Seq[String]] =
+      RegexpExtractAll(left, pattern, groupIdx)
+    inline def splitPart(delim: String, part: Expr[Row, Int]): Expr[Row, String] = SplitPart(left, delim, part)
+    inline def parseUrl(part: String): Expr[Row, String] = ParseUrl(left, part)
+  }
+
+  /** Character with the given code point. */
+  def chr[Row](expr: Expr[Row, Int]): Expr[Row, String] = Chr(expr)
+
+  /** Render a numeric value with the given java.text.DecimalFormat-style pattern. */
+  extension [Row](left: Expr[Row, Double]) {
+    inline def toChar(format: String): Expr[Row, String] = NumberToChar(left, format)
+  }
+
+  /** Format the arguments with the given java.util.Formatter-style format string. */
+  def formatString[Row](format: String, args: Expr[Row, Any]*): Expr[Row, String] =
+    FormatString(format, args.toVector)
+
+  extension [Row](left: Expr[Row, Double]) {
+    inline def cbrt: Expr[Row, Double] = Cbrt(left)
+    inline def hypot(other: Expr[Row, Double]): Expr[Row, Double] = Hypot(left, other)
+    inline def bround(scale: Int): Expr[Row, Double] = Bround(left, scale)
+    inline def sinh: Expr[Row, Double] = Sinh(left)
+    inline def cosh: Expr[Row, Double] = Cosh(left)
+    inline def tanh: Expr[Row, Double] = Tanh(left)
+    inline def asinh: Expr[Row, Double] = Asinh(left)
+    inline def acosh: Expr[Row, Double] = Acosh(left)
+    inline def atanh: Expr[Row, Double] = Atanh(left)
+    inline def degrees: Expr[Row, Double] = Degrees(left)
+    inline def radians: Expr[Row, Double] = Radians(left)
+    inline def log1p: Expr[Row, Double] = Log1p(left)
+    inline def expm1: Expr[Row, Double] = Expm1(left)
+    @targetName("tryDivideDouble")
+    inline def tryDivide(other: Expr[Row, Double]): Expr[Row, Double] = TryDivideDouble(left, other)
+    inline def widthBucket(min: Expr[Row, Double], max: Expr[Row, Double], buckets: Expr[Row, Int]): Expr[Row, Int] =
+      WidthBucket(left, min, max, buckets)
+  }
+
+  /** Binary representation of a Long value. */
+  def bin[Row](expr: Expr[Row, Long]): Expr[Row, String] = Bin(expr)
+
+  /** Hexadecimal string decoded to binary; null for invalid input. */
+  def unhex[Row](expr: Expr[Row, String]): Expr[Row, Binary] = Unhex(expr)
+
+  /** Convert a number between string bases. */
+  def conv[Row](num: Expr[Row, String], fromBase: Int, toBase: Int): Expr[Row, String] =
+    Conv(num, fromBase, toBase)
+
+  def factorial[Row](expr: Expr[Row, Int]): Expr[Row, Long] = Factorial(expr)
+
+  def pi[Row]: Expr[Row, Double] = Pi[Row]()
+
+  def euler[Row]: Expr[Row, Double] = Euler[Row]()
+
+  /** Standard-normal random values with a fixed seed for reproducibility. */
+  def randn[Row](seed: Long): Expr[Row, Double] = Randn(seed)
+
+  extension [Row](left: Expr[Row, Int]) {
+    @targetName("pmodInt")
+    inline def pmod(right: Expr[Row, Int]): Expr[Row, Int] = PmodInt(left, right)
+    @targetName("tryAddInt")
+    inline def tryAdd(right: Expr[Row, Int]): Expr[Row, Int] = TryAddInt(left, right)
+  }
+
+  extension [Row](left: Expr[Row, Long]) {
+    @targetName("pmodLong")
+    inline def pmod(right: Expr[Row, Long]): Expr[Row, Long] = PmodLong(left, right)
+    @targetName("tryAddLong")
+    inline def tryAdd(right: Expr[Row, Long]): Expr[Row, Long] = TryAddLong(left, right)
+    @targetName("trySubtractLong")
+    inline def trySubtract(right: Expr[Row, Long]): Expr[Row, Long] = TrySubtractLong(left, right)
+    @targetName("tryMultiplyLong")
+    inline def tryMultiply(right: Expr[Row, Long]): Expr[Row, Long] = TryMultiplyLong(left, right)
+    @targetName("tryDivideLong")
+    inline def tryDivide(right: Expr[Row, Long]): Expr[Row, Double] = TryDivideLong(left, right)
+  }
+
+  extension [Row](t: Expr[Row, Timestamp]) {
+    inline def unixTimestamp: Expr[Row, Long] = UnixTimestamp(t)
+    inline def hour: Expr[Row, Int] = HourOf(t)
+    inline def minute: Expr[Row, Int] = MinuteOf(t)
+    inline def second: Expr[Row, Int] = SecondOf(t)
+    inline def fromUtc(tz: String): Expr[Row, Timestamp] = FromUtcTimestamp(t, tz)
+    inline def toUtc(tz: String): Expr[Row, Timestamp] = ToUtcTimestamp(t, tz)
+    inline def convertTimezone(fromTz: String, toTz: String): Expr[Row, Timestamp] =
+      ConvertTimezone(t, fromTz, toTz)
+    inline def timestampAdd(unit: String, qty: Expr[Row, Int]): Expr[Row, Timestamp] =
+      TimestampAdd(unit, qty, t)
+  }
+
+  /** Parse an ISO-8601 datetime string into a timestamp (UTC wall-clock interpretation). */
+  def toTimestamp[Row](expr: Expr[Row, String]): Expr[Row, Timestamp] = ToTimestamp(expr)
+
+  /** Parse an ISO-8601 date string into a date. */
+  def toDate[Row](expr: Expr[Row, String]): Expr[Row, Date] = ToDate(expr)
+
+  def current_date[Row]: Expr[Row, Date] = CurrentDate[Row]()
+
+  def now[Row]: Expr[Row, Timestamp] = Now[Row]()
+
+  /** Build a timestamp from epoch seconds (fractional). */
+  def timestampSeconds[Row](expr: Expr[Row, Double]): Expr[Row, Timestamp] = TimestampSeconds(expr)
+
+  /** Build a timestamp from epoch milliseconds. */
+  def timestampMillis[Row](expr: Expr[Row, Long]): Expr[Row, Timestamp] = TimestampMillis(expr)
+
+  /** Build a timestamp from epoch microseconds. */
+  def timestampMicros[Row](expr: Expr[Row, Long]): Expr[Row, Timestamp] = TimestampMicros(expr)
+
+  /** Build a timestamp from components; interpreted in UTC. */
+  def makeTimestamp[Row](
+    year: Expr[Row, Int],
+    month: Expr[Row, Int],
+    day: Expr[Row, Int],
+    hour: Expr[Row, Int],
+    minute: Expr[Row, Int],
+    sec: Expr[Row, Double]
+  ): Expr[Row, Timestamp] = MakeTimestamp(year, month, day, hour, minute, sec)
+
+  /** Build a day-time interval from days, hours, minutes and (fractional) seconds. */
+  def makeDtInterval[Row](
+    days: Expr[Row, Long],
+    hours: Expr[Row, Int],
+    minutes: Expr[Row, Int],
+    seconds: Expr[Row, Double]
+  ): Expr[Row, DayTimeInterval] = MakeDtInterval(days, hours, minutes, seconds)
+
+  /** Build a year-month interval from years and months. */
+  def makeYmInterval[Row](years: Expr[Row, Int], months: Expr[Row, Int]): Expr[Row, YearMonthInterval] =
+    MakeYmInterval(years, months)
+
+  /** Difference between end and start in the given unit (SECOND, MINUTE, HOUR, DAY, MONTH, YEAR).
+    */
+  def timestampDiff[Row](unit: String, start: Expr[Row, Timestamp], end: Expr[Row, Timestamp]): Expr[Row, Long] =
+    TimestampDiff(unit, start, end)
+
+  extension [Row](d: Expr[Row, Date]) {
+    inline def weekday: Expr[Row, Int] = Weekday(d)
+  }
+
+  extension [Row, A](e: Expr[Row, Seq[A]]) {
+    inline def arrayAppend(elem: Expr[Row, A]): Expr[Row, Seq[A]] = ArrayAppend(e, elem)
+    inline def arrayPrepend(elem: Expr[Row, A]): Expr[Row, Seq[A]] = ArrayPrepend(e, elem)
+    inline def arrayInsert(pos: Expr[Row, Int], elem: Expr[Row, A]): Expr[Row, Seq[A]] = ArrayInsert(e, pos, elem)
+    inline def arrayRemove(elem: Expr[Row, A]): Expr[Row, Seq[A]] = ArrayRemove(e, elem)
+    inline def arrayCompact: Expr[Row, Seq[A]] = ArrayCompact(e)
+    inline def arrayPosition(elem: Expr[Row, A]): Expr[Row, Int] = ArrayPosition(e, elem)
+    inline def arraysOverlap(other: Expr[Row, Seq[A]]): Expr[Row, Boolean] = ArraysOverlap(e, other)
+    inline def getArray(index: Expr[Row, Int]): Expr[Row, A] = GetArray(e, index)
+    inline def arrayMax(using ordering: Ordering[A]): Expr[Row, A] = ArrayMax(e, ordering)
+    inline def arrayMin(using ordering: Ordering[A]): Expr[Row, A] = ArrayMin(e, ordering)
+  }
+
+  /** Repeat elem count times as an array. */
+  def arrayRepeat[Row, A](elem: Expr[Row, A], count: Expr[Row, Int]): Expr[Row, Seq[A]] =
+    ArrayRepeat(elem, count)
+
+  /** Concatenate string array elements with the delimiter, skipping (or replacing) nulls. */
+  def arrayJoin[Row](
+    arr: Expr[Row, Seq[String]],
+    delimiter: String,
+    nullReplacement: Option[String] = None
+  ): Expr[Row, String] =
+    ArrayJoin(arr, delimiter, nullReplacement)
+
+  /** Zip arrays position-wise into structs keyed by "0", "1", ... */
+  def arraysZip[Row](arrays: Expr[Row, Seq[?]]*): Expr[Row, Seq[Map[String, Any]]] =
+    ArraysZip(arrays.toVector)
+
+  /** Build a map from an array of key-value pairs. */
+  def mapFromEntries[Row, K, V](arr: Expr[Row, Seq[(K, V)]]): Expr[Row, Map[K, V]] = MapFromEntries(arr)
+
+  extension [Row, A](e: Expr[Row, Seq[A]]) {
+    inline def posexplode: Expr[Row, Any] = Posexplode(e)
+    inline def explodeOuter: Expr[Row, Any] = ExplodeOuter(e)
+    inline def inlineArray: Expr[Row, Any] = Inline(e)
+  }
+
+  /** Average of x over (x, y) pairs where both are non-null. */
+  def regrAvgx[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrAvgx(y, x)
+
+  /** Average of y over (x, y) pairs where both are non-null. */
+  def regrAvgy[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrAvgy(y, x)
+
+  /** Count of (x, y) pairs where both are non-null. */
+  def regrCount[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Long]] = RegrCount(y, x)
+
+  /** Linear-regression intercept of y over x. */
+  def regrIntercept[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] =
+    RegrIntercept(y, x)
+
+  /** Coefficient of determination (R²) of y over x. */
+  def regrR2[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrR2(y, x)
+
+  /** Linear-regression slope of y over x. */
+  def regrSlope[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrSlope(y, x)
+
+  /** Sum of squared deviations of x. */
+  def regrSxx[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrSxx(y, x)
+
+  /** Sum of products of deviations of x and y. */
+  def regrSxy[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrSxy(y, x)
+
+  /** Sum of squared deviations of y. */
+  def regrSyy[Row](y: Expr[Row, Double], x: Expr[Row, Double]): Expr[Row, Option[Double]] = RegrSyy(y, x)
+
+  /** Excess kurtosis (biased moment estimator, matching Spark). */
+  def kurtosis[Row](expr: Expr[Row, Double]): Expr[Row, Option[Double]] = Kurtosis(expr)
+
+  /** Skewness (biased moment estimator, matching Spark). */
+  def skewness[Row](expr: Expr[Row, Double]): Expr[Row, Option[Double]] = Skewness(expr)
+
+  /** Exact percentile with linear interpolation (percentage in [0, 1]). */
+  def percentile[Row](expr: Expr[Row, Double], percentage: Expr[Row, Double]): Expr[Row, Option[Double]] =
+    Percentile(expr, percentage)
+
+  /** Sum of the distinct non-null values; None for an empty or all-null group. */
+  def sumDistinct[Row](expr: Expr[Row, Long]): Expr[Row, Option[Long]] = SumDistinct(expr)
+
+  /** Spark-only: numeric histogram with at most nBins bins, as an array of (x, y) structs. */
+  def histogramNumeric[Row](expr: Expr[Row, Double], nBins: Expr[Row, Int]): Expr[Row, Any] =
+    HistogramNumeric(expr, nBins)
+
+  /** Spark-only: grouping indicator for GROUPING SETS / ROLLUP / CUBE. */
+  def grouping[Row](expr: Expr[Row, Any]): Expr[Row, Int] = Grouping(expr)
+
+  /** Spark-only: bit vector of grouping indicators over the given columns. */
+  def groupingId[Row](exprs: Expr[Row, Any]*): Expr[Row, Long] = GroupingId(exprs.toVector)
+
+  /** DDL schema string of a JSON document. */
+  def schemaOfJson[Row](expr: Expr[Row, String]): Expr[Row, String] = SchemaOfJson(expr)
+
+  /** Number of elements in the JSON array at path (e.g. "$.a[0]"); root when omitted. */
+  def jsonArrayLength[Row](expr: Expr[Row, String], path: String = "$"): Expr[Row, Long] =
+    JsonArrayLength(expr, path)
+
+  /** Keys of the JSON object at path; root when omitted. */
+  def jsonObjectKeys[Row](expr: Expr[Row, String], path: String = "$"): Expr[Row, Seq[String]] =
+    JsonObjectKeys(expr, path)
+
+  /** Parse a JSON string into T; `schema` is the Spark DDL string for the Spark backend. */
+  def fromJson[Row, T](expr: Expr[Row, String], schema: String)(using
+    decoder: Decoder[JsonValue, T]
+  ): Expr[Row, T] = FromJson(expr, schema, decoder)
+
+  /** Serialize a value to a JSON string via a Sarati encoder. */
+  def toJson[Row, T](expr: Expr[Row, T])(using encoder: Encoder[T, JsonValue]): Expr[Row, String] =
+    ToJson(expr, encoder)
+
+  extension [Row, T](structExpr: Expr[Row, T]) {
+
+    /** Extract a struct field by its position in the struct's flattened column layout.
+      *
+      * @param fieldIndex
+      *   Position of the field's column in the struct's flattened schema.
+      * @param fieldName
+      *   Field name used by the Spark backend (`getField`).
+      */
+    def getField[F](fieldIndex: ColumnIndex, fieldName: String): Expr[Row, F] =
+      GetField(structExpr, fieldIndex, fieldName)
+  }
+
   def mapFromArrays[Row, K, V](keys: Expr[Row, Seq[K]], values: Expr[Row, Seq[V]]): Expr[Row, Map[K, V]] =
     MapFromArrays(keys, values)
+
+  /** Construct a struct expression whose output type is the struct's flat schema layout.
+    *
+    * Each field is a (name, expression, column type) triple; the field columns are stored in the
+    * order given by `schema` (the caller must keep them consistent).
+    */
+  def struct[Row, T](
+    field: (String, Expr[Row, ?], ColumnType),
+    fields: (String, Expr[Row, ?], ColumnType)*
+  )(using schema: Schema[T]): Expr[Row, T] =
+    Struct(field +: fields.toVector, schema)
 
   /** Infer the output ColumnType of an expression, if statically known. */
   extension [Row, A](expr: Expr[Row, A]) {
@@ -675,8 +1475,34 @@ object Expr {
         Some(ColumnType.AnyType)
       case _: Expr.MapFromArrays[_, _, _] | _: Expr.MapConcat[_, _, _] => Some(ColumnType.AnyType)
       case _: Expr.Md5[_] | _: Expr.Sha1[_] | _: Expr.Sha2[_] | _: Expr.UrlEncode[_] | _: Expr.UrlDecode[_] |
-          _: Expr.Base64Encode[_] | _: Expr.Base64Decode[_] | _: Expr.Hex[_] | _: Expr.GetJsonObject[_] =>
+          _: Expr.Base64Encode[_] | _: Expr.Base64Decode[_] | _: Expr.Hex[_] | _: Expr.GetJsonObject[_] |
+          _: Expr.AesDecrypt[_] | _: Expr.TryAesDecrypt[_] =>
         Some(ColumnType.StringType)
+      case _: Expr.Crc32[_] | _: Expr.XxHash64[_] => Some(ColumnType.LongType)
+      case _: Expr.Hash[_] => Some(ColumnType.IntType)
+      case _: Expr.AesEncrypt[_] => Some(ColumnType.BinaryType)
+      case s: Expr.Struct[_, _] =>
+        Some(ColumnType.StructType(s.schema.columnNames.zip(s.schema.columnTypes)))
+      case _: Expr.GetField[_, _, _] => None
+      case _: Expr.TimeToSeconds[_] => Some(ColumnType.DecimalType(14, 6))
+      case _: Expr.TimeToMillis[_] | _: Expr.TimeToMicros[_] => Some(ColumnType.LongType)
+      case _: Expr.TimeFromSeconds[_] | _: Expr.TimeFromMillis[_] | _: Expr.TimeFromMicros[_] =>
+        Some(ColumnType.TimeType)
+      case _: Expr.TimeBucket[_] => Some(ColumnType.TimestampType)
+      case _: Expr.CurrentPath[_] => Some(ColumnType.StringType)
+      case _: Expr.SketchEstimate[_] => Some(ColumnType.LongType)
+      case _: Expr.SketchSummary[_] => Some(ColumnType.DoubleType)
+      case _: Expr.SketchBinaryOp[_] | _: Expr.TupleSketchAgg[_] | _: Expr.SketchSetAgg[_] | _: Expr.KllSketchAgg[_] =>
+        Some(ColumnType.BinaryType)
+      case _: Expr.SketchTheta[_] => Some(ColumnType.DoubleType)
+      case _: Expr.KllQuantile[_] => Some(ColumnType.AnyType)
+      case _: Expr.KllRank[_] => Some(ColumnType.DoubleType)
+      case _: Expr.ParseJson[_] | _: Expr.VariantGet[_] | _: Expr.TryVariantGet[_] | _: Expr.VariantExplode[_] =>
+        Some(ColumnType.VariantType)
+      case _: Expr.IsVariantNull[_] | _: Expr.IsValidVariant[_] => Some(ColumnType.BooleanType)
+      case _: Expr.SchemaOfVariant[_] => Some(ColumnType.StringType)
+      case _: Expr.FromJson[_, _] => Some(ColumnType.AnyType)
+      case _: Expr.ToJson[_, _] => Some(ColumnType.StringType)
     }
   }
 }

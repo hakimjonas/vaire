@@ -22,6 +22,22 @@ trait Schema[T] {
 
   /** Decode a vector of column values to type T. */
   def decode(values: Vector[Any]): Either[DecodeError, T]
+
+  /** Sub-schemas for struct-typed columns, indexed by column position.
+    *
+    * Flat schemas flatten nested case classes and need no entries. Schemas that expose a StructType
+    * column (e.g. Schema.structColumn) provide the nested schema so Spark Rows can be rebuilt into
+    * typed struct columns.
+    */
+  def nestedSchemas: Vector[Option[Schema[?]]] = Vector.fill(columnCount)(None)
+
+  /** Encode a value whose runtime type is T.
+    *
+    * Erasure boundary: the Schema contract exchanges Vector[Any], so the type parameter cannot be
+    * recovered by pattern matching — the same sanctioned boundary as AnyColumn storage access.
+    */
+  def encodeAny(value: Any): Vector[Any] =
+    encode(value.asInstanceOf[T]) // scalafix:ok DisableSyntax.asInstanceOf
 }
 
 object Schema {
@@ -112,6 +128,17 @@ object Schema {
       decodeSingle("TimestampNTZ") { case l: Long => types.TimestampNTZ.ofEpochMicro(l) }(values)
   }
 
+  given timeSchema: Schema[types.Time] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.TimeType)
+    def encode(value: types.Time): Vector[Any] = Vector(value.toMicros)
+    def decode(values: Vector[Any]): Either[DecodeError, types.Time] = decodeSingle("Time") {
+      case l: Long => types.Time.ofMicros(l)
+      case lt: java.time.LocalTime => types.Time.fromLocalTime(lt)
+    }(values)
+  }
+
   given yearMonthIntervalSchema: Schema[types.YearMonthInterval] with {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")
@@ -185,6 +212,47 @@ object Schema {
       decodeSingle("Boolean") { case b: Boolean => b }(values)
   }
 
+  /** Schema for Seq[A] stored as a single ArrayType column. */
+  given seqSchema[A](using elemSchema: Schema[A]): Schema[Seq[A]] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.ArrayType(elemSchema.columnTypes.head))
+    def encode(value: Seq[A]): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Seq[A]] =
+      if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
+      else
+        values.head match {
+          case s: Seq[?] =>
+            s.foldLeft[Either[DecodeError, Vector[A]]](Right(Vector.empty)) { (acc, e) =>
+              acc.flatMap(vs => elemSchema.decode(Vector(e)).map(vs :+ _)).map(_.toSeq)
+            }.map(_.toSeq)
+          case other => Left(DecodeError.TypeMismatch("Seq", other.getClass.getSimpleName))
+        }
+  }
+
+  /** Schema for Map[K, V] stored as a single MapType column. */
+  given mapSchema[K, V](using keySchema: Schema[K], valueSchema: Schema[V]): Schema[Map[K, V]] with {
+    def columnCount: Int = 1
+    def columnNames: Vector[String] = Vector("value")
+    def columnTypes: Vector[ColumnType] =
+      Vector(ColumnType.MapType(keySchema.columnTypes.head, valueSchema.columnTypes.head))
+    def encode(value: Map[K, V]): Vector[Any] = Vector(value)
+    def decode(values: Vector[Any]): Either[DecodeError, Map[K, V]] =
+      if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
+      else
+        values.head match {
+          case m: Map[?, ?] =>
+            m.foldLeft[Either[DecodeError, Vector[(K, V)]]](Right(Vector.empty)) { (acc, entry) =>
+              for {
+                entries <- acc
+                k <- keySchema.decode(Vector(entry._1))
+                v <- valueSchema.decode(Vector(entry._2))
+              } yield entries :+ ((k, v))
+            }.map(_.toMap)
+          case other => Left(DecodeError.TypeMismatch("Map", other.getClass.getSimpleName))
+        }
+  }
+
   /** Generic tuple schema for pairs - enables automatic Schema[(A, B)] derivation */
   given tuple2Schema[A, B](using schemaA: Schema[A], schemaB: Schema[B]): Schema[(A, B)] with {
     def columnCount: Int = schemaA.columnCount + schemaB.columnCount
@@ -255,6 +323,10 @@ object Schema {
 
   /** Automatic schema derivation for case classes using Scala 3 Mirror.
     *
+    * Nested case-class fields derive recursively: when no Schema[h] is in scope but a
+    * Mirror.ProductOf[h] is available, the field schema is derived. Nested schemas flatten into the
+    * parent's column layout.
+    *
     * Usage:
     * {{{
     * case class User(id: Int, name: String, age: Int)
@@ -263,6 +335,41 @@ object Schema {
     */
   inline def derived[T](using mirror: Mirror.ProductOf[T]): Schema[T] = ${
     deriveSchemaImpl[T, mirror.MirroredElemTypes, mirror.MirroredElemLabels]('mirror)
+  }
+
+  /** Schema viewing T itself as a single StructType column.
+    *
+    * The column value is a T instance (or a Product with T's field layout, e.g. a Spark Row).
+    * `nestedSchemas` exposes the flat inner schema so Spark's nested Rows can be rebuilt into typed
+    * struct columns.
+    */
+  inline def structColumn[T](using
+    m: Mirror.ProductOf[T],
+    inner: Schema[T]
+  ): Schema[T] = ${ structColumnImpl[T]('m, 'inner) }
+
+  private def structColumnImpl[T: Type](
+    m: Expr[Mirror.ProductOf[T]],
+    inner: Expr[Schema[T]]
+  )(using q: Quotes): Expr[Schema[T]] = {
+    val typeName: String = Type.show[T]
+    '{
+      new Schema[T] {
+        private val innerSchema = $inner
+        def columnCount: Int = 1
+        def columnNames: Vector[String] = Vector("value")
+        def columnTypes: Vector[ColumnType] =
+          Vector(ColumnType.StructType(innerSchema.columnNames.zip(innerSchema.columnTypes)))
+        override def nestedSchemas: Vector[Option[Schema[?]]] = Vector(Some(innerSchema))
+        def encode(value: T): Vector[Any] = Vector(value)
+        def decode(values: Vector[Any]): Either[DecodeError, T] = values match {
+          case Vector(p: Product) => Right($m.fromProduct(p))
+          case Vector(v) =>
+            Left(DecodeError.TypeMismatch(${ Expr(typeName): Expr[String] }, v.getClass.getSimpleName))
+          case other => Left(DecodeError.WrongArity(1, other.length))
+        }
+      }
+    }
   }
 
   private def getLabels[Labels <: Tuple: Type](using q: Quotes): List[String] = {
@@ -329,7 +436,8 @@ object Schema {
           val label = remainingLabels.head
           val fieldTypeStr = Type.show[h]
           val hasSchema = Expr.summon[Schema[h]].isDefined
-          val newAcc = if (hasSchema) acc else (label, fieldTypeStr) :: acc
+          val hasMirror = Expr.summon[Mirror.ProductOf[h]].isDefined
+          val newAcc = if (hasSchema || hasMirror) acc else (label, fieldTypeStr) :: acc
           collect[t](remainingLabels.tail, newAcc)
       }
 
@@ -359,7 +467,16 @@ object Schema {
       Type.of[E] match {
         case '[EmptyTuple] => Nil
         case '[h *: t] =>
-          val schema = Expr.summon[Schema[h]].get
+          val schema = Expr.summon[Schema[h]].getOrElse {
+            Expr.summon[Mirror.ProductOf[h]] match {
+              case Some(m) => '{ Schema.derived[h](using $m) }
+              case None =>
+                report.errorAndAbort(
+                  s"No Schema or Mirror.ProductOf available for ${Type.show[h]}",
+                  Position.ofMacroExpansion
+                )
+            }
+          }
           schema :: summonSchemas[t]
       }
 

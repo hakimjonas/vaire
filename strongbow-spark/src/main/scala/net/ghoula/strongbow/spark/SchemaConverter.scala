@@ -20,7 +20,8 @@ import org.apache.spark.sql.types.{
   ShortType => SparkShortType,
   StringType => SparkStringType,
   StructField,
-  StructType,
+  StructType => SparkStructType,
+  TimeType => SparkTimeType,
   TimestampNTZType => SparkTimestampNTZType,
   TimestampType => SparkTimestampType,
   YearMonthIntervalType => SparkYearMonthIntervalType
@@ -33,7 +34,7 @@ import net.ghoula.strongbow.column.ColumnType
 object SchemaConverter {
 
   /** Convert a Strongbow Schema[T] to a Spark StructType. */
-  def toStructType[T](schema: Schema[T]): StructType = {
+  def toStructType[T](schema: Schema[T]): SparkStructType = {
     val fields = schema.columnNames.zip(schema.columnTypes).map { case (name, ct) =>
       ct match {
         case ColumnType.OptionType(inner) =>
@@ -42,7 +43,7 @@ object SchemaConverter {
           StructField(name, toSparkType(ct), nullable = false)
       }
     }
-    StructType(fields.toArray)
+    SparkStructType(fields.toArray)
   }
 
   /** Convert a Strongbow ColumnType to a Spark DataType. */
@@ -56,6 +57,7 @@ object SchemaConverter {
     case ColumnType.StringType => SparkStringType
     case ColumnType.BooleanType => SparkBooleanType
     case ColumnType.DateType => SparkDateType
+    case ColumnType.TimeType => SparkTimeType()
     case ColumnType.TimestampType => SparkTimestampType
     case ColumnType.TimestampNTZType => SparkTimestampNTZType
     case ColumnType.YearMonthIntervalType => SparkYearMonthIntervalType()
@@ -64,6 +66,8 @@ object SchemaConverter {
     case ColumnType.DecimalType(p, s) => SparkDecimalType(p, s)
     case ColumnType.CharType(n) => SparkCharType(n)
     case ColumnType.VarcharType(n) => SparkVarcharType(n)
+    case ColumnType.StructType(fields) =>
+      SparkStructType(fields.map { case (name, ft) => StructField(name, toSparkType(ft), nullable = true) }.toArray)
     case ColumnType.VariantType => SparkVariantType
     case ColumnType.OptionType(inner) => toSparkType(inner)
     case ColumnType.ArrayType(elem) => SparkArrayType(toSparkType(elem), containsNull = true)
@@ -82,6 +86,7 @@ object SchemaConverter {
     case SparkStringType => ColumnType.StringType
     case SparkBooleanType => ColumnType.BooleanType
     case SparkDateType => ColumnType.DateType
+    case _: SparkTimeType => ColumnType.TimeType
     case SparkTimestampType => ColumnType.TimestampType
     case _: SparkTimestampNTZType => ColumnType.TimestampNTZType
     case _: SparkYearMonthIntervalType => ColumnType.YearMonthIntervalType
@@ -91,6 +96,8 @@ object SchemaConverter {
     case ct: SparkCharType => ColumnType.CharType(ct.length)
     case vt: SparkVarcharType => ColumnType.VarcharType(vt.length)
     case SparkVariantType => ColumnType.VariantType
+    case st: SparkStructType =>
+      ColumnType.StructType(st.fields.map(f => (f.name, fromSparkType(f.dataType))).toVector)
     case at: SparkArrayType => ColumnType.ArrayType(fromSparkType(at.elementType))
     case mt: SparkMapType => ColumnType.MapType(fromSparkType(mt.keyType), fromSparkType(mt.valueType))
     case _ => ColumnType.AnyType

@@ -116,22 +116,22 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     result shouldBe Right(3)
   }
 
-  it should "return null for positive index past end" in {
+  it should "return SqlNull.value for positive index past end" in {
     val expr = arrCell.elementAt(Expr.const(10))
     val result = eval(expr, arrColumns, 0)
-    result shouldBe Right(null) // scalafix:ok DisableSyntax.null
+    result shouldBe Right(SqlNull.value)
   }
 
-  it should "return null for zero index" in {
+  it should "return SqlNull.value for zero index" in {
     val expr = arrCell.elementAt(Expr.const(0))
     val result = eval(expr, arrColumns, 0)
-    result shouldBe Right(null) // scalafix:ok DisableSyntax.null
+    result shouldBe Right(SqlNull.value)
   }
 
-  it should "return null for negative index past start" in {
+  it should "return SqlNull.value for negative index past start" in {
     val expr = arrCell.elementAt(Expr.const(-10))
     val result = eval(expr, arrColumns, 0)
-    result shouldBe Right(null) // scalafix:ok DisableSyntax.null
+    result shouldBe Right(SqlNull.value)
   }
 
   "ArraySlice" should "return a sub-array" in {

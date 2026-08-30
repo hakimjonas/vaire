@@ -143,23 +143,23 @@ class ExprHashEncodingSpec extends AnyFlatSpec with Matchers {
     eval(jsonCell.getJsonObject("$.price"), jsonColumns, 0) shouldBe Right("9.99")
   }
 
-  it should "return null for missing path" in {
+  it should "return SqlNull.value for missing path" in {
     val jsonData: Array[String | Null] = Array("""{"name":"Alice"}""")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
     val result = eval(jsonCell.getJsonObject("$.missing"), jsonColumns, 0)
-    result shouldBe Right(null) // scalafix:ok DisableSyntax.null
+    result shouldBe Right(SqlNull.value)
   }
 
-  it should "return null for invalid JSON" in {
+  it should "return SqlNull.value for invalid JSON" in {
     val jsonData: Array[String | Null] = Array("not json")
     val jsonCol = Column.string(jsonData)
     val jsonColumns = Vector(jsonCol)
     val jsonCell = Expr.Cell[Any, String]("json", ColumnIndex(0))
     eval(jsonCell.getJsonObject("$.key"), jsonColumns, 0) shouldBe Right(
-      null
-    ) // scalafix:ok DisableSyntax.null
+      SqlNull.value
+    )
   }
 
   "outputType" should "return StringType for all Phase 4 expressions" in {

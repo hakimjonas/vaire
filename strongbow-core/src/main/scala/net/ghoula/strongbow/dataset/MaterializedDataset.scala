@@ -1,7 +1,7 @@
 package net.ghoula.strongbow.dataset
 
 import net.ghoula.strongbow.Schema
-import net.ghoula.strongbow.column.Column
+import net.ghoula.strongbow.column.{Column, ColumnType}
 import net.ghoula.strongbow.errors.{DecodeError, ExecutionError}
 
 /** Result of executing a Dataset plan.
@@ -100,7 +100,21 @@ object MaterializedDataset {
         (acc, colIdx) =>
           acc.flatMap { cols =>
             val colValues = encodedRows.map(_(colIdx))
-            Column.fromValues(colValues, schema.columnTypes(colIdx)).map(cols :+ _)
+            schema.columnTypes(colIdx) match {
+              case ColumnType.StructType(fields) =>
+                schema.nestedSchemas.lift(colIdx).flatten match {
+                  case Some(nested) =>
+                    Column.structFromValues(colValues, nested, fields).map(cols :+ _)
+                  case None =>
+                    Left(
+                      ExecutionError.UnsupportedOperation(
+                        "StructType column requires a nested schema (Schema.nestedSchemas)"
+                      )
+                    )
+                }
+              case ct =>
+                Column.fromValues(colValues, ct).map(cols :+ _)
+            }
           }
       }
     }

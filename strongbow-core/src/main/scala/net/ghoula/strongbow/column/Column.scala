@@ -2,6 +2,7 @@ package net.ghoula.strongbow.column
 
 import scala.collection.immutable.BitSet
 
+import net.ghoula.strongbow.Schema
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.types
 import net.ghoula.strongbow.types.RowIndex
@@ -10,6 +11,10 @@ import net.ghoula.strongbow.types.RowIndex
   *
   * Each column type uses primitive arrays where possible. Nullability is tracked via BitSet for
   * memory efficiency. The type parameter `A` tracks the logical element type via GADT refinement.
+  *
+  * Nested types (arrays, maps, structs) use the same flat + offsets layout as binary data:
+  * ArrayColumn/MapColumn hold one flat child column plus per-row offsets; StructColumn holds one
+  * child column per flattened schema field.
   */
 enum Column[+A] {
   case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
@@ -20,6 +25,7 @@ enum Column[+A] {
   case ByteColumn(data: Array[Byte], nulls: BitSet) extends Column[Byte]
   case TimestampColumn(data: Array[Long], nulls: BitSet) extends Column[types.Timestamp]
   case TimestampNTZColumn(data: Array[Long], nulls: BitSet) extends Column[types.TimestampNTZ]
+  case TimeColumn(data: Array[Long], nulls: BitSet) extends Column[types.Time]
   case YearMonthIntervalColumn(data: Array[Int], nulls: BitSet) extends Column[types.YearMonthInterval]
   case DayTimeIntervalColumn(data: Array[Long], nulls: BitSet) extends Column[types.DayTimeInterval]
   case StringColumn(data: Array[String | Null], nulls: BitSet) extends Column[String]
@@ -27,6 +33,9 @@ enum Column[+A] {
   case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
   case BinaryColumn(data: Array[Byte], offsets: Array[Int], nulls: BitSet) extends Column[types.Binary]
   case DecimalColumn(data: Array[Long], precision: Int, scale: Int, nulls: BitSet) extends Column[types.Decimal]
+  case ArrayColumn[A](elements: Column[A], offsets: Array[Int], nulls: BitSet) extends Column[Seq[A]]
+  case MapColumn[K, V](keys: Column[K], values: Column[V], offsets: Array[Int], nulls: BitSet) extends Column[Map[K, V]]
+  case StructColumn[T](columns: Vector[Column[?]], schema: Schema[T], nulls: BitSet) extends Column[T]
   case AnyColumn(data: Array[Any | Null], nulls: BitSet) extends Column[Any]
 
   inline def length: Int = this match {
@@ -38,6 +47,7 @@ enum Column[+A] {
     case ByteColumn(data, _) => data.length
     case TimestampColumn(data, _) => data.length
     case TimestampNTZColumn(data, _) => data.length
+    case TimeColumn(data, _) => data.length
     case YearMonthIntervalColumn(data, _) => data.length
     case DayTimeIntervalColumn(data, _) => data.length
     case StringColumn(data, _) => data.length
@@ -45,6 +55,9 @@ enum Column[+A] {
     case DateColumn(data, _) => data.length
     case BinaryColumn(_, offsets, _) => offsets.length - 1
     case DecimalColumn(data, _, _, _) => data.length
+    case ArrayColumn(_, offsets, _) => offsets.length - 1
+    case MapColumn(_, _, offsets, _) => offsets.length - 1
+    case StructColumn(columns, _, _) => Column.structLength(columns)
     case AnyColumn(data, _) => data.length
   }
 
@@ -57,6 +70,7 @@ enum Column[+A] {
     case ByteColumn(_, _) => ColumnType.ByteType
     case TimestampColumn(_, _) => ColumnType.TimestampType
     case TimestampNTZColumn(_, _) => ColumnType.TimestampNTZType
+    case TimeColumn(_, _) => ColumnType.TimeType
     case YearMonthIntervalColumn(_, _) => ColumnType.YearMonthIntervalType
     case DayTimeIntervalColumn(_, _) => ColumnType.DayTimeIntervalType
     case StringColumn(_, _) => ColumnType.StringType
@@ -64,6 +78,9 @@ enum Column[+A] {
     case DateColumn(_, _) => ColumnType.DateType
     case BinaryColumn(_, _, _) => ColumnType.BinaryType
     case DecimalColumn(_, p, s, _) => ColumnType.DecimalType(p, s)
+    case ArrayColumn(elements, _, _) => Column.arrayColumnType(elements)
+    case MapColumn(keys, values, _, _) => Column.mapColumnType(keys, values)
+    case StructColumn(_, schema, _) => ColumnType.StructType(schema.columnNames.zip(schema.columnTypes))
     case AnyColumn(_, _) => ColumnType.AnyType
   }
 
@@ -76,6 +93,7 @@ enum Column[+A] {
     case ByteColumn(_, nulls) => nulls
     case TimestampColumn(_, nulls) => nulls
     case TimestampNTZColumn(_, nulls) => nulls
+    case TimeColumn(_, nulls) => nulls
     case YearMonthIntervalColumn(_, nulls) => nulls
     case DayTimeIntervalColumn(_, nulls) => nulls
     case StringColumn(_, nulls) => nulls
@@ -83,6 +101,9 @@ enum Column[+A] {
     case DateColumn(_, nulls) => nulls
     case BinaryColumn(_, _, nulls) => nulls
     case DecimalColumn(_, _, _, nulls) => nulls
+    case ArrayColumn(_, _, nulls) => nulls
+    case MapColumn(_, _, _, nulls) => nulls
+    case StructColumn(_, _, nulls) => nulls
     case AnyColumn(_, nulls) => nulls
   }
 
@@ -106,6 +127,7 @@ enum Column[+A] {
         case ByteColumn(data, _) => data(index)
         case TimestampColumn(data, _) => types.Timestamp.ofEpochMicro(data(index))
         case TimestampNTZColumn(data, _) => types.TimestampNTZ.ofEpochMicro(data(index))
+        case TimeColumn(data, _) => types.Time.ofMicros(data(index))
         case YearMonthIntervalColumn(data, _) => types.YearMonthInterval.ofMonths(data(index))
         case DayTimeIntervalColumn(data, _) => types.DayTimeInterval.ofMicros(data(index))
         case StringColumn(data, _) => data(index)
@@ -114,6 +136,9 @@ enum Column[+A] {
         case BinaryColumn(data, offsets, _) =>
           types.Binary(java.util.Arrays.copyOfRange(data, offsets(index), offsets(index + 1)))
         case DecimalColumn(data, _, _, _) => types.Decimal.ofUnscaled(data(index))
+        case ArrayColumn(elements, offsets, _) => Column.arrayValueAt(elements, offsets, index)
+        case MapColumn(keys, values, offsets, _) => Column.mapValueAt(keys, values, offsets, index)
+        case StructColumn(columns, schema, _) => Column.structValueAt(columns, schema, index)
         case AnyColumn(data, _) => data(index)
       }
   }
@@ -137,7 +162,9 @@ enum Column[+A] {
       case ShortColumn(data, _) => ShortColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case ByteColumn(data, _) => ByteColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case TimestampColumn(data, _) => TimestampColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
-      case TimestampNTZColumn(data, _) => TimestampNTZColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case TimestampNTZColumn(data, _) =>
+        TimestampNTZColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
+      case TimeColumn(data, _) => TimeColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case YearMonthIntervalColumn(data, _) =>
         YearMonthIntervalColumn(java.util.Arrays.copyOfRange(data, 0, len), trimmedNulls)
       case DayTimeIntervalColumn(data, _) =>
@@ -154,6 +181,21 @@ enum Column[+A] {
         )
       case DecimalColumn(data, p, s, _) =>
         DecimalColumn(java.util.Arrays.copyOfRange(data, 0, len), p, s, trimmedNulls)
+      case ArrayColumn(elements, offsets, _) =>
+        ArrayColumn(
+          elements.take(offsets(len)),
+          java.util.Arrays.copyOfRange(offsets, 0, len + 1),
+          trimmedNulls
+        )
+      case MapColumn(keys, values, offsets, _) =>
+        MapColumn(
+          keys.take(offsets(len)),
+          values.take(offsets(len)),
+          java.util.Arrays.copyOfRange(offsets, 0, len + 1),
+          trimmedNulls
+        )
+      case StructColumn(columns, schema, _) =>
+        StructColumn(columns.map(_.take(len)), schema, trimmedNulls)
       case AnyColumn(data, _) =>
         val arr = new Array[Any | Null](len)
         System.arraycopy(data, 0, arr, 0, len)
@@ -198,6 +240,7 @@ enum Column[+A] {
         case (ByteColumn(l, _), ByteColumn(r, _)) => concatArrays(l, r, ByteColumn(_, _))
         case (TimestampColumn(l, _), TimestampColumn(r, _)) => concatArrays(l, r, TimestampColumn(_, _))
         case (TimestampNTZColumn(l, _), TimestampNTZColumn(r, _)) => concatArrays(l, r, TimestampNTZColumn(_, _))
+        case (TimeColumn(l, _), TimeColumn(r, _)) => concatArrays(l, r, TimeColumn(_, _))
         case (YearMonthIntervalColumn(l, _), YearMonthIntervalColumn(r, _)) =>
           concatArrays(l, r, YearMonthIntervalColumn(_, _))
         case (DayTimeIntervalColumn(l, _), DayTimeIntervalColumn(r, _)) =>
@@ -211,6 +254,29 @@ enum Column[+A] {
           Right(BinaryColumn(newData, newOffsets, combinedNulls))
         case (DecimalColumn(l, p, s, _), DecimalColumn(r, _, _, _)) =>
           concatArrays(l, r, (arr, ns) => DecimalColumn(arr, p, s, ns))
+        case (ArrayColumn(le, lo, _), ArrayColumn(re, ro, _)) =>
+          le.concat(re).map { merged =>
+            val mergedOffsets = lo ++ ro.tail.map(_ + lo.last)
+            ArrayColumn(merged, mergedOffsets, combinedNulls)
+          }
+        case (MapColumn(lk, lv, lo, _), MapColumn(rk, rv, ro, _)) =>
+          for {
+            mergedKeys <- lk.concat(rk)
+            mergedValues <- lv.concat(rv)
+          } yield MapColumn(
+            mergedKeys,
+            mergedValues,
+            lo ++ ro.tail.map(_ + lo.last),
+            combinedNulls
+          )
+        case (StructColumn(lc, ls, _), StructColumn(rc, _, _)) =>
+          lc.zip(rc)
+            .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { (acc, pair) =>
+              acc.flatMap { cols =>
+                pair._1.concat(pair._2).map(cols :+ _)
+              }
+            }
+            .map(cols => StructColumn(cols, ls, combinedNulls))
         case (AnyColumn(l, _), AnyColumn(r, _)) => concatArrays(l, r, AnyColumn(_, _))
         case _ =>
           Left(ExecutionError.TypeMismatch(this.columnType.toString, other.columnType.toString, "Column.concat"))
@@ -255,6 +321,8 @@ enum Column[+A] {
       TimestampColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
     case TimestampNTZColumn(data, nulls) =>
       TimestampNTZColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
+    case TimeColumn(data, nulls) =>
+      TimeColumn(sliceArray(data, indices, nulls, 0L), buildNullSet(nulls, indices))
     case YearMonthIntervalColumn(data, nulls) =>
       YearMonthIntervalColumn(sliceArray(data, indices, nulls, 0), buildNullSet(nulls, indices))
     case DayTimeIntervalColumn(data, nulls) =>
@@ -282,6 +350,32 @@ enum Column[+A] {
       BinaryColumn(newData, newOffsets, newNulls)
     case DecimalColumn(data, p, s, nulls) =>
       DecimalColumn(sliceArray(data, indices, nulls, 0L), p, s, buildNullSet(nulls, indices))
+    case ArrayColumn(elements, offsets, nulls) =>
+      val newNulls = buildNullSet(nulls, indices)
+      val lengths = indices.map { idx =>
+        if (nulls.contains(idx)) 0 else offsets(idx + 1) - offsets(idx)
+      }
+      val newOffsets = lengths.scanLeft(0)(_ + _)
+      val elementIndices = indices.indices.flatMap { i =>
+        val idx = indices(i)
+        if (nulls.contains(idx)) Iterator.empty
+        else offsets(idx) until offsets(idx + 1)
+      }.toArray
+      ArrayColumn(elements.slice(elementIndices), newOffsets, newNulls)
+    case MapColumn(keys, values, offsets, nulls) =>
+      val newNulls = buildNullSet(nulls, indices)
+      val lengths = indices.map { idx =>
+        if (nulls.contains(idx)) 0 else offsets(idx + 1) - offsets(idx)
+      }
+      val newOffsets = lengths.scanLeft(0)(_ + _)
+      val entryIndices = indices.indices.flatMap { i =>
+        val idx = indices(i)
+        if (nulls.contains(idx)) Iterator.empty
+        else offsets(idx) until offsets(idx + 1)
+      }.toArray
+      MapColumn(keys.slice(entryIndices), values.slice(entryIndices), newOffsets, newNulls)
+    case StructColumn(columns, schema, _) =>
+      StructColumn(columns.map(_.slice(indices)), schema, buildNullSet(nullSet, indices))
     case AnyColumn(data, nulls) =>
       AnyColumn(sliceArray(data, indices, nulls, null), buildNullSet(nulls, indices)) // scalafix:ok DisableSyntax.null
   }
@@ -301,6 +395,34 @@ enum Column[+A] {
 }
 
 object Column {
+
+  private[strongbow] def structLength(columns: Vector[Column[?]]): Int =
+    columns.headOption.fold(0)(_.length)
+
+  private[strongbow] def arrayColumnType[A](elements: Column[A]): ColumnType =
+    ColumnType.ArrayType(elements.columnType)
+
+  private[strongbow] def mapColumnType[K, V](keys: Column[K], values: Column[V]): ColumnType =
+    ColumnType.MapType(keys.columnType, values.columnType)
+
+  private[strongbow] def arrayValueAt(elements: Column[?], offsets: Array[Int], index: Int): Any | Null =
+    (offsets(index) until offsets(index + 1)).map(elements.getValue).toSeq
+
+  private[strongbow] def mapValueAt(keys: Column[?], values: Column[?], offsets: Array[Int], index: Int): Any | Null =
+    (offsets(index) until offsets(index + 1))
+      .map(j => keys.getValue(j) -> values.getValue(j))
+      .toMap
+
+  private[strongbow] def structValueAt[T](
+    columns: Vector[Column[?]],
+    schema: Schema[T],
+    index: Int
+  ): T =
+    schema.decode(columns.map(_.getValue(index))) match {
+      case Right(value) => value
+      case Left(err) => sys.error(s"Struct decode failed at row $index: $err")
+    }
+
   inline def int(data: Array[Int], nulls: BitSet = BitSet.empty): Column[Int] = {
     IntColumn(data, nulls)
   }
@@ -333,6 +455,11 @@ object Column {
   /** Create a TimestampNTZColumn from epoch microsecond values. */
   inline def timestampNTZ(data: Array[Long], nulls: BitSet = BitSet.empty): Column[types.TimestampNTZ] = {
     TimestampNTZColumn(data, nulls)
+  }
+
+  /** Create a TimeColumn from microsecond-since-midnight values. */
+  inline def time(data: Array[Long], nulls: BitSet = BitSet.empty): Column[types.Time] = {
+    TimeColumn(data, nulls)
   }
 
   /** Create a YearMonthIntervalColumn from total month values. */
@@ -388,6 +515,94 @@ object Column {
     AnyColumn(data, nulls)
   }
 
+  /** Create an ArrayColumn from per-row sequences with a flat child column.
+    *
+    * @param elements
+    *   Flat column holding all array elements concatenated.
+    * @param offsets
+    *   Per-row element boundaries (length row count + 1).
+    */
+  def array[A](elements: Column[A], offsets: Array[Int], nulls: BitSet = BitSet.empty): Column[Seq[A]] =
+    ArrayColumn(elements, offsets, nulls)
+
+  /** Create a MapColumn from flat key/value columns with per-row offsets. */
+  def map[K, V](
+    keys: Column[K],
+    values: Column[V],
+    offsets: Array[Int],
+    nulls: BitSet = BitSet.empty
+  ): Column[Map[K, V]] =
+    MapColumn(keys, values, offsets, nulls)
+
+  /** Create a StructColumn from per-field columns and the struct's flat schema. */
+  def struct[T](columns: Vector[Column[?]], schema: Schema[T], nulls: BitSet = BitSet.empty): Column[T] =
+    StructColumn(columns, schema, nulls)
+
+  /** Build an ArrayColumn from per-row element vectors.
+    *
+    * Elements are constructed through `Column.fromValues`, so nested element types (arrays of
+    * arrays, arrays of structs) recurse into their own typed columns.
+    */
+  def arrayFromVectors(
+    rows: Vector[Vector[Any]],
+    elementType: ColumnType,
+    nulls: BitSet
+  ): Either[ExecutionError, Column[?]] = {
+    val lengths = rows.map(_.length)
+    val offsets = lengths.scanLeft(0)(_ + _).toArray
+    Column.fromValues(rows.flatten, elementType).map(elements => ArrayColumn(elements, offsets, nulls))
+  }
+
+  /** Build a MapColumn from per-row key/value vector pairs. */
+  def mapFromVectors(
+    rows: Vector[(Vector[Any], Vector[Any])],
+    keyType: ColumnType,
+    valueType: ColumnType,
+    nulls: BitSet
+  ): Either[ExecutionError, Column[?]] = {
+    val lengths = rows.map(_._1.length)
+    val offsets = lengths.scanLeft(0)(_ + _).toArray
+    for {
+      keys <- Column.fromValues(rows.flatMap(_._1), keyType)
+      values <- Column.fromValues(rows.flatMap(_._2), valueType)
+    } yield MapColumn(keys, values, offsets, nulls)
+  }
+
+  /** Build a StructColumn from per-row struct values via the struct's flat schema.
+    *
+    * Each value is encoded with `schema.encodeAny` into the flat field values matching `fields`,
+    * and each field is materialized through `Column.fromValues`.
+    */
+  def structFromValues[T](
+    values: Vector[Any],
+    schema: Schema[T],
+    fields: Vector[(String, ColumnType)]
+  ): Either[ExecutionError, Column[T]] = {
+    if (schema.columnCount != fields.size) {
+      Left(
+        ExecutionError.TypeMismatch(
+          s"struct with ${fields.size} fields",
+          s"schema with ${schema.columnCount} columns",
+          "Column.structFromValues"
+        )
+      )
+    } else {
+      val nullIndices = values.zipWithIndex.collect { case (v, i) if Option(v).isEmpty => i }.to(BitSet)
+      val encodedRows = values.map { v =>
+        if (Option(v).isEmpty) Vector.fill(fields.size)(null) // scalafix:ok DisableSyntax.null
+        else schema.encodeAny(v)
+      }
+      fields.zipWithIndex
+        .foldLeft[Either[ExecutionError, Vector[Column[?]]]](Right(Vector.empty)) { (acc, field) =>
+          acc.flatMap { cols =>
+            val fieldValues = encodedRows.map(_(field._2))
+            Column.fromValues(fieldValues, field._1._2).map(cols :+ _)
+          }
+        }
+        .map(cols => StructColumn(cols, schema, nullIndices))
+    }
+  }
+
   /** Create an empty column of the given type. */
   def empty(columnType: ColumnType): Column[?] = columnType match {
     case ColumnType.IntType => IntColumn(Array.empty[Int], BitSet.empty)
@@ -398,6 +613,7 @@ object Column {
     case ColumnType.ByteType => ByteColumn(Array.empty[Byte], BitSet.empty)
     case ColumnType.TimestampType => TimestampColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.TimestampNTZType => TimestampNTZColumn(Array.empty[Long], BitSet.empty)
+    case ColumnType.TimeType => TimeColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.YearMonthIntervalType => YearMonthIntervalColumn(Array.empty[Int], BitSet.empty)
     case ColumnType.DayTimeIntervalType => DayTimeIntervalColumn(Array.empty[Long], BitSet.empty)
     case ColumnType.StringType => StringColumn(Array.empty[String | Null], BitSet.empty)
@@ -408,12 +624,28 @@ object Column {
     case ColumnType.DecimalType(_, _) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.CharType(_) => StringColumn(Array.empty[String | Null], BitSet.empty)
     case ColumnType.VarcharType(_) => StringColumn(Array.empty[String | Null], BitSet.empty)
+    case ColumnType.StructType(fields) =>
+      StructColumn(fields.map((_, ct) => Column.empty(ct)), emptyStructSchema(fields), BitSet.empty)
+    case ColumnType.ArrayType(elem) =>
+      ArrayColumn(Column.empty(elem), Array(0), BitSet.empty)
+    case ColumnType.MapType(key, value) =>
+      MapColumn(Column.empty(key), Column.empty(value), Array(0), BitSet.empty)
     case ColumnType.VariantType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.AnyType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
-    case ColumnType.ArrayType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
-    case ColumnType.MapType(_, _) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
   }
+
+  private def emptyStructSchemaOf[X](fields: Vector[(String, ColumnType)]): Schema[X] = new Schema[X] {
+    def columnCount: Int = fields.size
+    def columnNames: Vector[String] = fields.map(_._1)
+    def columnTypes: Vector[ColumnType] = fields.map(_._2)
+    def encode(value: X): Vector[Any] = Vector.empty
+    def decode(values: Vector[Any]): Either[net.ghoula.strongbow.errors.DecodeError, X] =
+      Left(net.ghoula.strongbow.errors.DecodeError.TypeMismatch("Struct", "empty struct column"))
+  }
+
+  private def emptyStructSchema(fields: Vector[(String, ColumnType)]): Schema[?] =
+    emptyStructSchemaOf(fields)
 
   /** Create a column from a vector of values.
     *
@@ -472,6 +704,16 @@ object Column {
         buildColumn[Long]("Timestamp", 0L, { case l: Long => l }, TimestampColumn(_, _))
       case ColumnType.TimestampNTZType =>
         buildColumn[Long]("TimestampNTZ", 0L, { case l: Long => l }, TimestampNTZColumn(_, _))
+      case ColumnType.TimeType =>
+        buildColumn[Long](
+          "Time",
+          0L,
+          {
+            case l: Long => l
+            case lt: java.time.LocalTime => types.Time.fromLocalTime(lt).toMicros
+          },
+          TimeColumn(_, _)
+        )
       case ColumnType.YearMonthIntervalType =>
         buildColumn[Int]("YearMonthInterval", 0, { case i: Int => i }, YearMonthIntervalColumn(_, _))
       case ColumnType.DayTimeIntervalType =>
@@ -531,8 +773,47 @@ object Column {
                 )
         }
         validated.map(byteArrays => binaryFromArrays(byteArrays.toArray, nullIndices))
-      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) | ColumnType.ArrayType(_) |
-          ColumnType.MapType(_, _) =>
+      case ColumnType.ArrayType(elementType) =>
+        val rowsOrError = values.zipWithIndex.foldLeft[Either[ExecutionError, Vector[Vector[Any]]]](
+          Right(Vector.empty)
+        ) { (acc, pair) =>
+          acc.flatMap { rows =>
+            val (v, idx) = pair
+            if (nullIndices.contains(idx)) Right(rows :+ Vector.empty)
+            else
+              Option(v) match {
+                case Some(s: Seq[?]) => Right(rows :+ s.toVector)
+                case Some(other) =>
+                  Left(ExecutionError.TypeMismatch("Seq", other.getClass.getSimpleName, "Column.fromValues"))
+                case None => Right(rows :+ Vector.empty)
+              }
+          }
+        }
+        rowsOrError.flatMap(arrayFromVectors(_, elementType, nullIndices))
+      case ColumnType.MapType(keyType, valueType) =>
+        val rowsOrError = values.zipWithIndex.foldLeft[
+          Either[ExecutionError, Vector[(Vector[Any], Vector[Any])]]
+        ](Right(Vector.empty)) { (acc, pair) =>
+          acc.flatMap { rows =>
+            val (v, idx) = pair
+            if (nullIndices.contains(idx)) Right(rows :+ ((Vector.empty, Vector.empty)))
+            else
+              Option(v) match {
+                case Some(m: Map[?, ?]) => Right(rows :+ ((m.keys.toVector, m.values.toVector)))
+                case Some(other) =>
+                  Left(ExecutionError.TypeMismatch("Map", other.getClass.getSimpleName, "Column.fromValues"))
+                case None => Right(rows :+ ((Vector.empty, Vector.empty)))
+              }
+          }
+        }
+        rowsOrError.flatMap(mapFromVectors(_, keyType, valueType, nullIndices))
+      case ColumnType.StructType(_) =>
+        Left(
+          ExecutionError.UnsupportedOperation(
+            "StructType columns require a nested schema; use Column.structFromValues"
+          )
+        )
+      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) =>
         Right(AnyColumn(values.toArray, nullIndices))
     }
   }
@@ -553,6 +834,7 @@ object Column {
         case ByteColumn(data, _) => java.lang.Byte.compare(data(a), data(b))
         case TimestampColumn(data, _) => java.lang.Long.compare(data(a), data(b))
         case TimestampNTZColumn(data, _) => java.lang.Long.compare(data(a), data(b))
+        case TimeColumn(data, _) => java.lang.Long.compare(data(a), data(b))
         case YearMonthIntervalColumn(data, _) => Integer.compare(data(a), data(b))
         case DayTimeIntervalColumn(data, _) => java.lang.Long.compare(data(a), data(b))
         case BinaryColumn(data, offsets, _) =>
@@ -561,8 +843,27 @@ object Column {
         case StringColumn(data, _) => data(a).nn.compareTo(data(b))
         case DateColumn(data, _) => Integer.compare(data(a), data(b))
         case BooleanColumn(data, _) => java.lang.Boolean.compare(data(a), data(b))
+        case ArrayColumn(elements, offsets, _) =>
+          compareRanges(elements, offsets(a), offsets(a + 1), offsets(b), offsets(b + 1))
+        case MapColumn(_, _, _, _) =>
+          String.valueOf(col.getValue(a)).compareTo(String.valueOf(col.getValue(b)))
+        case StructColumn(columns, _, _) =>
+          columns.foldLeft(0) { (acc, c) =>
+            if (acc != 0) acc else compareAt(c, a, b)
+          }
         case AnyColumn(data, _) => Ordering.String.compare(data(a).toString, data(b).toString)
       }
+  }
+
+  private def compareRanges(elements: Column[?], aStart: Int, aEnd: Int, bStart: Int, bEnd: Int): Int = {
+    val aLen = aEnd - aStart
+    val bLen = bEnd - bStart
+    val minLen = Math.min(aLen, bLen)
+    val firstDiff = (0 until minLen).find(i => compareAt(elements, aStart + i, bStart + i) != 0)
+    firstDiff match {
+      case Some(i) => compareAt(elements, aStart + i, bStart + i)
+      case None => Integer.compare(aLen, bLen)
+    }
   }
 
   def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] = {
@@ -577,7 +878,9 @@ object Column {
       case ShortColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case ByteColumn(data, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case TimestampColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
-      case TimestampNTZColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
+      case TimestampNTZColumn(data, _) =>
+        sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
+      case TimeColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
       case YearMonthIntervalColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => Integer.compare(a, b) < 0)
       case DayTimeIntervalColumn(data, _) =>
         sort(IArray.unsafeFromArray(data))((a, b) => java.lang.Long.compare(a, b) < 0)
@@ -587,6 +890,12 @@ object Column {
         (0 until rowCount).sortWith((a, b) => compareAt(bc, a, b) < 0).toArray
       case DecimalColumn(data, _, _, _) => sort(IArray.unsafeFromArray(data))(_ < _)
       case BooleanColumn(data, _) => sort(IArray.unsafeFromArray(data))((a, b) => !a && b)
+      case ac: ArrayColumn[?] =>
+        (0 until rowCount).sortWith((a, b) => compareAt(ac, a, b) < 0).toArray
+      case mc: MapColumn[?, ?] =>
+        (0 until rowCount).sortWith((a, b) => compareAt(mc, a, b) < 0).toArray
+      case sc: StructColumn[?] =>
+        (0 until rowCount).sortWith((a, b) => compareAt(sc, a, b) < 0).toArray
       case AnyColumn(data, _) =>
         sort(IArray.unsafeFromArray(data))((a, b) => String.valueOf(a).compareTo(String.valueOf(b)) < 0)
     }

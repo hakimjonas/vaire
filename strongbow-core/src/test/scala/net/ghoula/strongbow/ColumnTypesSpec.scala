@@ -30,7 +30,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result =
-      Column.fromValues(Vector(1.5f, null, 3.5f), ColumnType.FloatType) // scalafix:ok DisableSyntax.null
+      Column.fromValues(Vector(1.5f, SqlNull.value, 3.5f), ColumnType.FloatType)
     result.isRight shouldBe true
     val col = result.toOption.get
     col.length shouldBe 3
@@ -102,7 +102,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](1: Short, null, 3: Short), // scalafix:ok DisableSyntax.null
+      Vector[Any](1: Short, SqlNull.value, 3: Short),
       ColumnType.ShortType
     )
     result.isRight shouldBe true
@@ -159,7 +159,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](1: Byte, null, 3: Byte), // scalafix:ok DisableSyntax.null
+      Vector[Any](1: Byte, SqlNull.value, 3: Byte),
       ColumnType.ByteType
     )
     result.isRight shouldBe true
@@ -210,7 +210,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](1000000L, null, 3000000L), // scalafix:ok DisableSyntax.null
+      Vector[Any](1000000L, SqlNull.value, 3000000L),
       ColumnType.TimestampType
     )
     result.isRight shouldBe true
@@ -264,7 +264,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](500L, null, 700L), // scalafix:ok DisableSyntax.null
+      Vector[Any](500L, SqlNull.value, 700L),
       ColumnType.TimestampNTZType
     )
     result.isRight shouldBe true
@@ -314,7 +314,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](12, null, 36), // scalafix:ok DisableSyntax.null
+      Vector[Any](12, SqlNull.value, 36),
       ColumnType.YearMonthIntervalType
     )
     result.isRight shouldBe true
@@ -365,7 +365,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](86400000000L, null, 259200000000L), // scalafix:ok DisableSyntax.null
+      Vector[Any](86400000000L, SqlNull.value, 259200000000L),
       ColumnType.DayTimeIntervalType
     )
     result.isRight shouldBe true
@@ -426,7 +426,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues" in {
     val result = Column.fromValues(
-      Vector[Any](Array[Byte](1, 2), null, Array[Byte](3, 4, 5)), // scalafix:ok DisableSyntax.null
+      Vector[Any](Array[Byte](1, 2), SqlNull.value, Array[Byte](3, 4, 5)),
       ColumnType.BinaryType
     )
     result.isRight shouldBe true
@@ -575,7 +575,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   "VarcharType" should "map to StringColumn via fromValues" in {
     val result = Column.fromValues(
-      Vector("hello", null, "world"), // scalafix:ok DisableSyntax.null
+      Vector("hello", SqlNull.value, "world"),
       ColumnType.VarcharType(10)
     )
     result.isRight shouldBe true
@@ -787,9 +787,9 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
     value shouldBe 150L
   }
 
-  it should "return null from getValue for null index" in {
+  it should "return SqlNull.value from getValue for SqlNull.value index" in {
     val col = Column.decimal(Array(0L, 200L), 10, 2, BitSet(0))
-    (col.getValue(0) == null) shouldBe true // scalafix:ok DisableSyntax.null
+    (col.getValue(0) == SqlNull.value) shouldBe true
     col.getValue(1) shouldBe 200L
   }
 
@@ -801,7 +801,7 @@ class ColumnTypesSpec extends AnyFlatSpec with Matchers {
 
   it should "round-trip through fromValues with Long input" in {
     val result = Column.fromValues(
-      Vector[Any](150L, null, 350L), // scalafix:ok DisableSyntax.null
+      Vector[Any](150L, SqlNull.value, 350L),
       ColumnType.DecimalType(10, 2)
     )
     result.isRight shouldBe true

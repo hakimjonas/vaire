@@ -194,9 +194,9 @@ class ExprStringNullSpec extends AnyFlatSpec with Matchers {
     cell.contains(Expr.lit("x")).outputType shouldBe Some(ColumnType.BooleanType)
   }
 
-  "isNull" should "detect null values" in {
+  "isNull" should "detect SqlNull.value values" in {
     val col = Column.any(
-      Array("hello", null, "world"), // scalafix:ok DisableSyntax.null
+      Array("hello", SqlNull.value, "world"),
       scala.collection.immutable.BitSet(1)
     )
     val columns = Vector(col)
@@ -207,9 +207,9 @@ class ExprStringNullSpec extends AnyFlatSpec with Matchers {
     results shouldBe Seq(Right(false), Right(true), Right(false))
   }
 
-  "isNotNull" should "detect non-null values" in {
+  "isNotNull" should "detect non-SqlNull.value values" in {
     val col = Column.any(
-      Array("hello", null, "world"), // scalafix:ok DisableSyntax.null
+      Array("hello", SqlNull.value, "world"),
       scala.collection.immutable.BitSet(1)
     )
     val columns = Vector(col)
@@ -242,13 +242,13 @@ class ExprStringNullSpec extends AnyFlatSpec with Matchers {
     results shouldBe Seq(Right(false), Right(true), Right(true), Right(true), Right(false))
   }
 
-  "coalesce" should "return first non-null value" in {
+  "coalesce" should "return first non-SqlNull.value value" in {
     val col1 = Column.any(
-      Array(null, "b", null), // scalafix:ok DisableSyntax.null
+      Array(SqlNull.value, "b", SqlNull.value),
       scala.collection.immutable.BitSet(0, 2)
     )
     val col2 = Column.any(
-      Array("x", null, null), // scalafix:ok DisableSyntax.null
+      Array("x", SqlNull.value, SqlNull.value),
       scala.collection.immutable.BitSet(1, 2)
     )
     val columns = Vector(col1, col2)
@@ -260,7 +260,7 @@ class ExprStringNullSpec extends AnyFlatSpec with Matchers {
     eval(expr, columns, 1) shouldBe Right("b")
   }
 
-  "null/conditional outputType" should "return correct types" in {
+  "SqlNull.value/conditional outputType" should "return correct types" in {
     val cell = Expr.Cell[Int, Int]("v", ColumnIndex(0))
     cell.isNull.outputType shouldBe Some(ColumnType.BooleanType)
     cell.isNotNull.outputType shouldBe Some(ColumnType.BooleanType)

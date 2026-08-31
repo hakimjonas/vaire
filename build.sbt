@@ -65,8 +65,8 @@ lazy val sharedScalacOptions = Seq(
 )
 
 // Dependencies
-val saratiVersion = "0.3.2"
-val rumilVersion = "0.3.5"
+val saratiVersion = "0.3.9"
+val rumilVersion = "0.3.11"
 val sparkVersion = "4.2.0"
 
 lazy val root = project

@@ -1,7 +1,21 @@
 package net.ghoula.strongbow.interpreter
 
 import net.ghoula.sarati.ast.json.JsonValue
+import net.ghoula.sarati.ast.xml.xpathXmlConfig
+import net.ghoula.sarati.xpath.{
+  AttributeNode,
+  CommentNode,
+  Document,
+  ElementNode,
+  PiNode,
+  TextNode,
+  XNode,
+  XPathEval,
+  XPathValue
+}
 import parsers.json.{formatJson, parseJson}
+import parsers.xml.parseXml
+import parsers.xpath.parseXPath
 
 import scala.collection.immutable.BitSet
 
@@ -1651,6 +1665,54 @@ object ExprInterpreter {
               )
             case _ => Column.any(Array.empty[Any | Null])
           }
+
+        case x: Expr.Xpath[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathString[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathBoolean[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathShort[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathInt[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathLong[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathFloat[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.XpathDouble[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = false, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpath[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathString[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathBoolean[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathShort[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathInt[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathLong[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathFloat[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = true, columns, rowCount, lambdaScope)
+
+        case x: Expr.TryXpathDouble[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = true, columns, rowCount, lambdaScope)
 
         case st: Expr.Struct[Row, _] =>
           val fieldResults = st.fields.map { case (_, fieldExpr, fieldCt) =>
@@ -4425,6 +4487,111 @@ object ExprInterpreter {
         }
         Column.boolean(data, BitSet.empty ++ outNulls)
       }
+    }
+
+  /** The XPath 1.0 result projection kinds, one per `xpath*` function. */
+  private enum XpathKind derives CanEqual {
+    case NodeSet, Str, Boolean, Short, Int, Long, Float, Double
+  }
+
+  /** Spark's `xpath()` node values: text/attribute/comment/PI content, null for element and
+    * document nodes (W3C DOM `getNodeValue` semantics, pinned against Spark in the gate).
+    */
+  private def xpathNodeValue(node: XNode): Any | Null = node match {
+    case t: TextNode => t.text
+    case a: AttributeNode => a.value
+    case c: CommentNode => c.text
+    case p: PiNode => p.content
+    case _: ElementNode | _: Document => null // scalafix:ok DisableSyntax.null
+  }
+
+  /** XPath 1.0 boolean coercion of an evaluated value (Spark `xpath_boolean`). */
+  private def xpathToBoolean(value: XPathValue): Boolean = value match {
+    case XPathValue.NodeSet(ns) => ns.nonEmpty
+    case XPathValue.Bool(b) => b
+    case XPathValue.Number(n) => !n.isNaN && n != 0.0
+    case XPathValue.Str(s) => s.nonEmpty
+  }
+
+  /** Evaluate `path` (parsed once per expression) against each row's XML document. Mirrors Spark's
+    * `xpath*` family: null or empty inputs yield null rows; invalid XML or a failing evaluation
+    * errors the whole column with the row index (tryMode: null rows instead); a non-node-set result
+    * under the node-set projection errors (Spark: "Can not convert ...").
+    */
+  private def xpathArm[Row](
+    e: Expr[Row, String],
+    path: String,
+    kind: XpathKind,
+    tryMode: Boolean,
+    columns: Vector[Column[?]],
+    rowCount: Int,
+    lambdaScope: LambdaScope
+  ): Either[ExecutionError, Column[?]] =
+    parseXPath(path) match {
+      case parser.core.Result.Success(ast, _) =>
+        evalColumn(e, columns, ColumnType.StringType)(using lambdaScope).flatMap { col =>
+          val out = new Array[Any | Null](rowCount)
+          val outNulls = scala.collection.mutable.BitSet.empty
+          val error = (0 until rowCount).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
+            err match {
+              case some @ Some(_) => some
+              case None =>
+                def fail(msg: String): Option[ExecutionError] =
+                  if (tryMode) { outNulls += i; None }
+                  else Some(ExecutionError.InvalidValue(s"$msg at row $i"))
+                val xmlOpt: Option[String] =
+                  if (col.isNull(RowIndex(i))) None
+                  else
+                    col.getValue(i) match {
+                      case x: String => Option(x)
+                      case _ => None
+                    }
+                xmlOpt.filter(_.nonEmpty) match {
+                  case None =>
+                    outNulls += i
+                    None
+                  case Some(xmlStr) =>
+                    parseXml(xmlStr, xpathXmlConfig) match {
+                      case parser.core.Result.Success(doc, _) =>
+                        XPathEval.eval(ast, doc) match {
+                          case Right(value) =>
+                            kind match {
+                              case XpathKind.NodeSet =>
+                                value match {
+                                  case XPathValue.NodeSet(ns) =>
+                                    out(i) = ns.map(xpathNodeValue): Seq[Any | Null]
+                                    None
+                                  case _ => fail("XPath result is not a node-set")
+                                }
+                              case XpathKind.Str => out(i) = XPathEval.asString(value); None
+                              case XpathKind.Boolean => out(i) = xpathToBoolean(value); None
+                              case XpathKind.Short =>
+                                out(i) = XPathEval.toNumberOrNaN(value).shortValue; None
+                              case XpathKind.Int =>
+                                out(i) = XPathEval.toNumberOrNaN(value).toInt; None
+                              case XpathKind.Long =>
+                                out(i) = XPathEval.toNumberOrNaN(value).toLong; None
+                              case XpathKind.Float =>
+                                out(i) = XPathEval.toNumberOrNaN(value).toFloat; None
+                              case XpathKind.Double =>
+                                out(i) = XPathEval.toNumberOrNaN(value); None
+                            }
+                          case Left(evalErr) =>
+                            fail(s"xpath evaluation failed: ${evalErr.toString}")
+                        }
+                      case parseFailure =>
+                        if (tryMode) { outNulls += i; None }
+                        else
+                          Some(ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300)))
+                    }
+                }
+            }
+          }
+          error.toLeft(Column.any(out, BitSet.empty ++ outNulls))
+        }
+      case parseFailure =>
+        // A path error is a programming error: it fails in both modes.
+        Left(ExecutionError.InvalidValue(s"Invalid XPath '$path': $parseFailure".take(300)))
     }
 
   /** The padding value for the shorter side of a zip: Spark binds null to the overhang. */

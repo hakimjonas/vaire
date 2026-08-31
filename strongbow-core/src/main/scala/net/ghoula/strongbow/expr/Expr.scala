@@ -18,6 +18,19 @@ import net.ghoula.strongbow.types.{
   YearMonthInterval
 }
 
+/** A lambda variable binder for higher-order expressions.
+  *
+  * The phantom type on [[Binder]] gives `LambdaVar(binder: Binder[A])` type `Expr[Row, A]` by
+  * construction. Binders are created and handed to lambda bodies by the higher-order combinators
+  * ([[Expr.transform]], [[Expr.aggregate]], ...); a `LambdaVar` is evaluated against the binding
+  * established by the nearest enclosing higher-order expression, so unbound use fails evaluation
+  * rather than compiling away.
+  *
+  * Identity semantics (reference equality) are load-bearing: nested and sibling lambdas must not
+  * collide in the binding scope, so Binder is a plain class, not a case class.
+  */
+final class Binder[A] private[expr] ()
+
 /** Type-safe expression language for dataset operations.
   *
   * Expr[Row, A] is a GADT that carries type evidence through pattern matching. No casts
@@ -32,6 +45,9 @@ enum Expr[Row, +A] {
   case Cell[Row, A](name: String, index: ColumnIndex) extends Expr[Row, A]
   case Const[Row, A](value: A) extends Expr[Row, A]
   case Named[Row, A](expr: Expr[Row, A], name: String) extends Expr[Row, A]
+
+  /** A lambda variable bound by the nearest enclosing higher-order expression. */
+  case LambdaVar[Row, A](binder: Binder[A]) extends Expr[Row, A]
 
   case Add[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
   case Sub[Row](left: Expr[Row, Int], right: Expr[Row, Int]) extends Expr[Row, Int]
@@ -215,6 +231,98 @@ enum Expr[Row, +A] {
   case MapEntries[Row, K, V](expr: Expr[Row, Map[K, V]]) extends Expr[Row, Seq[(K, V)]]
   case MapFromArrays[Row, K, V](keys: Expr[Row, Seq[K]], values: Expr[Row, Seq[V]]) extends Expr[Row, Map[K, V]]
   case MapConcat[Row, K, V](left: Expr[Row, Map[K, V]], right: Expr[Row, Map[K, V]]) extends Expr[Row, Map[K, V]]
+
+  /** Higher-order: apply a lambda to every element (and optionally its index) of an array. */
+  case Transform[Row, A, B](
+    array: Expr[Row, Seq[A]],
+    binder: Binder[A],
+    indexBinder: Option[Binder[Int]],
+    body: Expr[Row, B]
+  ) extends Expr[Row, Seq[B]]
+
+  /** Higher-order: keep the elements (and optionally the index) whose lambda result is true. */
+  case Filter[Row, A](
+    array: Expr[Row, Seq[A]],
+    binder: Binder[A],
+    indexBinder: Option[Binder[Int]],
+    body: Expr[Row, Boolean]
+  ) extends Expr[Row, Seq[A]]
+
+  /** Higher-order: whether the lambda holds for at least one element (three-valued). */
+  case Exists[Row, A](array: Expr[Row, Seq[A]], binder: Binder[A], body: Expr[Row, Boolean]) extends Expr[Row, Boolean]
+
+  /** Higher-order: whether the lambda holds for every element (three-valued). */
+  case ForAll[Row, A](array: Expr[Row, Seq[A]], binder: Binder[A], body: Expr[Row, Boolean]) extends Expr[Row, Boolean]
+
+  /** Higher-order: fold the array left-to-right from `zero`, then optionally project the
+    * accumulator with `finish`. Spark's `aggregate`/`reduce`.
+    */
+  case Aggregate[Row, S, A](
+    array: Expr[Row, Seq[A]],
+    zero: Expr[Row, S],
+    accBinder: Binder[S],
+    elemBinder: Binder[A],
+    merge: Expr[Row, S],
+    finish: Option[(Binder[S], Expr[Row, S])]
+  ) extends Expr[Row, S]
+
+  /** Higher-order: merge two arrays element-wise; the shorter is null-padded, so the lambda binds
+    * `Option` elements.
+    */
+  case ZipWith[Row, A, B, C](
+    left: Expr[Row, Seq[A]],
+    right: Expr[Row, Seq[B]],
+    leftBinder: Binder[Option[A]],
+    rightBinder: Binder[Option[B]],
+    body: Expr[Row, C]
+  ) extends Expr[Row, Seq[C]]
+
+  /** Higher-order: keep the map entries whose lambda result is true. */
+  case MapFilter[Row, K, V](
+    map: Expr[Row, Map[K, V]],
+    keyBinder: Binder[K],
+    valueBinder: Binder[V],
+    body: Expr[Row, Boolean]
+  ) extends Expr[Row, Map[K, V]]
+
+  /** Higher-order: merge two maps by key; missing values bind as `None`. */
+  case MapZipWith[Row, K, V1, V2, C](
+    left: Expr[Row, Map[K, V1]],
+    right: Expr[Row, Map[K, V2]],
+    keyBinder: Binder[K],
+    leftBinder: Binder[Option[V1]],
+    rightBinder: Binder[Option[V2]],
+    body: Expr[Row, C]
+  ) extends Expr[Row, Map[K, C]]
+
+  /** Higher-order: transform map keys (the result must be distinct per Spark; duplicate detection
+    * uses boxed equality in-memory, so it diverges from Spark's Catalyst equality only for
+    * array/struct keys).
+    */
+  case TransformKeys[Row, K, V, K2](
+    map: Expr[Row, Map[K, V]],
+    keyBinder: Binder[K],
+    valueBinder: Binder[V],
+    body: Expr[Row, K2]
+  ) extends Expr[Row, Map[K2, V]]
+
+  /** Higher-order: transform map values. */
+  case TransformValues[Row, K, V, V2](
+    map: Expr[Row, Map[K, V]],
+    keyBinder: Binder[K],
+    valueBinder: Binder[V],
+    body: Expr[Row, V2]
+  ) extends Expr[Row, Map[K, V2]]
+
+  /** Higher-order: sort by a comparator lambda (negative/zero/positive, like Spark's
+    * `array_sort(e, comparator)`); a null comparator result fails evaluation.
+    */
+  case ArraySortComparator[Row, A](
+    array: Expr[Row, Seq[A]],
+    leftBinder: Binder[A],
+    rightBinder: Binder[A],
+    body: Expr[Row, Int]
+  ) extends Expr[Row, Seq[A]]
 
   case Md5[Row](expr: Expr[Row, String]) extends Expr[Row, String]
   case Sha1[Row](expr: Expr[Row, String]) extends Expr[Row, String]
@@ -865,6 +973,77 @@ object Expr {
     inline def arrayExcept(other: Expr[Row, Seq[A]]): Expr[Row, Seq[A]] = ArrayExcept(e, other)
     inline def elementAt(index: Expr[Row, Int]): Expr[Row, A] = ElementAt(e, index)
     inline def arraySlice(start: Int, length: Int): Expr[Row, Seq[A]] = ArraySlice(e, start, length)
+
+    def transform[B](body: Expr[Row, A] => Expr[Row, B]): Expr[Row, Seq[B]] = {
+      val binder = Binder[A]()
+      Transform(e, binder, None, body(LambdaVar(binder)))
+    }
+
+    def transform[B](body: (Expr[Row, A], Expr[Row, Int]) => Expr[Row, B]): Expr[Row, Seq[B]] = {
+      val binder = Binder[A]()
+      val indexBinder = Binder[Int]()
+      Transform(e, binder, Some(indexBinder), body(LambdaVar(binder), LambdaVar(indexBinder)))
+    }
+
+    def filter(body: Expr[Row, A] => Expr[Row, Boolean]): Expr[Row, Seq[A]] = {
+      val binder = Binder[A]()
+      Filter(e, binder, None, body(LambdaVar(binder)))
+    }
+
+    def filter(body: (Expr[Row, A], Expr[Row, Int]) => Expr[Row, Boolean]): Expr[Row, Seq[A]] = {
+      val binder = Binder[A]()
+      val indexBinder = Binder[Int]()
+      Filter(e, binder, Some(indexBinder), body(LambdaVar(binder), LambdaVar(indexBinder)))
+    }
+
+    def exists(body: Expr[Row, A] => Expr[Row, Boolean]): Expr[Row, Boolean] = {
+      val binder = Binder[A]()
+      Exists(e, binder, body(LambdaVar(binder)))
+    }
+
+    def forall(body: Expr[Row, A] => Expr[Row, Boolean]): Expr[Row, Boolean] = {
+      val binder = Binder[A]()
+      ForAll(e, binder, body(LambdaVar(binder)))
+    }
+
+    def aggregate[S](zero: Expr[Row, S])(merge: (Expr[Row, S], Expr[Row, A]) => Expr[Row, S]): Expr[Row, S] = {
+      val accBinder = Binder[S]()
+      val elemBinder = Binder[A]()
+      Aggregate(e, zero, accBinder, elemBinder, merge(LambdaVar(accBinder), LambdaVar(elemBinder)), None)
+    }
+
+    def aggregate[S](
+      zero: Expr[Row, S]
+    )(
+      merge: (Expr[Row, S], Expr[Row, A]) => Expr[Row, S],
+      finish: Expr[Row, S] => Expr[Row, S]
+    ): Expr[Row, S] = {
+      val accBinder = Binder[S]()
+      val elemBinder = Binder[A]()
+      val finishBinder = Binder[S]()
+      Aggregate(
+        e,
+        zero,
+        accBinder,
+        elemBinder,
+        merge(LambdaVar(accBinder), LambdaVar(elemBinder)),
+        Some((finishBinder, finish(LambdaVar(finishBinder))))
+      )
+    }
+
+    def zipWith[B, C](
+      other: Expr[Row, Seq[B]]
+    )(body: (Expr[Row, Option[A]], Expr[Row, Option[B]]) => Expr[Row, C]): Expr[Row, Seq[C]] = {
+      val leftBinder = Binder[Option[A]]()
+      val rightBinder = Binder[Option[B]]()
+      ZipWith(e, other, leftBinder, rightBinder, body(LambdaVar(leftBinder), LambdaVar(rightBinder)))
+    }
+
+    def arraySortBy(body: (Expr[Row, A], Expr[Row, A]) => Expr[Row, Int]): Expr[Row, Seq[A]] = {
+      val leftBinder = Binder[A]()
+      val rightBinder = Binder[A]()
+      ArraySortComparator(e, leftBinder, rightBinder, body(LambdaVar(leftBinder), LambdaVar(rightBinder)))
+    }
   }
 
   extension [Row, A](e: Expr[Row, Seq[Seq[A]]]) {
@@ -877,6 +1056,40 @@ object Expr {
     inline def mapContainsKey(key: Expr[Row, K]): Expr[Row, Boolean] = MapContainsKey(e, key)
     inline def mapEntries: Expr[Row, Seq[(K, V)]] = MapEntries(e)
     inline def mapConcat(other: Expr[Row, Map[K, V]]): Expr[Row, Map[K, V]] = MapConcat(e, other)
+
+    def mapFilter(body: (Expr[Row, K], Expr[Row, V]) => Expr[Row, Boolean]): Expr[Row, Map[K, V]] = {
+      val keyBinder = Binder[K]()
+      val valueBinder = Binder[V]()
+      MapFilter(e, keyBinder, valueBinder, body(LambdaVar(keyBinder), LambdaVar(valueBinder)))
+    }
+
+    def transformKeys[K2](body: (Expr[Row, K], Expr[Row, V]) => Expr[Row, K2]): Expr[Row, Map[K2, V]] = {
+      val keyBinder = Binder[K]()
+      val valueBinder = Binder[V]()
+      TransformKeys(e, keyBinder, valueBinder, body(LambdaVar(keyBinder), LambdaVar(valueBinder)))
+    }
+
+    def transformValues[V2](body: (Expr[Row, K], Expr[Row, V]) => Expr[Row, V2]): Expr[Row, Map[K, V2]] = {
+      val keyBinder = Binder[K]()
+      val valueBinder = Binder[V]()
+      TransformValues(e, keyBinder, valueBinder, body(LambdaVar(keyBinder), LambdaVar(valueBinder)))
+    }
+
+    def mapZipWith[V2, C](other: Expr[Row, Map[K, V2]])(
+      body: (Expr[Row, K], Expr[Row, Option[V]], Expr[Row, Option[V2]]) => Expr[Row, C]
+    ): Expr[Row, Map[K, C]] = {
+      val keyBinder = Binder[K]()
+      val leftBinder = Binder[Option[V]]()
+      val rightBinder = Binder[Option[V2]]()
+      MapZipWith(
+        e,
+        other,
+        keyBinder,
+        leftBinder,
+        rightBinder,
+        body(LambdaVar(keyBinder), LambdaVar(leftBinder), LambdaVar(rightBinder))
+      )
+    }
   }
 
   def currentPath[Row](): Expr[Row, String] = CurrentPath()
@@ -1446,6 +1659,12 @@ object Expr {
           _: Expr.RegexpExtract[_] | _: Expr.ConcatWs[_] | _: Expr.CastToString[_, _] =>
         Some(ColumnType.StringType)
       case _: Expr.StringSplit[_] | _: Expr.JsonTuple[_] => Some(ColumnType.AnyType)
+      case _: Expr.LambdaVar[_, _] | _: Expr.Transform[_, _, _] | _: Expr.ZipWith[_, _, _, _] |
+          _: Expr.Aggregate[_, _, _] | _: Expr.MapZipWith[_, _, _, _, _] | _: Expr.TransformKeys[_, _, _, _] |
+          _: Expr.TransformValues[_, _, _, _] | _: Expr.ArraySortComparator[_, _] =>
+        Some(ColumnType.AnyType)
+      case _: Expr.Filter[_, _] | _: Expr.MapFilter[_, _, _] => Some(ColumnType.AnyType)
+      case _: Expr.Exists[_, _] | _: Expr.ForAll[_, _] => Some(ColumnType.BooleanType)
       case _: Expr.Length[_] => Some(ColumnType.IntType)
       case c: Expr.Coalesce[_, _] => c.exprs.headOption.flatMap(_.outputType)
       case g: Expr.GetOrElse[_, _] => g.expr.outputType

@@ -21,7 +21,7 @@ object ExprToColumn {
     right: Expr[Row, B],
     op: (SparkColumn, SparkColumn) => SparkColumn,
     resultType: ColumnType
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] =
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     for {
       (l, _) <- convert(left)
       (r, _) <- convert(right)
@@ -31,7 +31,7 @@ object ExprToColumn {
     expr: Expr[Row, A],
     op: SparkColumn => SparkColumn,
     resultType: ColumnType
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] =
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     convert(expr).map { case (sparkCol, _) => (op(sparkCol), resultType) }
 
   /** Spark path for a literal json_tuple key. Spark's JsonPathParser has no escape mechanism: the
@@ -50,13 +50,24 @@ object ExprToColumn {
 
   /** Convert a Strongbow Expr to a Spark Column paired with its output ColumnType.
     *
-    * Returns Left for unsupported expressions.
+    * Returns Left for unsupported expressions. `scope` carries the lambda-variable bindings of the
+    * nearest enclosing higher-order expression; ordinary arms pass it through unchanged (implicit),
+    * and higher-order arms extend it around body conversion.
     */
-  def convert[Row, A](expr: Expr[Row, A]): Either[ExecutionError, (SparkColumn, ColumnType)] = {
+  def convert[Row, A](expr: Expr[Row, A])(using
+    scope: LambdaColumnScope = LambdaColumnScope.empty
+  ): Either[ExecutionError, (SparkColumn, ColumnType)] = {
     (expr: @unchecked) match {
 
       case cell: Expr.Cell[Row, _] =>
         Right((col(cell.name), ColumnType.AnyType))
+
+      case lv: Expr.LambdaVar[Row, _] =>
+        scope.get(lv.binder) match {
+          case Some(sparkCol) => Right((sparkCol, ColumnType.AnyType))
+          case None =>
+            Left(ExecutionError.InvalidValue("Lambda variable used outside its binding expression"))
+        }
 
       case c: Expr.Const[Row, _] =>
         Right((toLit(c.value), ColumnType.AnyType))
@@ -374,6 +385,275 @@ object ExprToColumn {
       case mfa: Expr.MapFromArrays[Row, _, _] =>
         convertBinary(mfa.keys, mfa.values, map_from_arrays, ColumnType.AnyType)
       case mc: Expr.MapConcat[Row, _, _] => convertBinary(mc.left, mc.right, map_concat(_, _), ColumnType.AnyType)
+
+      case t: Expr.Transform[Row, _, _] =>
+        convert(t.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val bound: (SparkColumn, SparkColumn) => Either[ExecutionError, SparkColumn] = (elem, idx) => {
+            val scope2 = t.indexBinder match {
+              case Some(ib) => scope.updated(t.binder, elem).updated(ib, idx)
+              case None => scope.updated(t.binder, elem)
+            }
+            convert(t.body)(using scope2).map { case (c, _) => c }
+          }
+          val mapped = t.indexBinder match {
+            case Some(_) =>
+              transform(
+                arr,
+                (elem: SparkColumn, idx: SparkColumn) =>
+                  bound(elem, idx).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+              )
+            case None =>
+              transform(
+                arr,
+                (elem: SparkColumn) =>
+                  bound(elem, lit(0)).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+              )
+          }
+          failure.get().toLeft((mapped, ColumnType.AnyType))
+        }
+
+      case fl: Expr.Filter[Row, _] =>
+        convert(fl.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val bound: (SparkColumn, SparkColumn) => Either[ExecutionError, SparkColumn] = (elem, idx) => {
+            val scope2 = fl.indexBinder match {
+              case Some(ib) => scope.updated(fl.binder, elem).updated(ib, idx)
+              case None => scope.updated(fl.binder, elem)
+            }
+            convert(fl.body)(using scope2).map { case (c, _) => c }
+          }
+          val filtered = fl.indexBinder match {
+            case Some(_) =>
+              filter(
+                arr,
+                (elem: SparkColumn, idx: SparkColumn) =>
+                  bound(elem, idx).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(false)
+                    },
+                    identity
+                  )
+              )
+            case None =>
+              filter(
+                arr,
+                (elem: SparkColumn) =>
+                  bound(elem, lit(0)).fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(false)
+                    },
+                    identity
+                  )
+              )
+          }
+          failure.get().toLeft((filtered, ColumnType.AnyType))
+        }
+
+      case ex: Expr.Exists[Row, _] =>
+        convert(ex.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = exists(
+            arr,
+            (elem: SparkColumn) =>
+              convert(ex.body)(using scope.updated(ex.binder, elem)).map { case (c, _) => c }.fold(
+                { err =>
+                  failure.set(Some(err))
+                  lit(false)
+                },
+                identity
+              )
+          )
+          failure.get().toLeft((result, ColumnType.BooleanType))
+        }
+
+      case fa: Expr.ForAll[Row, _] =>
+        convert(fa.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = forall(
+            arr,
+            (elem: SparkColumn) =>
+              convert(fa.body)(using scope.updated(fa.binder, elem)).map { case (c, _) => c }.fold(
+                { err =>
+                  failure.set(Some(err))
+                  lit(true)
+                },
+                identity
+              )
+          )
+          failure.get().toLeft((result, ColumnType.BooleanType))
+        }
+
+      case ag: Expr.Aggregate[Row, _, _] =>
+        convert(ag.array).flatMap { case (arr, _) =>
+          convert(ag.zero).flatMap { case (zero, _) =>
+            val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+            val merged = (acc: SparkColumn, elem: SparkColumn) =>
+              convert(ag.merge)(using scope.updated(ag.accBinder, acc).updated(ag.elemBinder, elem)).map {
+                case (c, _) => c
+              }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+            val resultE = ag.finish match {
+              case None =>
+                Right((aggregate(arr, zero, merged), ColumnType.AnyType))
+              case Some((finishBinder, finishBody)) =>
+                val finished = (acc: SparkColumn) =>
+                  convert(finishBody)(using scope.updated(finishBinder, acc)).map { case (c, _) => c }
+                    .fold(
+                      { err =>
+                        failure.set(Some(err))
+                        lit(0)
+                      },
+                      identity
+                    )
+                Right((aggregate(arr, zero, merged, finished), ColumnType.AnyType))
+            }
+            resultE.flatMap(r => failure.get().toLeft(r))
+          }
+        }
+
+      case zw: Expr.ZipWith[Row, _, _, _] =>
+        convert(zw.left).flatMap { case (l, _) =>
+          convert(zw.right).flatMap { case (r, _) =>
+            val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+            val result = zip_with(
+              l,
+              r,
+              (le: SparkColumn, re: SparkColumn) =>
+                convert(zw.body)(using scope.updated(zw.leftBinder, le).updated(zw.rightBinder, re)).map {
+                  case (c, _) => c
+                }
+                  .fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+            )
+            failure.get().toLeft((result, ColumnType.AnyType))
+          }
+        }
+
+      case mf: Expr.MapFilter[Row, _, _] =>
+        convert(mf.map).flatMap { case (m, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = map_filter(
+            m,
+            (k: SparkColumn, v: SparkColumn) =>
+              convert(mf.body)(using scope.updated(mf.keyBinder, k).updated(mf.valueBinder, v)).map { case (c, _) => c }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(true)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
+      case tk: Expr.TransformKeys[Row, _, _, _] =>
+        convert(tk.map).flatMap { case (m, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = transform_keys(
+            m,
+            (k: SparkColumn, v: SparkColumn) =>
+              convert(tk.body)(using scope.updated(tk.keyBinder, k).updated(tk.valueBinder, v)).map { case (c, _) => c }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
+      case tv: Expr.TransformValues[Row, _, _, _] =>
+        convert(tv.map).flatMap { case (m, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = transform_values(
+            m,
+            (k: SparkColumn, v: SparkColumn) =>
+              convert(tv.body)(using scope.updated(tv.keyBinder, k).updated(tv.valueBinder, v)).map { case (c, _) => c }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
+
+      case mzw: Expr.MapZipWith[Row, _, _, _, _] =>
+        convert(mzw.left).flatMap { case (l, _) =>
+          convert(mzw.right).flatMap { case (r, _) =>
+            val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+            val result = map_zip_with(
+              l,
+              r,
+              (k: SparkColumn, v1: SparkColumn, v2: SparkColumn) =>
+                convert(mzw.body)(using
+                  scope
+                    .updated(mzw.keyBinder, k)
+                    .updated(mzw.leftBinder, v1)
+                    .updated(mzw.rightBinder, v2)
+                ).map { case (c, _) => c }
+                  .fold(
+                    { err =>
+                      failure.set(Some(err))
+                      lit(0)
+                    },
+                    identity
+                  )
+            )
+            failure.get().toLeft((result, ColumnType.AnyType))
+          }
+        }
+
+      case asc: Expr.ArraySortComparator[Row, _] =>
+        convert(asc.array).flatMap { case (arr, _) =>
+          val failure = new java.util.concurrent.atomic.AtomicReference(Option.empty[ExecutionError])
+          val result = array_sort(
+            arr,
+            (le: SparkColumn, re: SparkColumn) =>
+              convert(asc.body)(using scope.updated(asc.leftBinder, le).updated(asc.rightBinder, re)).map {
+                case (c, _) => c
+              }
+                .fold(
+                  { err =>
+                    failure.set(Some(err))
+                    lit(0)
+                  },
+                  identity
+                )
+          )
+          failure.get().toLeft((result, ColumnType.AnyType))
+        }
 
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)
@@ -877,7 +1157,7 @@ object ExprToColumn {
     exprs: Seq[Expr[Row, ?]],
     f: (Seq[SparkColumn], Seq[ColumnType]) => SparkColumn,
     defaultType: ColumnType
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] = {
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] = {
     val results = exprs.map(convert)
     val firstError = results.collectFirst { case Left(err) => err }
     firstError match {
@@ -896,7 +1176,7 @@ object ExprToColumn {
     right: Expr[Row, net.ghoula.strongbow.types.Binary],
     lgNomEntries: Option[Int],
     mode: Option[String]
-  ): Either[ExecutionError, (SparkColumn, ColumnType)] =
+  )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     for {
       (l, _) <- convert(left)
       (r, _) <- convert(right)

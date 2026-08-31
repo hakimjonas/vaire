@@ -172,6 +172,52 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     )
   }
 
+  it should "pass null elements to a null-aware comparator, and fail a null-naive one" in {
+    // The null-element fixture cannot go through the typed schema, so both backends are pinned
+    // against raw values: a null-aware comparator sorts nulls per the comparator decision, and a
+    // null-naive comparator (l - r yields null) fails the query on both backends.
+    val nullData: Array[Any] = Array(Seq(2, SqlNull.value, 1))
+    val nullCol = Column.any(nullData)
+    val nullCell: Expr[Any, Seq[Int]] = Expr.cell("xs", ColumnIndex(0))
+    val inMemory = ExprInterpreter.evalColumn(
+      nullCell.arraySortBy((l, r) =>
+        Expr.when(
+          l.isNull,
+          Expr.const(1),
+          Expr.when(r.isNull, Expr.const(-1), Expr.const(0))
+        )
+      ),
+      Vector(nullCol),
+      ColumnType.AnyType
+    ) match {
+      case Right(col) => col.getValue(0)
+      case other => fail(s"In-memory eval failed: $other")
+    }
+    inMemory shouldBe Seq(2, 1, SqlNull.value)
+
+    val sparkNative = spark
+      .sql(
+        "SELECT array_sort(array(2, null, 1), (l, r) -> CASE WHEN l IS NULL THEN 1 WHEN r IS NULL THEN -1 ELSE 0 END) AS s"
+      )
+      .collect()
+      .head
+      .get(0)
+    sparkNative.toString should include("2, 1, null")
+
+    val naiveInMemory = ExprInterpreter.evalColumn(
+      nullCell.arraySortBy((l, r) => l - Expr.const(1)),
+      Vector(nullCol),
+      ColumnType.AnyType
+    )
+    naiveInMemory.isLeft shouldBe true
+    try {
+      spark.sql("SELECT array_sort(array(2, null, 1), (l, r) -> l - r)").collect()
+      fail("expected the null-naive comparator to fail on Spark")
+    } catch {
+      case _: Throwable => ()
+    }
+  }
+
   "map_filter" should "keep entries whose predicate holds on both backends" in {
     checkParity(
       mCell.mapFilter((_, v) => v > Expr.const(1)),

@@ -295,7 +295,10 @@ enum Expr[Row, +A] {
     body: Expr[Row, C]
   ) extends Expr[Row, Map[K, C]]
 
-  /** Higher-order: transform map keys (the result must be distinct per Spark). */
+  /** Higher-order: transform map keys (the result must be distinct per Spark; duplicate detection
+    * uses boxed equality in-memory, so it diverges from Spark's Catalyst equality only for
+    * array/struct keys).
+    */
   case TransformKeys[Row, K, V, K2](
     map: Expr[Row, Map[K, V]],
     keyBinder: Binder[K],

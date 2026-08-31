@@ -1509,9 +1509,18 @@ object ExprInterpreter {
                         val scope2 = lambdaScope
                           .updated(asc.leftBinder, elementColumn(Vector(a)))
                           .updated(asc.rightBinder, elementColumn(Vector(b)))
+                        println(
+                          s"DEBUG compare a=$a b=$b rowCols=${rowColumns.map(_.length)} total=${rowColumns.headOption.map(_.length)}"
+                        )
                         evalColumn(asc.body, rowColumns, ColumnType.AnyType)(using scope2) match {
                           case Right(col) =>
-                            if (col.isNull(RowIndex(0))) {
+                            println(
+                              s"DEBUG col len=${col.length} nulls=${col.nullSet} len0=${rowColumns.headOption.map(_.length)}"
+                            )
+                            // An empty body result means an arm fell back to its typed-column
+                            // default (e.g. arithmetic on an all-null binding); treat it like a
+                            // null comparator result — Spark fails the query in both cases.
+                            if (col.length == 0 || col.isNull(RowIndex(0))) {
                               // Spark fails the query when the comparator returns null
                               cmpError.set(Some(ExecutionError.InvalidValue("array_sort comparator returned null")))
                               0
@@ -4450,8 +4459,11 @@ object ExprInterpreter {
     *
     * Higher-order bodies are evaluated by the same typed arms as ordinary expressions, so the bound
     * element column must be an IntColumn for `x + 1`-style bodies, not a boxed AnyColumn. The
-    * element runtime type is sampled once per evaluation; null and unclassifiable positions are
-    * recorded in the column's null set with the type's placeholder value.
+    * element runtime type is sampled from the first non-null value; null positions and values whose
+    * runtime type differs from the sample are recorded in the column's null set with the type's
+    * placeholder value. Heterogeneous element types (outside Strongbow's data model) therefore
+    * surface as nulls, and a body whose type arm has no sample match yields an empty column — the
+    * array_sort comparator treats that as a null comparator result.
     */
   private def elementColumn(flatElems: Vector[Any | Null]): Column[?] = {
     val n = flatElems.length
@@ -4482,7 +4494,9 @@ object ExprInterpreter {
         } // scalafix:ok DisableSyntax.null
       case Some(_: java.time.LocalDate) =>
         build[Int](Column.date(_, _), 0) { case d: java.time.LocalDate => Some(d.toEpochDay.toInt); case _ => None }
-      case _ => Column.any(Array.tabulate[Any | Null](n)(flatElems(_)))
+      case _ =>
+        val nulls = BitSet.fromSpecific(flatElems.indices.toVector.filter(i => Option(flatElems(i)).isEmpty))
+        Column.any(Array.tabulate[Any | Null](n)(flatElems(_)), nulls)
     }
   }
 

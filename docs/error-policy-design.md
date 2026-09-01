@@ -1,11 +1,15 @@
 # Strongbow error policy — fail-fast, Collect, and quarantine
 
 Design document for per-row error handling policy in the in-memory interpreter.
-Research and sketch — no code written yet. Companion to the parity plan
-(`strongbow-spark-4.2-parity-plan.md`) and the handover
+Companion to the parity plan (`strongbow-spark-4.2-parity-plan.md`) and the handover
 (`strongbow-parity-handover-2.md`); grew out of the error-model discussion on the
 `xpath*` work (PR #8), where the strict/try split raised the general question:
 **who decides what a single bad row costs?**
+
+> **Decisions recorded (2026-09-01, operator):** result shape = separate
+> `evalColumnCollect` entry point; quarantine = separate method (E3); `maxErrors`
+> default = 100; input previews = `Off` (Collect) / `Truncated(120)` (quarantine).
+> Status: E1 pending (types, entry point, fallible-arm updates, specs).
 
 ---
 
@@ -183,6 +187,19 @@ Pipelines live at the `Dataset` level, so the ergonomic API belongs there:
 "continue" means for *whole operations* (a select with a failing expr under Collect
 produces the null-marked column plus the error result; under FailFast it throws, as
 today).
+
+### 5.2.1 The structural/per-row boundary — normative
+
+`Collect` only ever suppresses **per-row data errors**: errors whose occurrence depends
+on the row's values (division by zero, malformed XML, unparseable timestamps, comparator
+failures). **Structural errors** — wrong column type for an arm, unbound lambda
+variables, untyped-column misuse — fail under *every* policy, including Collect: they
+are usage errors that Spark rejects at analysis time, and letting Collect swallow them
+would silently turn broken plans into null columns. Concretely: an arm's
+type/coercion `Left`s and pre-condition checks stay `Left`; only error sites carrying a
+row index (or created inside a per-row loop) consult the policy. This boundary is
+enforced by construction in the implementation — structural failures never reach the
+collector.
 
 ### 5.3 The Spark asymmetry — stated honestly
 

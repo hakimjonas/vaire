@@ -282,9 +282,9 @@ object Schema {
 
   /** Generic tuple schema for tuples of arity 3+.
     *
-    * Uses Schema.derived macro to auto-generate schema for any Tuple type. Scala 3 tuples are
-    * product types with Mirror.ProductOf, so the derivation macro handles field access via _1, _2,
-    * etc. automatically.
+    * Uses Schema.derived to auto-generate schema for any Tuple type. Scala 3 tuples are product
+    * types with Mirror.ProductOf, so the derivation handles field access via _1, _2, etc.
+    * automatically.
     *
     * tuple2Schema takes priority for Tuple2 (more specific match). This covers Tuple3 through
     * Tuple22.
@@ -415,8 +415,10 @@ object Schema {
       } else {
         val indexExpr = Expr(index)
         '{
-          $aExpr.asInstanceOf[Product].productElement($indexExpr).asInstanceOf[H]
-        } // scalafix:ok DisableSyntax.asInstanceOf
+          val product: Product = $aExpr.asInstanceOf[Product] // scalafix:ok DisableSyntax.asInstanceOf
+          val element: Any = product.productElement($indexExpr)
+          element.asInstanceOf[H] // scalafix:ok DisableSyntax.asInstanceOf
+        }
       }
     }
   }

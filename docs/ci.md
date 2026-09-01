@@ -32,8 +32,8 @@ memory-frugal on shared CI, while the heavy suites still run somewhere.
 
 The fork heap is a fixed `-Xmx4G` (the 5M stress suite needs it; the fast suites use far less
 but the ceiling is only a maximum, and ZGC commits only what it uses). The sbt heap comes from
-the workflow `JAVA_OPTS`/`SBT_OPTS`. `.jvmopts` is gitignored (developer-local); see
-`.jvmopts.example`. `FAST_TESTS` controls only *which* tests run (it excludes the `Slow` tag),
+the workflow `JAVA_OPTS`/`SBT_OPTS`. `.jvmopts` is developer-local — excluded per clone via `.git/info/exclude`
+(see `.jvmopts.example`). `FAST_TESTS` controls only *which* tests run (it excludes the `Slow` tag),
 not the heap.
 
 ## Running locally

@@ -4385,8 +4385,7 @@ object ExprInterpreter {
           case Some(JsonValue.Null) =>
             Right(null) // scalafix:ok DisableSyntax.null
           case Some(JsonValue.Bool(b)) => Right(b.toString)
-          case Some(JsonValue.Number(n)) =>
-            Right(if (n == n.toLong.toDouble) n.toLong.toString else n.toString)
+          case Some(JsonValue.Number(n, raw)) => Right(renderNumberSpelling(n, raw))
           case Some(compound) => Right(formatJson(compound))
           case None => Right(null) // scalafix:ok DisableSyntax.null
         }
@@ -4400,12 +4399,29 @@ object ExprInterpreter {
     stripped.split('.').filter(_.nonEmpty).toList
   }
 
+  /** Spark's number rendering (Jackson node types): integer tokens render exactly — Long node in
+    * range, exact digits beyond (BigInteger) — float tokens render via Java's Double.toString;
+    * programmatically constructed numbers (raw = None) fall back to the canonical form. Verified
+    * against the pinned divergence rows in JsonTupleParitySpec.
+    */
+  private def renderNumberSpelling(n: Double, raw: Option[String]): String = raw match {
+    case Some(token) =>
+      val isFloatToken = token.exists(c => c == '.' || c == 'e' || c == 'E')
+      if (isFloatToken) n.toString
+      else
+        token.toLongOption match {
+          case Some(l) => l.toString
+          case None => token // exact digits beyond Long range
+        }
+    case None =>
+      if (n == n.toLong.toDouble) n.toLong.toString else n.toString
+  }
+
   private def jsonTupleScalar(pathResult: Option[JsonValue]): Any | Null = pathResult match {
     case Some(JsonValue.Str(s)) => s
     case Some(JsonValue.Bool(b)) => b.toString
     case Some(JsonValue.Null) => null // scalafix:ok DisableSyntax.null
-    case Some(JsonValue.Number(n)) =>
-      if (n == n.toLong.toDouble) n.toLong.toString else n.toString
+    case Some(JsonValue.Number(n, raw)) => renderNumberSpelling(n, raw)
     case Some(compound) => formatJson(compound)
     case None => null // scalafix:ok DisableSyntax.null
   }
@@ -4789,24 +4805,24 @@ object ExprInterpreter {
       case "STRING" =>
         value match {
           case JsonValue.Str(s) => Some(s)
-          case JsonValue.Number(n) => Some(if (n == n.toLong.toDouble) n.toLong.toString else n.toString)
+          case JsonValue.Number(n, raw) => Some(renderNumberSpelling(n, raw))
           case JsonValue.Bool(b) => Some(b.toString)
           case _ => None
         }
       case "BIGINT" | "INTEGER" | "INT" | "LONG" =>
         value match {
-          case JsonValue.Number(n) if n.isValidInt => Some(n.toLong)
+          case JsonValue.Number(n, _) if n.isValidInt => Some(n.toLong)
           case _ => None
         }
       case "DOUBLE" =>
         value match {
-          case JsonValue.Number(n) => Some(n)
+          case JsonValue.Number(n, _) => Some(n)
           case _ => None
         }
       case "BOOLEAN" =>
         value match {
           case JsonValue.Bool(b) => Some(b)
-          case JsonValue.Number(n) => Some(n != 0.0)
+          case JsonValue.Number(n, _) => Some(n != 0.0)
           case _ => None
         }
       case _ => None
@@ -4815,7 +4831,7 @@ object ExprInterpreter {
   private def jsonValueToSqlType(value: JsonValue): Option[String] = value match {
     case JsonValue.Null => Some("VOID")
     case JsonValue.Bool(_) => Some("BOOLEAN")
-    case JsonValue.Number(n) => Some(if (n.isValidInt) "BIGINT" else "DOUBLE")
+    case JsonValue.Number(n, _) => Some(if (n.isValidInt) "BIGINT" else "DOUBLE")
     case JsonValue.Str(_) => Some("STRING")
     case JsonValue.Array(items) =>
       val elemTypes = items.map(jsonValueToSqlType).collect { case Some(t) => t }.distinct

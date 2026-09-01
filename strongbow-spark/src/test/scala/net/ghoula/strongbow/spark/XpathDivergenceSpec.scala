@@ -15,9 +15,9 @@ import net.ghoula.strongbow.prelude.*
   *      them while Spark's DOM expands internal-subset entities.
   *   2. Prefixed name tests: Spark's engine runs over a namespace-unaware DOM — `b` matches both
   *      `b` and `ns:b` (local-name semantics) and `*:b` fails the query ("Prefix must resolve to a
-  *      namespace"). In-memory matches prefix-literally per XPath 1.0.
-  *   3. CDATA: Spark's `text()` excludes CDATA nodes; in-memory folds them into text (they still
-  *      contribute to string-values on both backends). Tracked as sarati#11.
+  *      namespace"). In-memory matches prefix-literally per XPath 1.0. (CDATA was the third
+  *      divergence - resolved by sarati 0.3.12's cdata flag, tracked as sarati#11; both backends
+  *      now exclude it from text(), pinned in XpathParitySpec's text() coverage.)
   */
 class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -92,10 +92,10 @@ class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     sparkSide.isLeft shouldBe true
   }
 
-  "CDATA sections" should "join text() in-memory while Spark excludes them" in {
+  "CDATA sections" should "be excluded from text() on both backends since sarati 0.3.12" in {
     val doc = """<r><t><![CDATA[cd]]></t><e>plain</e></r>"""
     val inMemory = evalInMemory(doc, cell(doc).xpath("//text()"))
-    inMemory shouldBe Right(Seq("cd", "plain"))
+    inMemory shouldBe Right(Seq("plain"))
     val sparkSide = evalSpark(doc, "xpath", "//text()")
     sparkSide shouldBe Right(Seq("plain"))
     // string-value still includes CDATA on both backends

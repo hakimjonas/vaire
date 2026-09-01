@@ -45,8 +45,8 @@ Strongbow publishes to the Codeberg Maven registry:
 ```scala
 resolvers += "codeberg" at "https://codeberg.org/api/packages/hakim/maven"
 libraryDependencies ++= Seq(
-  "net.ghoula" %% "strongbow-core" % "0.0.7",
-  "net.ghoula" %% "strongbow-spark" % "0.0.7" // Spark backend (optional)
+  "net.ghoula" %% "strongbow-core" % "0.0.8",
+  "net.ghoula" %% "strongbow-spark" % "0.0.8" // Spark backend (optional)
 )
 ```
 

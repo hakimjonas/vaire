@@ -35,6 +35,24 @@ import net.ghoula.strongbow.types.{Date, DayTimeInterval, RowIndex, Time, YearMo
   */
 object ExprInterpreter {
 
+  /** Evaluate under the `Collect` error policy: per-row data failures null-mark their row and are
+    * recorded (bounded by the policy's `maxErrors`, with a by-kind summary) instead of aborting the
+    * column. Structural errors fail under every policy. The default policy collects up to 100
+    * errors.
+    */
+  def evalColumnCollect[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    columnType: ColumnType,
+    policy: ErrorPolicy = ErrorPolicy.Collect(100)
+  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Collected] = {
+    given errors: RowErrors = RowErrors(policy)
+    evalColumn(expr, columns, columnType).map { col =>
+      val (entries, truncated, byKind) = errors.result
+      Collected(col, entries, truncated, byKind)
+    }
+  }
+
   private[strongbow] def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]]): ColumnType = {
     expr.outputType.getOrElse {
       expr match {
@@ -67,7 +85,10 @@ object ExprInterpreter {
     expr: Expr[Row, A],
     columns: Vector[Column[?]],
     columnType: ColumnType
-  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Column[?]] = {
+  )(using
+    lambdaScope: LambdaScope = LambdaScope.empty,
+    errors: RowErrors = RowErrors.failFast
+  ): Either[ExecutionError, Column[?]] = {
     if (columns.isEmpty || columns.head.length == 0) {
       Right(Column.empty(columnType))
     } else {
@@ -1243,7 +1264,7 @@ object ExprInterpreter {
                 (ib, Column.int(Array.tabulate(total)(j => j - offsets(rowOf(j)))))
               }
             val scope = binds.foldLeft(lambdaScope)((s, b) => s.updated(b._1, b._2))
-            evalColumn(t.body, columns.map(_.slice(rowOf)), ColumnType.AnyType)(using scope).map { bodyCol =>
+            evalColumn(t.body, columns.map(_.slice(rowOf)), ColumnType.AnyType)(using scope, errors).map { bodyCol =>
               val flat = Array.tabulate[Any | Null](total)(j => bodyCol.getValue(j))
               Column.array(Column.any(flat), offsets, rowNulls)
             }
@@ -1259,27 +1280,28 @@ object ExprInterpreter {
                 (ib, Column.int(Array.tabulate(total)(j => j - offsets(rowOf(j)))))
               }
             val scope = binds.foldLeft(lambdaScope)((s, b) => s.updated(b._1, b._2))
-            evalColumn(fl.body, columns.map(_.slice(rowOf)), ColumnType.BooleanType)(using scope).map { bodyCol =>
-              val kept = new scala.collection.mutable.ArrayBuffer[Any | Null]
-              val newOffsets = new Array[Int](offsets.length)
-              val keptNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
-              (0 until arrCol.length).foreach { i =>
-                if (rowNulls.contains(i)) {
-                  newOffsets(i + 1) = newOffsets(i)
-                } else {
-                  val range = offsets(i) until offsets(i + 1)
-                  val keptInRange = range.filter { j =>
-                    // Spark drops elements whose predicate is false or null (null unboxes to false)
-                    !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
-                      case b: Boolean => b
-                      case _ => false
-                    })
+            evalColumn(fl.body, columns.map(_.slice(rowOf)), ColumnType.BooleanType)(using scope, errors).map {
+              bodyCol =>
+                val kept = new scala.collection.mutable.ArrayBuffer[Any | Null]
+                val newOffsets = new Array[Int](offsets.length)
+                val keptNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
+                (0 until arrCol.length).foreach { i =>
+                  if (rowNulls.contains(i)) {
+                    newOffsets(i + 1) = newOffsets(i)
+                  } else {
+                    val range = offsets(i) until offsets(i + 1)
+                    val keptInRange = range.filter { j =>
+                      // Spark drops elements whose predicate is false or null (null unboxes to false)
+                      !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
+                        case b: Boolean => b
+                        case _ => false
+                      })
+                    }
+                    keptInRange.foreach(j => kept += flatElems(j))
+                    newOffsets(i + 1) = newOffsets(i) + keptInRange.length
                   }
-                  keptInRange.foreach(j => kept += flatElems(j))
-                  newOffsets(i + 1) = newOffsets(i) + keptInRange.length
                 }
-              }
-              Column.array(elementColumn(kept.toVector), newOffsets, BitSet.empty ++ keptNulls)
+                Column.array(elementColumn(kept.toVector), newOffsets, BitSet.empty ++ keptNulls)
             }
           }
 
@@ -1294,7 +1316,7 @@ object ExprInterpreter {
           evalColumn(ag.array, columns, arrType).flatMap { arrCol =>
             val (flatElems, _, offsets, rowNulls) = flatArrayLayout(arrCol, arrCol.length)
             val n = arrCol.length
-            evalColumn(ag.zero, columns, ColumnType.AnyType)(using lambdaScope).flatMap { zeroCol =>
+            evalColumn(ag.zero, columns, ColumnType.AnyType)(using lambdaScope, errors).flatMap { zeroCol =>
               val outNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
               val out = new Array[Any | Null](n)
               val error = (0 until n).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
@@ -1312,7 +1334,7 @@ object ExprInterpreter {
                           val scope2 = lambdaScope
                             .updated(ag.accBinder, elementColumn(Vector(acc)))
                             .updated(ag.elemBinder, elementColumn(Vector(flatElems(j))))
-                          evalColumn(ag.merge, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+                          evalColumn(ag.merge, rowColumns, ColumnType.AnyType)(using scope2, errors).map(_.getValue(0))
                         }
                       }
                       val finished = merged.flatMap { acc =>
@@ -1320,7 +1342,8 @@ object ExprInterpreter {
                           case None => Right(acc)
                           case Some((finishBinder, finishBody)) =>
                             val scope2 = lambdaScope.updated(finishBinder, elementColumn(Vector(acc)))
-                            evalColumn(finishBody, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+                            evalColumn(finishBody, rowColumns, ColumnType.AnyType)(using scope2, errors)
+                              .map(_.getValue(0))
                         }
                       }
                       finished match {
@@ -1337,8 +1360,8 @@ object ExprInterpreter {
         case zw: Expr.ZipWith[Row, _, _, _] =>
           val leftType = inferExprColumnType(zw.left, columns)
           val rightType = inferExprColumnType(zw.right, columns)
-          evalColumn(zw.left, columns, leftType)(using lambdaScope).flatMap { leftCol =>
-            evalColumn(zw.right, columns, rightType)(using lambdaScope).flatMap { rightCol =>
+          evalColumn(zw.left, columns, leftType)(using lambdaScope, errors).flatMap { leftCol =>
+            evalColumn(zw.right, columns, rightType)(using lambdaScope, errors).flatMap { rightCol =>
               val n = leftCol.length
               val flatLeft = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
               val flatRight = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
@@ -1367,7 +1390,8 @@ object ExprInterpreter {
                 .updated(zw.leftBinder, optionElementColumn(flatLeft.toVector))
                 .updated(zw.rightBinder, optionElementColumn(flatRight.toVector))
               evalColumn(zw.body, columns.map(_.slice(rowOf.toArray)), ColumnType.AnyType)(using
-                scope
+                scope,
+                errors
               ).map { bodyCol =>
                 val flat = Array.tabulate[Any | Null](total)(j => bodyCol.getValue(j))
                 Column.array(Column.any(flat), offsets, BitSet.empty ++ outNulls)
@@ -1467,8 +1491,8 @@ object ExprInterpreter {
           val leftType = inferExprColumnType(mzw.left, columns)
           val rightType = inferExprColumnType(mzw.right, columns)
           for {
-            leftCol <- evalColumn(mzw.left, columns, leftType)(using lambdaScope)
-            rightCol <- evalColumn(mzw.right, columns, rightType)(using lambdaScope)
+            leftCol <- evalColumn(mzw.left, columns, leftType)(using lambdaScope, errors)
+            rightCol <- evalColumn(mzw.right, columns, rightType)(using lambdaScope, errors)
           } yield {
             Column.any(
               Array.tabulate[Any | Null](rowCount) { i =>
@@ -1493,7 +1517,7 @@ object ExprInterpreter {
                           .updated(mzw.keyBinder, elementColumn(Vector(k)))
                           .updated(mzw.leftBinder, optionElementColumn(Vector(v1.orNull)))
                           .updated(mzw.rightBinder, optionElementColumn(Vector(v2.orNull)))
-                        evalColumn(mzw.body, rowColumns, ColumnType.AnyType)(using scope2)
+                        evalColumn(mzw.body, rowColumns, ColumnType.AnyType)(using scope2, errors)
                           .map(_.getValue(0))
                           .toOption
                           .map(k -> _)
@@ -1526,7 +1550,7 @@ object ExprInterpreter {
                         println(
                           s"DEBUG compare a=$a b=$b rowCols=${rowColumns.map(_.length)} total=${rowColumns.headOption.map(_.length)}"
                         )
-                        evalColumn(asc.body, rowColumns, ColumnType.AnyType)(using scope2) match {
+                        evalColumn(asc.body, rowColumns, ColumnType.AnyType)(using scope2, errors) match {
                           case Right(col) =>
                             println(
                               s"DEBUG col len=${col.length} nulls=${col.nullSet} len0=${rowColumns.headOption.map(_.length)}"
@@ -1667,52 +1691,52 @@ object ExprInterpreter {
           }
 
         case x: Expr.Xpath[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathString[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathBoolean[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathShort[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathInt[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathLong[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathFloat[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.XpathDouble[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = false, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = false, columns, rowCount)(using errors)
 
         case x: Expr.TryXpath[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathString[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathBoolean[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathShort[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathInt[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathLong[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathFloat[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = true, columns, rowCount)(using errors)
 
         case x: Expr.TryXpathDouble[Row] =>
-          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = true, columns, rowCount, lambdaScope)
+          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = true, columns, rowCount)(using errors)
 
         case st: Expr.Struct[Row, _] =>
           val fieldResults = st.fields.map { case (_, fieldExpr, fieldCt) =>
@@ -3396,15 +3420,22 @@ object ExprInterpreter {
     isZero: T => Boolean,
     op: (T, T) => T,
     wrap: (Array[T], BitSet) => Column[?]
-  ): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => isZero(right(i)))
-    zeroIdx match {
-      case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(wrap(Array.tabulate(rowCount)(i => op(left(i), right(i))), BitSet.empty))
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] = {
+    val out = new Array[T](rowCount)
+    val outNulls = scala.collection.mutable.BitSet.empty
+    (0 until rowCount).foreach { i =>
+      if (isZero(right(i))) {
+        errors.add(i, ExecutionError.DivisionByZero(i))
+        outNulls += i
+      } else out(i) = op(left(i), right(i))
     }
+    if (outNulls.isEmpty || errors.isCollect) Right(wrap(out, BitSet.empty ++ outNulls))
+    else Left(ExecutionError.DivisionByZero(outNulls.head))
   }
 
-  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int)(using
+    errors: RowErrors
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ / _, Column.int)
 
   private def vectorizedLongBinOp[Row](
@@ -3430,7 +3461,7 @@ object ExprInterpreter {
     left: Array[Long],
     right: Array[Long],
     rowCount: Int
-  ): Either[ExecutionError, Column[?]] =
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ / _, Column.long)
 
   private def vectorizedDoubleBinOp[Row](
@@ -3456,7 +3487,7 @@ object ExprInterpreter {
     left: Array[Double],
     right: Array[Double],
     rowCount: Int
-  ): Either[ExecutionError, Column[?]] =
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0.0, _ / _, Column.double)
 
   private def typedComparison[Row, A](
@@ -3519,14 +3550,16 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int)(using
+    errors: RowErrors
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ % _, Column.int)
 
   private def vectorizedLongMod(
     left: Array[Long],
     right: Array[Long],
     rowCount: Int
-  ): Either[ExecutionError, Column[?]] =
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ % _, Column.long)
 
   private def vectorizedDoubleUnaryOp[Row](
@@ -4540,12 +4573,11 @@ object ExprInterpreter {
     kind: XpathKind,
     tryMode: Boolean,
     columns: Vector[Column[?]],
-    rowCount: Int,
-    lambdaScope: LambdaScope
-  ): Either[ExecutionError, Column[?]] =
+    rowCount: Int
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     parseXPath(path) match {
       case parser.core.Result.Success(ast, _) =>
-        evalColumn(e, columns, ColumnType.StringType)(using lambdaScope).flatMap { col =>
+        evalColumn(e, columns, ColumnType.StringType).flatMap { col =>
           val out = new Array[Any | Null](rowCount)
           val outNulls = scala.collection.mutable.BitSet.empty
           val error = (0 until rowCount).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
@@ -4596,8 +4628,14 @@ object ExprInterpreter {
                             fail(s"xpath evaluation failed: ${evalErr.toString}")
                         }
                       case parseFailure =>
-                        if (tryMode) { outNulls += i; None }
-                        else
+                        if (tryMode || errors.isCollect) {
+                          errors.add(
+                            i,
+                            ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300))
+                          )
+                          outNulls += i
+                          None
+                        } else
                           Some(ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300)))
                     }
                 }

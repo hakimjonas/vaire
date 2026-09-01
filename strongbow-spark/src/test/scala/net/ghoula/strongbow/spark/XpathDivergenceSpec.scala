@@ -16,8 +16,8 @@ import net.ghoula.strongbow.prelude.*
   *   2. Prefixed name tests: Spark's engine runs over a namespace-unaware DOM — `b` matches both
   *      `b` and `ns:b` (local-name semantics) and `*:b` fails the query ("Prefix must resolve to a
   *      namespace"). In-memory matches prefix-literally per XPath 1.0. (CDATA was the third
-  *      divergence - resolved by sarati 0.3.12's cdata flag; both backends now exclude it from
-  *      text(), pinned in XpathParitySpec's text() coverage.)
+  *      divergence - resolved by sarati 0.3.12's cdata flag, tracked as sarati#11; both backends
+  *      now exclude it from text(), pinned in XpathParitySpec's text() coverage.)
   */
 class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 

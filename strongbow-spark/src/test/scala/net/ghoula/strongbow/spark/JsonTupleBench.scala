@@ -191,7 +191,7 @@ class JsonTupleBench extends AnyFlatSpec with Matchers with SparkTestBase {
       fields.get(key) match {
         case Some(JsonValue.Str(s)) => s
         case Some(JsonValue.Bool(b)) => b.toString
-        case Some(JsonValue.Number(n)) =>
+        case Some(JsonValue.Number(n, _)) =>
           if (n == n.toLong.toDouble) n.toLong.toString else n.toString
         case _ => null // scalafix:ok DisableSyntax.null
       }

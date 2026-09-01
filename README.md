@@ -143,14 +143,14 @@ sbt spark/testFull   # full Spark suite (includes Spark round-trip parity)
 
 `sbt 2.0` runs `test` incrementally and caches results; use `testFull` for a full run. CI runs these suites with `FAST_TESTS=1` (excluding the `Slow`-tagged stress suites); see [docs/ci.md](docs/ci.md).
 
-## Part of the Arda Ecosystem
+## Dependencies and the Arda Ecosystem
 
-Strongbow is built on the Arda family of Scala 3 libraries:
+Strongbow depends on two Arda libraries (both declared in `build.sbt`):
 
-- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators with left recursion, zero-allocation backtracking, and built-in JSON/CSV/XML parsers
-- [Sarati](https://codeberg.org/hakim/sarati) — binary codec with compile-time derivation and structural AST layers (JSON, TOML, YAML, XML)
-- [Eru](https://codeberg.org/hakim/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers, resource safety, and concurrency primitives (Ref, Semaphore, Queue, Promise)
-- [Valar](https://codeberg.org/hakim/valar) — type-safe validation with compile-time derivation and error accumulation
+- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators with left recursion; the JSON, XML and XPath parsers behind Strongbow's JSON and XML functions
+- [Sarati](https://codeberg.org/hakim/sarati) — binary codec with compile-time derivation and the structural AST layers (JSON, XML) that Strongbow's JSON/XPath evaluation runs on
+
+Sibling Arda libraries (not Strongbow dependencies): [Eru](https://codeberg.org/hakim/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers and resource safety — and [Valar](https://codeberg.org/hakim/valar) — type-safe validation with compile-time derivation and error accumulation.
 
 All Arda libraries share the same principles: Scala 3 native, compile-time metaprogramming, zero `asInstanceOf` in core logic, `-Yexplicit-nulls`, `-language:strictEquality`.
 

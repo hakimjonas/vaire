@@ -17,7 +17,7 @@ import net.ghoula.strongbow.prelude.*
   *      `b` and `ns:b` (local-name semantics) and `*:b` fails the query ("Prefix must resolve to a
   *      namespace"). In-memory matches prefix-literally per XPath 1.0.
   *   3. CDATA: Spark's `text()` excludes CDATA nodes; in-memory folds them into text (they still
-  *      contribute to string-values on both backends).
+  *      contribute to string-values on both backends). Tracked as sarati#11.
   */
 class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 

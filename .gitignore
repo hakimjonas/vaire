@@ -18,21 +18,5 @@ project/project/
 # Mac
 .DS_Store
 
-# Logs
-*.log
-
 # SemanticDB
 *.semanticdb
-
-# JVM crash logs
-hs_err_pid*
-core.*
-
-# Local developer JVM tuning (CI uses the workflow env instead)
-.jvmopts
-
-# AI tool config (not user-facing)
-CLAUDE.md
-
-# Docker local overrides
-docker/spark-cluster/.env

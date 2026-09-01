@@ -1,4 +1,5 @@
-# Local developer JVM tuning for sbt. Copy to `.jvmopts` (gitignored) to override.
+# Local developer JVM tuning for sbt. Copy to `.jvmopts` (excluded per clone via
+# `.git/info/exclude`) to override.
 # CI does NOT use this file — the Forgejo workflows set JAVA_OPTS/SBT_OPTS explicitly.
 
 -Xms2G

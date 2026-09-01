@@ -14,10 +14,10 @@ import net.ghoula.strongbow.prelude.*
   * In-memory walks the Rumil-parsed JsonValue per key (reusing the GetJsonObject conventions);
   * Spark maps to array(get_json_object) over bracket-quoted key paths, which matches Spark's native
   * json_tuple generator for strings, booleans, compounds, JSON nulls, absent keys and invalid
-  * documents (the generator cannot be nested in expressions). Two pinned divergences: number
-  * formatting on edge-case doubles (pre-existing GetJsonObject gap rooted in JsonValue.Number
-  * storing only the double — follow-up filed for raw tokens), and keys mixing a single quote with a
-  * dot or bracket (unaddressable by any Spark path syntax).
+  * documents (the generator cannot be nested in expressions). Number formatting matches Spark via
+  * the raw token preserved by rumil's parser and rendered per Jackson node-type semantics (sarati
+  * 0.3.12 + rumil 0.3.12). Remaining pinned divergence: keys mixing a single quote with a dot or
+  * bracket (unaddressable by any Spark path syntax).
   */
 class JsonTupleParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -197,9 +197,19 @@ class JsonTupleParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     inMemory(4) shouldBe Seq("literal")
   }
 
-  it should "diverge on number formatting for edge-case doubles (known gap, follow-up filed)" in {
-    val (inMemory, sparkValues) = evalBoth(Expr.jsonTuple[Doc](jCell, "e", "g"), ColumnType.AnyType)
-    inMemory(5) shouldBe Seq("10000000000", "1")
-    sparkValues(5) shouldBe Seq("1.0E10", "1.0")
+  it should "render number spellings per Spark's Jackson node-type semantics" in {
+    // raw tokens drive the rendering: float tokens via Double.toString, integer tokens exact
+    checkParity(
+      Expr.jsonTuple[Doc](jCell, "e", "g"),
+      ColumnType.AnyType,
+      Vector(
+        Seq(SqlNull.value, SqlNull.value),
+        Seq(SqlNull.value, SqlNull.value),
+        Seq(SqlNull.value, SqlNull.value),
+        Seq(SqlNull.value, SqlNull.value),
+        Seq(SqlNull.value, SqlNull.value),
+        Seq("1.0E10", "1.0")
+      )
+    )
   }
 }

@@ -1,7 +1,21 @@
 package net.ghoula.strongbow.interpreter
 
 import net.ghoula.sarati.ast.json.JsonValue
+import net.ghoula.sarati.ast.xml.xpathXmlConfig
+import net.ghoula.sarati.xpath.{
+  AttributeNode,
+  CommentNode,
+  Document,
+  ElementNode,
+  PiNode,
+  TextNode,
+  XNode,
+  XPathEval,
+  XPathValue
+}
 import parsers.json.{formatJson, parseJson}
+import parsers.xml.parseXml
+import parsers.xpath.parseXPath
 
 import scala.collection.immutable.BitSet
 
@@ -20,6 +34,24 @@ import net.ghoula.strongbow.types.{Date, DayTimeInterval, RowIndex, Time, YearMo
   * value collection.
   */
 object ExprInterpreter {
+
+  /** Evaluate under the `Collect` error policy: per-row data failures null-mark their row and are
+    * recorded (bounded by the policy's `maxErrors`, with a by-kind summary) instead of aborting the
+    * column. Structural errors fail under every policy. The default policy collects up to 100
+    * errors.
+    */
+  def evalColumnCollect[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    columnType: ColumnType,
+    policy: ErrorPolicy = ErrorPolicy.Collect(100)
+  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Collected] = {
+    given errors: RowErrors = RowErrors(policy)
+    evalColumn(expr, columns, columnType).map { col =>
+      val (entries, truncated, byKind) = errors.result
+      Collected(col, entries, truncated, byKind)
+    }
+  }
 
   private[strongbow] def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]]): ColumnType = {
     expr.outputType.getOrElse {
@@ -53,7 +85,10 @@ object ExprInterpreter {
     expr: Expr[Row, A],
     columns: Vector[Column[?]],
     columnType: ColumnType
-  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Column[?]] = {
+  )(using
+    lambdaScope: LambdaScope = LambdaScope.empty,
+    errors: RowErrors = RowErrors.failFast
+  ): Either[ExecutionError, Column[?]] = {
     if (columns.isEmpty || columns.head.length == 0) {
       Right(Column.empty(columnType))
     } else {
@@ -1229,7 +1264,7 @@ object ExprInterpreter {
                 (ib, Column.int(Array.tabulate(total)(j => j - offsets(rowOf(j)))))
               }
             val scope = binds.foldLeft(lambdaScope)((s, b) => s.updated(b._1, b._2))
-            evalColumn(t.body, columns.map(_.slice(rowOf)), ColumnType.AnyType)(using scope).map { bodyCol =>
+            evalColumn(t.body, columns.map(_.slice(rowOf)), ColumnType.AnyType)(using scope, errors).map { bodyCol =>
               val flat = Array.tabulate[Any | Null](total)(j => bodyCol.getValue(j))
               Column.array(Column.any(flat), offsets, rowNulls)
             }
@@ -1245,27 +1280,28 @@ object ExprInterpreter {
                 (ib, Column.int(Array.tabulate(total)(j => j - offsets(rowOf(j)))))
               }
             val scope = binds.foldLeft(lambdaScope)((s, b) => s.updated(b._1, b._2))
-            evalColumn(fl.body, columns.map(_.slice(rowOf)), ColumnType.BooleanType)(using scope).map { bodyCol =>
-              val kept = new scala.collection.mutable.ArrayBuffer[Any | Null]
-              val newOffsets = new Array[Int](offsets.length)
-              val keptNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
-              (0 until arrCol.length).foreach { i =>
-                if (rowNulls.contains(i)) {
-                  newOffsets(i + 1) = newOffsets(i)
-                } else {
-                  val range = offsets(i) until offsets(i + 1)
-                  val keptInRange = range.filter { j =>
-                    // Spark drops elements whose predicate is false or null (null unboxes to false)
-                    !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
-                      case b: Boolean => b
-                      case _ => false
-                    })
+            evalColumn(fl.body, columns.map(_.slice(rowOf)), ColumnType.BooleanType)(using scope, errors).map {
+              bodyCol =>
+                val kept = new scala.collection.mutable.ArrayBuffer[Any | Null]
+                val newOffsets = new Array[Int](offsets.length)
+                val keptNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
+                (0 until arrCol.length).foreach { i =>
+                  if (rowNulls.contains(i)) {
+                    newOffsets(i + 1) = newOffsets(i)
+                  } else {
+                    val range = offsets(i) until offsets(i + 1)
+                    val keptInRange = range.filter { j =>
+                      // Spark drops elements whose predicate is false or null (null unboxes to false)
+                      !bodyCol.isNull(RowIndex(j)) && (bodyCol.getValue(j) match {
+                        case b: Boolean => b
+                        case _ => false
+                      })
+                    }
+                    keptInRange.foreach(j => kept += flatElems(j))
+                    newOffsets(i + 1) = newOffsets(i) + keptInRange.length
                   }
-                  keptInRange.foreach(j => kept += flatElems(j))
-                  newOffsets(i + 1) = newOffsets(i) + keptInRange.length
                 }
-              }
-              Column.array(elementColumn(kept.toVector), newOffsets, BitSet.empty ++ keptNulls)
+                Column.array(elementColumn(kept.toVector), newOffsets, BitSet.empty ++ keptNulls)
             }
           }
 
@@ -1280,7 +1316,7 @@ object ExprInterpreter {
           evalColumn(ag.array, columns, arrType).flatMap { arrCol =>
             val (flatElems, _, offsets, rowNulls) = flatArrayLayout(arrCol, arrCol.length)
             val n = arrCol.length
-            evalColumn(ag.zero, columns, ColumnType.AnyType)(using lambdaScope).flatMap { zeroCol =>
+            evalColumn(ag.zero, columns, ColumnType.AnyType)(using lambdaScope, errors).flatMap { zeroCol =>
               val outNulls = scala.collection.mutable.BitSet.empty ++ rowNulls
               val out = new Array[Any | Null](n)
               val error = (0 until n).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
@@ -1298,7 +1334,7 @@ object ExprInterpreter {
                           val scope2 = lambdaScope
                             .updated(ag.accBinder, elementColumn(Vector(acc)))
                             .updated(ag.elemBinder, elementColumn(Vector(flatElems(j))))
-                          evalColumn(ag.merge, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+                          evalColumn(ag.merge, rowColumns, ColumnType.AnyType)(using scope2, errors).map(_.getValue(0))
                         }
                       }
                       val finished = merged.flatMap { acc =>
@@ -1306,7 +1342,8 @@ object ExprInterpreter {
                           case None => Right(acc)
                           case Some((finishBinder, finishBody)) =>
                             val scope2 = lambdaScope.updated(finishBinder, elementColumn(Vector(acc)))
-                            evalColumn(finishBody, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
+                            evalColumn(finishBody, rowColumns, ColumnType.AnyType)(using scope2, errors)
+                              .map(_.getValue(0))
                         }
                       }
                       finished match {
@@ -1323,8 +1360,8 @@ object ExprInterpreter {
         case zw: Expr.ZipWith[Row, _, _, _] =>
           val leftType = inferExprColumnType(zw.left, columns)
           val rightType = inferExprColumnType(zw.right, columns)
-          evalColumn(zw.left, columns, leftType)(using lambdaScope).flatMap { leftCol =>
-            evalColumn(zw.right, columns, rightType)(using lambdaScope).flatMap { rightCol =>
+          evalColumn(zw.left, columns, leftType)(using lambdaScope, errors).flatMap { leftCol =>
+            evalColumn(zw.right, columns, rightType)(using lambdaScope, errors).flatMap { rightCol =>
               val n = leftCol.length
               val flatLeft = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
               val flatRight = scala.collection.mutable.ArrayBuffer.empty[Any | Null]
@@ -1353,7 +1390,8 @@ object ExprInterpreter {
                 .updated(zw.leftBinder, optionElementColumn(flatLeft.toVector))
                 .updated(zw.rightBinder, optionElementColumn(flatRight.toVector))
               evalColumn(zw.body, columns.map(_.slice(rowOf.toArray)), ColumnType.AnyType)(using
-                scope
+                scope,
+                errors
               ).map { bodyCol =>
                 val flat = Array.tabulate[Any | Null](total)(j => bodyCol.getValue(j))
                 Column.array(Column.any(flat), offsets, BitSet.empty ++ outNulls)
@@ -1453,8 +1491,8 @@ object ExprInterpreter {
           val leftType = inferExprColumnType(mzw.left, columns)
           val rightType = inferExprColumnType(mzw.right, columns)
           for {
-            leftCol <- evalColumn(mzw.left, columns, leftType)(using lambdaScope)
-            rightCol <- evalColumn(mzw.right, columns, rightType)(using lambdaScope)
+            leftCol <- evalColumn(mzw.left, columns, leftType)(using lambdaScope, errors)
+            rightCol <- evalColumn(mzw.right, columns, rightType)(using lambdaScope, errors)
           } yield {
             Column.any(
               Array.tabulate[Any | Null](rowCount) { i =>
@@ -1479,7 +1517,7 @@ object ExprInterpreter {
                           .updated(mzw.keyBinder, elementColumn(Vector(k)))
                           .updated(mzw.leftBinder, optionElementColumn(Vector(v1.orNull)))
                           .updated(mzw.rightBinder, optionElementColumn(Vector(v2.orNull)))
-                        evalColumn(mzw.body, rowColumns, ColumnType.AnyType)(using scope2)
+                        evalColumn(mzw.body, rowColumns, ColumnType.AnyType)(using scope2, errors)
                           .map(_.getValue(0))
                           .toOption
                           .map(k -> _)
@@ -1512,7 +1550,7 @@ object ExprInterpreter {
                         println(
                           s"DEBUG compare a=$a b=$b rowCols=${rowColumns.map(_.length)} total=${rowColumns.headOption.map(_.length)}"
                         )
-                        evalColumn(asc.body, rowColumns, ColumnType.AnyType)(using scope2) match {
+                        evalColumn(asc.body, rowColumns, ColumnType.AnyType)(using scope2, errors) match {
                           case Right(col) =>
                             println(
                               s"DEBUG col len=${col.length} nulls=${col.nullSet} len0=${rowColumns.headOption.map(_.length)}"
@@ -1651,6 +1689,54 @@ object ExprInterpreter {
               )
             case _ => Column.any(Array.empty[Any | Null])
           }
+
+        case x: Expr.Xpath[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathString[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathBoolean[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathShort[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathInt[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathLong[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathFloat[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.XpathDouble[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = false, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpath[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.NodeSet, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathString[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Str, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathBoolean[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Boolean, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathShort[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Short, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathInt[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Int, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathLong[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Long, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathFloat[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Float, tryMode = true, columns, rowCount)(using errors)
+
+        case x: Expr.TryXpathDouble[Row] =>
+          xpathArm(x.expr, x.path, XpathKind.Double, tryMode = true, columns, rowCount)(using errors)
 
         case st: Expr.Struct[Row, _] =>
           val fieldResults = st.fields.map { case (_, fieldExpr, fieldCt) =>
@@ -3334,15 +3420,22 @@ object ExprInterpreter {
     isZero: T => Boolean,
     op: (T, T) => T,
     wrap: (Array[T], BitSet) => Column[?]
-  ): Either[ExecutionError, Column[?]] = {
-    val zeroIdx = (0 until rowCount).find(i => isZero(right(i)))
-    zeroIdx match {
-      case Some(i) => Left(ExecutionError.DivisionByZero(i))
-      case None => Right(wrap(Array.tabulate(rowCount)(i => op(left(i), right(i))), BitSet.empty))
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] = {
+    val out = new Array[T](rowCount)
+    val outNulls = scala.collection.mutable.BitSet.empty
+    (0 until rowCount).foreach { i =>
+      if (isZero(right(i))) {
+        errors.add(i, ExecutionError.DivisionByZero(i))
+        outNulls += i
+      } else out(i) = op(left(i), right(i))
     }
+    if (outNulls.isEmpty || errors.isCollect) Right(wrap(out, BitSet.empty ++ outNulls))
+    else Left(ExecutionError.DivisionByZero(outNulls.head))
   }
 
-  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedDiv(left: Array[Int], right: Array[Int], rowCount: Int)(using
+    errors: RowErrors
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ / _, Column.int)
 
   private def vectorizedLongBinOp[Row](
@@ -3368,7 +3461,7 @@ object ExprInterpreter {
     left: Array[Long],
     right: Array[Long],
     rowCount: Int
-  ): Either[ExecutionError, Column[?]] =
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ / _, Column.long)
 
   private def vectorizedDoubleBinOp[Row](
@@ -3394,7 +3487,7 @@ object ExprInterpreter {
     left: Array[Double],
     right: Array[Double],
     rowCount: Int
-  ): Either[ExecutionError, Column[?]] =
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0.0, _ / _, Column.double)
 
   private def typedComparison[Row, A](
@@ -3457,14 +3550,16 @@ object ExprInterpreter {
     }
   }
 
-  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int): Either[ExecutionError, Column[?]] =
+  private def vectorizedIntMod(left: Array[Int], right: Array[Int], rowCount: Int)(using
+    errors: RowErrors
+  ): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0, _ % _, Column.int)
 
   private def vectorizedLongMod(
     left: Array[Long],
     right: Array[Long],
     rowCount: Int
-  ): Either[ExecutionError, Column[?]] =
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
     vectorizedSafeBinOp(left, right, rowCount, _ == 0L, _ % _, Column.long)
 
   private def vectorizedDoubleUnaryOp[Row](
@@ -4323,8 +4418,7 @@ object ExprInterpreter {
           case Some(JsonValue.Null) =>
             Right(null) // scalafix:ok DisableSyntax.null
           case Some(JsonValue.Bool(b)) => Right(b.toString)
-          case Some(JsonValue.Number(n)) =>
-            Right(if (n == n.toLong.toDouble) n.toLong.toString else n.toString)
+          case Some(JsonValue.Number(n, raw)) => Right(renderNumberSpelling(n, raw))
           case Some(compound) => Right(formatJson(compound))
           case None => Right(null) // scalafix:ok DisableSyntax.null
         }
@@ -4338,12 +4432,29 @@ object ExprInterpreter {
     stripped.split('.').filter(_.nonEmpty).toList
   }
 
+  /** Spark's number rendering (Jackson node types): integer tokens render exactly — Long node in
+    * range, exact digits beyond (BigInteger) — float tokens render via Java's Double.toString;
+    * programmatically constructed numbers (raw = None) fall back to the canonical form. Verified
+    * against the pinned divergence rows in JsonTupleParitySpec.
+    */
+  private def renderNumberSpelling(n: Double, raw: Option[String]): String = raw match {
+    case Some(token) =>
+      val isFloatToken = token.exists(c => c == '.' || c == 'e' || c == 'E')
+      if (isFloatToken) n.toString
+      else
+        token.toLongOption match {
+          case Some(l) => l.toString
+          case None => token // exact digits beyond Long range
+        }
+    case None =>
+      if (n == n.toLong.toDouble) n.toLong.toString else n.toString
+  }
+
   private def jsonTupleScalar(pathResult: Option[JsonValue]): Any | Null = pathResult match {
     case Some(JsonValue.Str(s)) => s
     case Some(JsonValue.Bool(b)) => b.toString
     case Some(JsonValue.Null) => null // scalafix:ok DisableSyntax.null
-    case Some(JsonValue.Number(n)) =>
-      if (n == n.toLong.toDouble) n.toLong.toString else n.toString
+    case Some(JsonValue.Number(n, raw)) => renderNumberSpelling(n, raw)
     case Some(compound) => formatJson(compound)
     case None => null // scalafix:ok DisableSyntax.null
   }
@@ -4425,6 +4536,116 @@ object ExprInterpreter {
         }
         Column.boolean(data, BitSet.empty ++ outNulls)
       }
+    }
+
+  /** The XPath 1.0 result projection kinds, one per `xpath*` function. */
+  private enum XpathKind derives CanEqual {
+    case NodeSet, Str, Boolean, Short, Int, Long, Float, Double
+  }
+
+  /** Spark's `xpath()` node values: text/attribute/comment/PI content, null for element and
+    * document nodes (W3C DOM `getNodeValue` semantics, pinned against Spark in the gate).
+    */
+  private def xpathNodeValue(node: XNode): Any | Null = node match {
+    case t: TextNode => t.text
+    case a: AttributeNode => a.value
+    case c: CommentNode => c.text
+    case p: PiNode => p.content
+    case _: ElementNode | _: Document => null // scalafix:ok DisableSyntax.null
+  }
+
+  /** XPath 1.0 boolean coercion of an evaluated value (Spark `xpath_boolean`). */
+  private def xpathToBoolean(value: XPathValue): Boolean = value match {
+    case XPathValue.NodeSet(ns) => ns.nonEmpty
+    case XPathValue.Bool(b) => b
+    case XPathValue.Number(n) => !n.isNaN && n != 0.0
+    case XPathValue.Str(s) => s.nonEmpty
+  }
+
+  /** Evaluate `path` (parsed once per expression) against each row's XML document. Mirrors Spark's
+    * `xpath*` family: null or empty inputs yield null rows; invalid XML or a failing evaluation
+    * errors the whole column with the row index (tryMode: null rows instead); a non-node-set result
+    * under the node-set projection errors (Spark: "Can not convert ...").
+    */
+  private def xpathArm[Row](
+    e: Expr[Row, String],
+    path: String,
+    kind: XpathKind,
+    tryMode: Boolean,
+    columns: Vector[Column[?]],
+    rowCount: Int
+  )(using errors: RowErrors): Either[ExecutionError, Column[?]] =
+    parseXPath(path) match {
+      case parser.core.Result.Success(ast, _) =>
+        evalColumn(e, columns, ColumnType.StringType).flatMap { col =>
+          val out = new Array[Any | Null](rowCount)
+          val outNulls = scala.collection.mutable.BitSet.empty
+          val error = (0 until rowCount).foldLeft(Option.empty[ExecutionError]) { (err, i) =>
+            err match {
+              case some @ Some(_) => some
+              case None =>
+                def fail(msg: String): Option[ExecutionError] =
+                  if (tryMode) { outNulls += i; None }
+                  else Some(ExecutionError.InvalidValue(s"$msg at row $i"))
+                val xmlOpt: Option[String] =
+                  if (col.isNull(RowIndex(i))) None
+                  else
+                    col.getValue(i) match {
+                      case x: String => Option(x)
+                      case _ => None
+                    }
+                xmlOpt.filter(_.nonEmpty) match {
+                  case None =>
+                    outNulls += i
+                    None
+                  case Some(xmlStr) =>
+                    parseXml(xmlStr, xpathXmlConfig) match {
+                      case parser.core.Result.Success(doc, _) =>
+                        XPathEval.eval(ast, doc) match {
+                          case Right(value) =>
+                            kind match {
+                              case XpathKind.NodeSet =>
+                                value match {
+                                  case XPathValue.NodeSet(ns) =>
+                                    out(i) = ns.map(xpathNodeValue): Seq[Any | Null]
+                                    None
+                                  case _ => fail("XPath result is not a node-set")
+                                }
+                              case XpathKind.Str => out(i) = XPathEval.asString(value); None
+                              case XpathKind.Boolean => out(i) = xpathToBoolean(value); None
+                              case XpathKind.Short =>
+                                out(i) = XPathEval.toNumberOrNaN(value).shortValue; None
+                              case XpathKind.Int =>
+                                out(i) = XPathEval.toNumberOrNaN(value).toInt; None
+                              case XpathKind.Long =>
+                                out(i) = XPathEval.toNumberOrNaN(value).toLong; None
+                              case XpathKind.Float =>
+                                out(i) = XPathEval.toNumberOrNaN(value).toFloat; None
+                              case XpathKind.Double =>
+                                out(i) = XPathEval.toNumberOrNaN(value); None
+                            }
+                          case Left(evalErr) =>
+                            fail(s"xpath evaluation failed: ${evalErr.toString}")
+                        }
+                      case parseFailure =>
+                        if (tryMode || errors.isCollect) {
+                          errors.add(
+                            i,
+                            ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300))
+                          )
+                          outNulls += i
+                          None
+                        } else
+                          Some(ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300)))
+                    }
+                }
+            }
+          }
+          error.toLeft(Column.any(out, BitSet.empty ++ outNulls))
+        }
+      case parseFailure =>
+        // A path error is a programming error: it fails in both modes.
+        Left(ExecutionError.InvalidValue(s"Invalid XPath '$path': $parseFailure".take(300)))
     }
 
   /** The padding value for the shorter side of a zip: Spark binds null to the overhang. */
@@ -4622,24 +4843,24 @@ object ExprInterpreter {
       case "STRING" =>
         value match {
           case JsonValue.Str(s) => Some(s)
-          case JsonValue.Number(n) => Some(if (n == n.toLong.toDouble) n.toLong.toString else n.toString)
+          case JsonValue.Number(n, raw) => Some(renderNumberSpelling(n, raw))
           case JsonValue.Bool(b) => Some(b.toString)
           case _ => None
         }
       case "BIGINT" | "INTEGER" | "INT" | "LONG" =>
         value match {
-          case JsonValue.Number(n) if n.isValidInt => Some(n.toLong)
+          case JsonValue.Number(n, _) if n.isValidInt => Some(n.toLong)
           case _ => None
         }
       case "DOUBLE" =>
         value match {
-          case JsonValue.Number(n) => Some(n)
+          case JsonValue.Number(n, _) => Some(n)
           case _ => None
         }
       case "BOOLEAN" =>
         value match {
           case JsonValue.Bool(b) => Some(b)
-          case JsonValue.Number(n) => Some(n != 0.0)
+          case JsonValue.Number(n, _) => Some(n != 0.0)
           case _ => None
         }
       case _ => None
@@ -4648,7 +4869,7 @@ object ExprInterpreter {
   private def jsonValueToSqlType(value: JsonValue): Option[String] = value match {
     case JsonValue.Null => Some("VOID")
     case JsonValue.Bool(_) => Some("BOOLEAN")
-    case JsonValue.Number(n) => Some(if (n.isValidInt) "BIGINT" else "DOUBLE")
+    case JsonValue.Number(n, _) => Some(if (n.isValidInt) "BIGINT" else "DOUBLE")
     case JsonValue.Str(_) => Some("STRING")
     case JsonValue.Array(items) =>
       val elemTypes = items.map(jsonValueToSqlType).collect { case Some(t) => t }.distinct

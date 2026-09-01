@@ -34,6 +34,13 @@ object ExprToColumn {
   )(using scope: LambdaColumnScope): Either[ExecutionError, (SparkColumn, ColumnType)] =
     convert(expr).map { case (sparkCol, _) => (op(sparkCol), resultType) }
 
+  /** The try-xpath family cannot be expressed in Spark's Column model: a per-row XML parse failure
+    * throws inside Spark's xpath implementation and no Column-level combinator can catch it, so the
+    * try semantics (null rows instead of a failed query) are unrepresentable.
+    */
+  private def tryXpathUnsupported(fn: String): Either[ExecutionError, (SparkColumn, ColumnType)] =
+    Left(ExecutionError.UnsupportedOperation(s"$fn requires the in-memory interpreter"))
+
   /** Spark path for a literal json_tuple key. Spark's JsonPathParser has no escape mechanism: the
     * bracket form `$['k']` rejects single quotes, and the dot form `$.k` rejects dots and brackets
     * — a key containing both kinds of character is unaddressable.
@@ -654,6 +661,24 @@ object ExprToColumn {
           )
           failure.get().toLeft((result, ColumnType.AnyType))
         }
+
+      case x: Expr.Xpath[Row] => convertUnary(x.expr, xpath(_, lit(x.path)), ColumnType.AnyType)
+      case x: Expr.XpathString[Row] => convertUnary(x.expr, xpath_string(_, lit(x.path)), ColumnType.StringType)
+      case x: Expr.XpathBoolean[Row] => convertUnary(x.expr, xpath_boolean(_, lit(x.path)), ColumnType.BooleanType)
+      case x: Expr.XpathShort[Row] => convertUnary(x.expr, xpath_short(_, lit(x.path)), ColumnType.ShortType)
+      case x: Expr.XpathInt[Row] => convertUnary(x.expr, xpath_int(_, lit(x.path)), ColumnType.IntType)
+      case x: Expr.XpathLong[Row] => convertUnary(x.expr, xpath_long(_, lit(x.path)), ColumnType.LongType)
+      case x: Expr.XpathFloat[Row] => convertUnary(x.expr, xpath_float(_, lit(x.path)), ColumnType.FloatType)
+      case x: Expr.XpathDouble[Row] => convertUnary(x.expr, xpath_double(_, lit(x.path)), ColumnType.DoubleType)
+
+      case _: Expr.TryXpath[Row] => tryXpathUnsupported("try_xpath")
+      case _: Expr.TryXpathString[Row] => tryXpathUnsupported("try_xpath_string")
+      case _: Expr.TryXpathBoolean[Row] => tryXpathUnsupported("try_xpath_boolean")
+      case _: Expr.TryXpathShort[Row] => tryXpathUnsupported("try_xpath_short")
+      case _: Expr.TryXpathInt[Row] => tryXpathUnsupported("try_xpath_int")
+      case _: Expr.TryXpathLong[Row] => tryXpathUnsupported("try_xpath_long")
+      case _: Expr.TryXpathFloat[Row] => tryXpathUnsupported("try_xpath_float")
+      case _: Expr.TryXpathDouble[Row] => tryXpathUnsupported("try_xpath_double")
 
       case m: Expr.Md5[Row] => convertUnary(m.expr, md5, ColumnType.StringType)
       case s: Expr.Sha1[Row] => convertUnary(s.expr, sha1, ColumnType.StringType)

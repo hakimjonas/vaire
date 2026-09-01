@@ -343,6 +343,45 @@ enum Expr[Row, +A] {
 
   case GetJsonObject[Row](expr: Expr[Row, String], path: String) extends Expr[Row, String]
 
+  /** XPath 1.0 over an XML document (Spark's `xpath*` family). `path` is a constant, parsed once
+    * per evaluation; per-row XML is parsed with [[net.ghoula.sarati.ast.xml.xpathXmlConfig]].
+    * Invalid XML or a failing evaluation errors the whole column (mirroring Spark's query failure)
+    * with the row index in the message; null or empty inputs yield null rows. Documents with a DTD
+    * are not parseable by the in-memory XML parser (Spark expands internal DTD entities) — a
+    * documented divergence.
+    */
+  case Xpath[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Seq[String | Null]]
+
+  /** XPath 1.0 string projection: string-value of the first node in document order. */
+  case XpathString[Row](expr: Expr[Row, String], path: String) extends Expr[Row, String]
+
+  /** XPath 1.0 boolean projection. */
+  case XpathBoolean[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Boolean]
+
+  /** XPath 1.0 numeric projections: `number()` coercion of the result, truncated for the integral
+    * kinds (NaN truncates to 0, matching Spark); float/double keep NaN.
+    */
+  case XpathShort[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Short]
+  case XpathInt[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Int]
+  case XpathLong[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Long]
+  case XpathFloat[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Float]
+  case XpathDouble[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Double]
+
+  /** In-memory-only try variants of the [[Xpath]]* family: per-row evaluation failures (malformed
+    * XML) yield null rows instead of failing the column. Invalid paths still fail (a path error is
+    * a programming error, not data). On Spark these report `UnsupportedOperation` — Spark's Column
+    * model has no way to catch per-row evaluation failures, so the try semantics cannot be
+    * expressed there.
+    */
+  case TryXpath[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Seq[String | Null]]
+  case TryXpathString[Row](expr: Expr[Row, String], path: String) extends Expr[Row, String]
+  case TryXpathBoolean[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Boolean]
+  case TryXpathShort[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Short]
+  case TryXpathInt[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Int]
+  case TryXpathLong[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Long]
+  case TryXpathFloat[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Float]
+  case TryXpathDouble[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Double]
+
   case JsonTuple[Row](expr: Expr[Row, String], keys: Vector[String]) extends Expr[Row, Seq[String | Null]]
 
   case TimeToSeconds[Row](expr: Expr[Row, Time]) extends Expr[Row, Decimal]
@@ -891,6 +930,24 @@ object Expr {
     inline def aesDecrypt(key: Expr[Row, String]): Expr[Row, String] = AesDecrypt(left, key)
     inline def tryAesDecrypt(key: Expr[Row, String]): Expr[Row, String] = TryAesDecrypt(left, key)
     inline def getJsonObject(path: String): Expr[Row, String] = GetJsonObject(left, path)
+    inline def xpath(path: String): Expr[Row, Seq[String | Null]] = Xpath(left, path)
+    inline def xpathString(path: String): Expr[Row, String] = XpathString(left, path)
+    inline def xpathBoolean(path: String): Expr[Row, Boolean] = XpathBoolean(left, path)
+    inline def xpathShort(path: String): Expr[Row, Short] = XpathShort(left, path)
+    inline def xpathInt(path: String): Expr[Row, Int] = XpathInt(left, path)
+    inline def xpathLong(path: String): Expr[Row, Long] = XpathLong(left, path)
+    inline def xpathFloat(path: String): Expr[Row, Float] = XpathFloat(left, path)
+    inline def xpathDouble(path: String): Expr[Row, Double] = XpathDouble(left, path)
+    inline def xpathNumber(path: String): Expr[Row, Double] = XpathDouble(left, path)
+    inline def tryXpath(path: String): Expr[Row, Seq[String | Null]] = TryXpath(left, path)
+    inline def tryXpathString(path: String): Expr[Row, String] = TryXpathString(left, path)
+    inline def tryXpathBoolean(path: String): Expr[Row, Boolean] = TryXpathBoolean(left, path)
+    inline def tryXpathShort(path: String): Expr[Row, Short] = TryXpathShort(left, path)
+    inline def tryXpathInt(path: String): Expr[Row, Int] = TryXpathInt(left, path)
+    inline def tryXpathLong(path: String): Expr[Row, Long] = TryXpathLong(left, path)
+    inline def tryXpathFloat(path: String): Expr[Row, Float] = TryXpathFloat(left, path)
+    inline def tryXpathDouble(path: String): Expr[Row, Double] = TryXpathDouble(left, path)
+    inline def tryXpathNumber(path: String): Expr[Row, Double] = TryXpathDouble(left, path)
   }
 
   extension [Row, A](e: Expr[Row, Option[A]]) {
@@ -1658,7 +1715,15 @@ object Expr {
           _: Expr.RTrim[_] | _: Expr.Substring[_] | _: Expr.StringReplace[_] | _: Expr.RegexpReplace[_] |
           _: Expr.RegexpExtract[_] | _: Expr.ConcatWs[_] | _: Expr.CastToString[_, _] =>
         Some(ColumnType.StringType)
-      case _: Expr.StringSplit[_] | _: Expr.JsonTuple[_] => Some(ColumnType.AnyType)
+      case _: Expr.StringSplit[_] | _: Expr.JsonTuple[_] | _: Expr.Xpath[_] | _: Expr.TryXpath[_] =>
+        Some(ColumnType.AnyType)
+      case _: Expr.XpathString[_] | _: Expr.TryXpathString[_] => Some(ColumnType.StringType)
+      case _: Expr.XpathBoolean[_] | _: Expr.TryXpathBoolean[_] => Some(ColumnType.BooleanType)
+      case _: Expr.XpathShort[_] | _: Expr.TryXpathShort[_] => Some(ColumnType.ShortType)
+      case _: Expr.XpathInt[_] | _: Expr.TryXpathInt[_] => Some(ColumnType.IntType)
+      case _: Expr.XpathLong[_] | _: Expr.TryXpathLong[_] => Some(ColumnType.LongType)
+      case _: Expr.XpathFloat[_] | _: Expr.TryXpathFloat[_] => Some(ColumnType.FloatType)
+      case _: Expr.XpathDouble[_] | _: Expr.TryXpathDouble[_] => Some(ColumnType.DoubleType)
       case _: Expr.LambdaVar[_, _] | _: Expr.Transform[_, _, _] | _: Expr.ZipWith[_, _, _, _] |
           _: Expr.Aggregate[_, _, _] | _: Expr.MapZipWith[_, _, _, _, _] | _: Expr.TransformKeys[_, _, _, _] |
           _: Expr.TransformValues[_, _, _, _] | _: Expr.ArraySortComparator[_, _] =>

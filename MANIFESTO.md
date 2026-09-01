@@ -19,7 +19,7 @@ Strongbow is a **logically pure, execution-flexible dataset library** that treat
 #### I. Arda Ecosystem Native
 
 - **Core depends on Rumil and Sarati** — the Arda ecosystem's parser and codec libraries
-- **No third-party dependencies** — everything is built in-house
+- **No third-party production dependencies** — everything is built in-house (test-only libraries aside)
 - **Logical plan as data**: Dataset[T], Expr[Row, A], Column[+A] are sealed enums
 - **Integration modules**: Spark backend is optional, core works standalone
 
@@ -30,7 +30,7 @@ Strongbow is a **logically pure, execution-flexible dataset library** that treat
 - **Native enums**: For Dataset, Expr, Column, ColumnType
 - **GADTs**: Type parameters refined through pattern matching
 - **Opaque types**: Zero-cost wrappers (RowIndex, ColumnIndex, Date)
-- **Inline macros**: Compile-time lambda → expression compilation
+- **Inline metaprogramming** (quotes/splices): compile-time lambda → expression compilation
 - **Extension methods**: Fluent API without inheritance
 - **Prelude pattern**: Single canonical import
 - **`-Yexplicit-nulls`**: Compiler-enforced null safety
@@ -52,7 +52,7 @@ Strongbow is a **logically pure, execution-flexible dataset library** that treat
 
 **Cast Philosophy:**
 - Zero `asInstanceOf` in interpreters — all type safety comes from GADT refinement
-- Casts exist only in macro metaprogramming (quote/splice boundary) — a Scala 3 compiler limitation
+- Casts exist only at documented erasure boundaries — the quote/splice boundary of inline metaprogramming (a compiler limitation) and erased storage access in the interpreter (AnyColumn reads where type erasure makes pattern matching impossible)
 - No silent defaults, no unchecked casts, no type erasure workarounds
 
 #### IV. Separation of Description and Execution
@@ -77,7 +77,7 @@ Strongbow is a **logically pure, execution-flexible dataset library** that treat
 #### VI. Correctness First, Performance Later
 
 - Build it right, then make it fast
-- Measure before optimizing — premature optimization is the root of all evil
+- Measure before optimizing — optimization without a measurement is guesswork
 - A slow correct implementation beats a fast broken one
 - Benchmarks prove claims, not assumptions
 

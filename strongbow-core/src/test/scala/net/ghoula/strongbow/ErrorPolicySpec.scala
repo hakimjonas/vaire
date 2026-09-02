@@ -7,7 +7,16 @@ import org.scalatest.matchers.should.Matchers
 import net.ghoula.strongbow.Schema
 import net.ghoula.strongbow.dataset.Dataset
 import net.ghoula.strongbow.errors.ExecutionError
-import net.ghoula.strongbow.interpreter.{Collected, CollectedDataset, ErrorPolicy, ExprInterpreter, RowErrors}
+import net.ghoula.strongbow.interpreter.{
+  Collected,
+  CollectedDataset,
+  ErrorPolicy,
+  ExprInterpreter,
+  InputPreview,
+  Quarantined,
+  QuarantinedRow,
+  RowErrors
+}
 import net.ghoula.strongbow.prelude.*
 import net.ghoula.strongbow.types.{ColumnIndex, RowIndex}
 
@@ -99,9 +108,9 @@ class ErrorPolicySpec extends AnyFlatSpec with Matchers {
 
   "RowErrors.collecting" should "record bounded entries with complete by-kind counts" in {
     val collector = RowErrors.collecting(2)
-    collector.add(0, ExecutionError.DivisionByZero(0))
-    collector.add(1, ExecutionError.DivisionByZero(1))
-    collector.add(2, ExecutionError.InvalidValue("x"))
+    collector.add(0, ExecutionError.DivisionByZero(0), "20 / 0")
+    collector.add(1, ExecutionError.DivisionByZero(1), "30 / 0")
+    collector.add(2, ExecutionError.InvalidValue("x"), "payload")
     val (entries, truncated, byKind) = collector.result
     entries should have size 2
     truncated shouldBe true
@@ -194,6 +203,125 @@ class ErrorPolicySpec extends AnyFlatSpec with Matchers {
     ratioSelect.collect match {
       case Left(ExecutionError.DivisionByZero(row)) => row.shouldBe(1)
       case other => fail(s"expected DivisionByZero, got $other")
+    }
+  }
+
+  private def evalQuarantine[A](
+    expr: Expr[A, ?],
+    columns: Vector[Column[?]],
+    preview: InputPreview = InputPreview.Truncated(120),
+    redact: String => String = identity
+  ): Either[ExecutionError, Quarantined] =
+    ExprInterpreter.evalColumnWithErrors(expr, columns, ColumnType.IntType, preview, redact)
+
+  "evalColumnWithErrors" should "produce a dense error column boxing QuarantinedRow" in {
+    val expr = intCell / divCell
+    val result = evalQuarantine(expr, intColumns)
+    inside(result) { case Right(Quarantined(values, errs)) =>
+      values.length shouldBe 4
+      values.isNull(RowIndex(1)) shouldBe true
+      values.isNull(RowIndex(3)) shouldBe true
+      values.getValue(0) shouldBe 5
+      errs.isNull(RowIndex(0)) shouldBe true
+      errs.isNull(RowIndex(2)) shouldBe true
+      errs.getValue(1) match {
+        case QuarantinedRow(ExecutionError.DivisionByZero(1), Some(preview)) =>
+          preview shouldBe "20 / 0"
+        case other => fail(s"expected quarantined division row, got $other")
+      }
+      errs.getValue(3) match {
+        case QuarantinedRow(ExecutionError.DivisionByZero(3), Some("40 / 0")) => succeed
+        case other => fail(s"expected quarantined division row, got $other")
+      }
+    }
+  }
+
+  it should "route good rows and dead-letter rows apart" in {
+    val expr = intCell / divCell
+    val Right(Quarantined(values, errs)) = evalQuarantine(expr, intColumns): @unchecked
+    val goodRows = (0 until values.length).filter(row => errs.isNull(RowIndex(row)))
+    val badRows = (0 until values.length).filterNot(row => errs.isNull(RowIndex(row)))
+    goodRows shouldBe Vector(0, 2)
+    badRows shouldBe Vector(1, 3)
+    val goodValues = values.slice(goodRows.toArray)
+    goodValues.getValue(0) shouldBe 5
+    goodValues.getValue(1) shouldBe 10
+    val deadLetterReasons = badRows.map(row =>
+      errs.getValue(row) match {
+        case QuarantinedRow(err, _) => err.productPrefix
+        case other => fail(s"expected QuarantinedRow, got $other")
+      }
+    )
+    deadLetterReasons shouldBe Vector("DivisionByZero", "DivisionByZero")
+  }
+
+  it should "keep every failed row where Collect truncates" in {
+    val expr = intCell / divCell
+    val Right(Collected(_, collectedErrors, truncated, _)) =
+      ExprInterpreter.evalColumnCollect(expr, intColumns, ColumnType.IntType, ErrorPolicy.Collect(1)): @unchecked
+    truncated shouldBe true
+    collectedErrors should have size 1
+    val Right(Quarantined(_, errs)) = evalQuarantine(expr, intColumns): @unchecked
+    val quarantinedCount = (0 until errs.length).count(row => !errs.isNull(RowIndex(row)))
+    quarantinedCount shouldBe 2
+  }
+
+  it should "carry the malformed XML document as the input preview" in {
+    val xmlData: Array[String | Null] = Array(
+      """<r><v>1</v></r>""",
+      """<r><v>broken""",
+      """<r><v>3</v></r>"""
+    )
+    val xmlCol = Column.string(xmlData)
+    val xmlCell = Expr.Cell[Any, String]("xml", ColumnIndex(0))
+    val expr = xmlCell.xpathInt("r/v")
+    val result = ExprInterpreter.evalColumnWithErrors(expr, Vector(xmlCol), ColumnType.IntType)
+    inside(result) { case Right(Quarantined(values, errs)) =>
+      values.getValue(0) shouldBe 1
+      values.isNull(RowIndex(1)) shouldBe true
+      values.getValue(2) shouldBe 3
+      errs.isNull(RowIndex(0)) shouldBe true
+      errs.isNull(RowIndex(2)) shouldBe true
+      errs.getValue(1) match {
+        case QuarantinedRow(ExecutionError.InvalidValue(_), Some(preview)) =>
+          preview shouldBe """<r><v>broken"""
+        case other => fail(s"expected quarantined XML row, got $other")
+      }
+    }
+  }
+
+  it should "honor the preview knobs and the redactor" in {
+    val expr = intCell / divCell
+    val redacted = evalQuarantine(expr, intColumns, InputPreview.Off)
+    inside(redacted) { case Right(Quarantined(_, errs)) =>
+      errs.getValue(1) match {
+        case QuarantinedRow(_, None) => succeed
+        case other => fail(s"expected no preview, got $other")
+      }
+    }
+    val full = evalQuarantine(expr, intColumns, InputPreview.Full, raw => s"REDACTED($raw)")
+    inside(full) { case Right(Quarantined(_, errs)) =>
+      errs.getValue(1) match {
+        case QuarantinedRow(_, Some(preview)) => preview shouldBe "REDACTED(20 / 0)"
+        case other => fail(s"expected redacted preview, got $other")
+      }
+    }
+    val truncated = evalQuarantine(expr, intColumns, InputPreview.Truncated(3))
+    inside(truncated) { case Right(Quarantined(_, errs)) =>
+      errs.getValue(1) match {
+        case QuarantinedRow(_, Some(preview)) => preview shouldBe "20 "
+        case other => fail(s"expected truncated preview, got $other")
+      }
+    }
+  }
+
+  it should "not suppress structural errors" in {
+    val xmlCol = Column.string(Array("""<r><v>1</v></r>"""))
+    val xmlCell = Expr.Cell[Any, String]("xml", ColumnIndex(0))
+    val brokenPath = xmlCell.xpathInt("r/[v")
+    ExprInterpreter.evalColumnWithErrors(brokenPath, Vector(xmlCol), ColumnType.IntType) match {
+      case Left(ExecutionError.InvalidValue(msg)) => msg.should(include("Invalid XPath"))
+      case other => fail(s"expected structural path failure, got $other")
     }
   }
 }

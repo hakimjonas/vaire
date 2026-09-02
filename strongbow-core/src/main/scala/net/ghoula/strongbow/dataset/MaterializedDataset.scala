@@ -87,6 +87,7 @@ final case class MaterializedDataset[T](
   }
 }
 
+/** Construction of materialized datasets from rows or columns. */
 object MaterializedDataset {
 
   /** Create from a Vector of values and schema. */

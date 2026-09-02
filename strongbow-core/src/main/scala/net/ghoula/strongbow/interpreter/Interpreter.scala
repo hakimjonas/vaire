@@ -9,6 +9,8 @@ import net.ghoula.strongbow.errors.ExecutionError
   * pluggable execution via `given Interpreter`.
   */
 trait Interpreter {
+
+  /** Execute the plan to a materialized result (fail-fast semantics). */
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]]
 
   /** Execute a policy-scoped plan (one carrying a `withErrorPolicy` node), returning the

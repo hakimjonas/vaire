@@ -14,7 +14,13 @@ import net.ghoula.strongbow.errors.ExecutionError
   * Spark backend the policy does not apply — Spark fails its own queries.
   */
 enum ErrorPolicy derives CanEqual {
+
+  /** The default: the first per-row failure aborts the evaluation with its error. */
   case FailFast
+
+  /** Bounded accumulation: failed rows null-mark their column; failures are recorded up to
+    * `maxErrors`.
+    */
   case Collect(maxErrors: Int)
 }
 
@@ -27,11 +33,18 @@ enum ErrorPolicy derives CanEqual {
   * is applied to whatever is kept.
   */
 enum InputPreview derives CanEqual {
+
+  /** Discard the input preview entirely. */
   case Off
+
+  /** Keep at most the first `maxChars` characters of the input. */
   case Truncated(maxChars: Int)
+
+  /** Keep the input verbatim (after redaction). */
   case Full
 }
 
+/** Rendering of the payload-channel input preview. */
 object InputPreview {
 
   /** Apply the preview knob to a raw input string, returning the payload-channel value. */
@@ -86,21 +99,30 @@ final case class Quarantined(values: Column[?], errors: Column[?])
   * Collect, rendered by the quarantine recorder per its preview knob.
   */
 sealed trait RowErrors {
+
+  /** Record a per-row failure with its payload-channel input (never forced by FailFast/Collect). */
   def add(row: Int, err: ExecutionError, input: => String): Unit
+
+  /** Whether per-row failures continue evaluation (Collect and quarantine) rather than aborting. */
   def isCollect: Boolean
+
+  /** The bounded entries, truncation flag and by-kind summary (Collect mode). */
   def result: (Vector[(Int, ExecutionError)], Boolean, Map[String, Int])
 
   /** The complete per-row quarantine records; empty outside quarantine mode. */
   def quarantineResult: Vector[(Int, QuarantinedRow)]
 }
 
+/** Construction of the three recorder modes. */
 object RowErrors {
 
+  /** The recorder for the given policy. */
   def apply(policy: ErrorPolicy): RowErrors = policy match {
     case ErrorPolicy.FailFast => failFast
     case ErrorPolicy.Collect(maxErrors) => collecting(maxErrors)
   }
 
+  /** The discarding recorder behind FailFast. */
   val failFast: RowErrors = new RowErrors {
     def add(row: Int, err: ExecutionError, input: => String): Unit = ()
     def isCollect: Boolean = false
@@ -108,6 +130,7 @@ object RowErrors {
     def quarantineResult: Vector[(Int, QuarantinedRow)] = Vector.empty
   }
 
+  /** The bounded recorder behind Collect(maxErrors). */
   def collecting(maxErrors: Int): RowErrors = new RowErrors {
     private val entries =
       new java.util.concurrent.atomic.AtomicReference(Vector.empty[(Int, ExecutionError)])

@@ -6,10 +6,15 @@ package net.ghoula.strongbow.types
   */
 opaque type TimestampNTZ = Long
 
+/** Construction of zone-less Timestamps. */
 object TimestampNTZ {
+
+  /** A timestamp from microseconds since the epoch (local wall-clock semantics). */
   inline def ofEpochMicro(micros: Long): TimestampNTZ = micros
 
   extension (t: TimestampNTZ) {
+
+    /** Microseconds since the epoch. */
     inline def toEpochMicro: Long = t
   }
 

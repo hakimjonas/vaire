@@ -10,8 +10,10 @@ PR merge to `main` cuts the next patch tag and publishes to the registry.
   classes/objects/enums, enum cases, extension methods; overrides, givens, exports, and
   private/protected members exempt). The `check` gate compares per-file counts against the
   checked-in `doc-coverage.json` and fails when undocumented counts grow; `sbt
-  docCoverageSnapshot` regenerates the baseline after doc work. Baseline: 278/1138 (24.4%) —
-  ratcheting to 100% happens family by family.
+  docCoverageSnapshot` regenerates the baseline after doc work. The backfill landed the same
+  cycle: every public member of core and spark now carries a scaladoc — 1133/1133 (100%) — so
+  the ratchet holds the line as a hard gate. Members of private/qualified-private aggregates
+  are outside the user-facing API surface and stay exempt.
 - **Error-policy E3 — quarantine (dead-letter view)** — `evalColumnWithErrors` evaluates under
   quarantine: per-row failures null-mark the value column and are recorded in a dense error
   column (an `AnyColumn` boxing `QuarantinedRow` — log-safe reason plus opt-in input preview — at

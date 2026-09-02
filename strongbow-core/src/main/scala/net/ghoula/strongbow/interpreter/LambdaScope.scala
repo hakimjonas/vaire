@@ -12,12 +12,17 @@ import net.ghoula.strongbow.expr.Binder
   */
 final case class LambdaScope private[interpreter] (bindings: Map[Binder[?], Column[?]]) {
 
+  /** A scope extended with one lambda-variable binding. */
   def updated(binder: Binder[?], column: Column[?]): LambdaScope =
     LambdaScope(bindings.updated(binder, column))
 
+  /** The binding for the given lambda variable, if it is in scope. */
   def get(binder: Binder[?]): Option[Column[?]] = bindings.get(binder)
 }
 
+/** The scope of lambda-variable bindings for one evaluation. */
 object LambdaScope {
+
+  /** The empty scope at evaluation entry. */
   val empty: LambdaScope = LambdaScope(Map.empty)
 }

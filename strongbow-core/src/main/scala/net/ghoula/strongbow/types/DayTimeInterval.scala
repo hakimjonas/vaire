@@ -7,10 +7,15 @@ package net.ghoula.strongbow.types
   */
 opaque type DayTimeInterval = Long
 
+/** Construction of day-time intervals. */
 object DayTimeInterval {
+
+  /** An interval from total microseconds. */
   inline def ofMicros(micros: Long): DayTimeInterval = micros
 
   extension (i: DayTimeInterval) {
+
+    /** Total microseconds. */
     inline def toMicros: Long = i
   }
 

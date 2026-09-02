@@ -16,26 +16,56 @@ import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, 
   *   The row type of this dataset
   */
 enum Dataset[T] {
+
+  /** The plan's source: columns in memory, or a Spark DataFrame. */
   case Root[T](source: DataSource, schema: Schema[T]) extends Dataset[T]
+
+  /** Row filter over the parent's rows. */
   case Filter[T](parent: Dataset[T], predicate: Expr[T, Boolean]) extends Dataset[T]
+
+  /** Row-wise transformation with a decoded-row function. */
   case Map[A, B](parent: Dataset[A], func: A => B, schema: Schema[B]) extends Dataset[B]
+
+  /** Row-wise transformation producing zero or more rows per input row. */
   case FlatMap[A, B](parent: Dataset[A], func: A => Iterable[B], schema: Schema[B]) extends Dataset[B]
+
+  /** Row-wise projection to a new row type. */
   case Select[T, U](parent: Dataset[T], projection: T => U, schema: Schema[U]) extends Dataset[U]
+
+  /** Projection via typed expressions evaluated columnar (SQL SELECT list). */
   case SelectExprs[In, Out](
     parent: Dataset[In],
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
     schema: Schema[Out]
   ) extends Dataset[Out]
+
+  /** Deduplicated rows of the parent. */
   case Distinct[T](parent: Dataset[T]) extends Dataset[T]
+
+  /** The first n rows of the parent. */
   case Limit[T](parent: Dataset[T], n: Int) extends Dataset[T]
+
+  /** All rows of both datasets (duplicates kept, SQL UNION ALL). */
   case Union[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
+
+  /** Inner join on a row-pair predicate. */
   case InnerJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(A, B)]
+
+  /** Left outer join on a row-pair predicate; unmatched left rows carry None. */
   case LeftJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[(A, Option[B])]
+
+  /** Right outer join on a row-pair predicate; unmatched right rows carry None. */
   case RightJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean)
       extends Dataset[(Option[A], B)]
+
+  /** Full outer join on a row-pair predicate; unmatched rows carry None on the missing side. */
   case FullJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean)
       extends Dataset[(Option[A], Option[B])]
+
+  /** Left rows with no matching right row. */
   case LeftAntiJoin[A, B](left: Dataset[A], right: Dataset[B], condition: (A, B) => Boolean) extends Dataset[A]
+
+  /** Inner join on typed key expressions, evaluated columnar. */
   case InnerJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -44,6 +74,8 @@ enum Dataset[T] {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
   ) extends Dataset[(A, B)]
+
+  /** Left outer join on typed key expressions. */
   case LeftJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -52,6 +84,8 @@ enum Dataset[T] {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
   ) extends Dataset[(A, Option[B])]
+
+  /** Right outer join on typed key expressions. */
   case RightJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -60,6 +94,8 @@ enum Dataset[T] {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
   ) extends Dataset[(Option[A], B)]
+
+  /** Full outer join on typed key expressions. */
   case FullJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -68,6 +104,8 @@ enum Dataset[T] {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
   ) extends Dataset[(Option[A], Option[B])]
+
+  /** Left rows whose key has no right match. */
   case LeftAntiJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -76,26 +114,47 @@ enum Dataset[T] {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
   ) extends Dataset[A]
+
+  /** Rows present in both datasets, deduplicated (SQL INTERSECT). */
   case Intersect[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
+
+  /** Rows of the left absent from the right, deduplicated (SQL EXCEPT). */
   case Except[T](left: Dataset[T], right: Dataset[T]) extends Dataset[T]
+
+  /** Ordering by the row type's Ordering. */
   case Sort[T](parent: Dataset[T], ordering: Ordering[T]) extends Dataset[T]
+
+  /** Ordering by a decoded-row key function. */
   case SortBy[T, K](parent: Dataset[T], key: T => K, ordering: Ordering[K]) extends Dataset[T]
+
+  /** Ordering by a typed expression evaluated columnar. */
   case SortByExpr[T, K](parent: Dataset[T], keyExpr: Expr[T, K], keyType: ColumnType, ordering: Ordering[K])
       extends Dataset[T]
+
+  /** Random row sample with the given fraction, seed and replacement mode. */
   case Sample[T](
     parent: Dataset[T],
     fraction: Double,
     seed: Long,
     withReplacement: Boolean
   ) extends Dataset[T]
+
+  /** Pairs each row with its 0-based position. */
   case ZipWithIndex[T](parent: Dataset[T]) extends Dataset[(T, Long)]
+
+  /** Pairs each row with a unique (non-contiguous) id. */
   case ZipWithUniqueId[T](parent: Dataset[T]) extends Dataset[(T, Long)]
 
+  /** Marks the parent for caching on the executing backend (no-op in memory). */
   case Persist[T](parent: Dataset[T]) extends Dataset[T]
+
+  /** Materializes the parent rows eagerly, truncating the plan. */
   case Checkpoint[T](parent: Dataset[T]) extends Dataset[T]
 
+  /** Partitioning hint for partitioned backends (no-op in memory). */
   case Rebalance[T](parent: Dataset[T], numPartitions: Option[Int]) extends Dataset[T]
 
+  /** Grouped aggregation over typed key and aggregation specs. */
   case GroupByAgg[In, Out](
     parent: Dataset[In],
     keySpecs: Vector[KeySpec[In]],
@@ -103,11 +162,13 @@ enum Dataset[T] {
     schema: Schema[Out]
   ) extends Dataset[Out]
 
+  /** Ordering by several typed expressions with independent directions. */
   case SortByExprs[T](
     parent: Dataset[T],
     sortKeys: Vector[SortSpec[T]]
   ) extends Dataset[T]
 
+  /** Left rows whose key has a right match; right columns dropped. */
   case LeftSemiJoinOn[A, B, K](
     left: Dataset[A],
     right: Dataset[B],
@@ -117,6 +178,7 @@ enum Dataset[T] {
     rightKeyType: ColumnType
   ) extends Dataset[A]
 
+  /** Appends window-function columns over the given window specification. */
   case WithWindow[In, Out](
     parent: Dataset[In],
     windowExprs: Vector[WindowExprSpec[In]],
@@ -124,15 +186,18 @@ enum Dataset[T] {
     schema: Schema[Out]
   ) extends Dataset[Out]
 
+  /** Global aggregation without grouping keys (single-row result). */
   case Aggregate[T, R](
     parent: Dataset[T],
     aggSpecs: Vector[AggSpec[T]],
     resultSchema: Schema[R]
   ) extends Dataset[R]
 
+  /** Error-policy scope over the plan built so far; see docs/error-policy-design.md. */
   case WithPolicy[T](parent: Dataset[T], policy: ErrorPolicy) extends Dataset[T]
 }
 
+/** Smart constructor with validation and the transformation DSL. */
 object Dataset {
 
   /** Smart constructor with validation using Either (no deps).
@@ -164,26 +229,33 @@ object Dataset {
   }
 
   extension [T](ds: Dataset[T]) {
+
+    /** Rows where the predicate holds. */
     inline def filter(predicate: Expr[T, Boolean]): Dataset[T] = {
       Filter(ds, predicate)
     }
 
+    /** Row-wise transformation to a new row type. */
     inline def map[U](f: T => U)(using schema: Schema[U]): Dataset[U] = {
       Map(ds, f, schema)
     }
 
+    /** Row-wise transformation producing zero or more rows per input row. */
     inline def flatMap[U](f: T => Iterable[U])(using schema: Schema[U]): Dataset[U] = {
       FlatMap(ds, f, schema)
     }
 
+    /** Deduplicated rows (SQL DISTINCT). */
     inline def distinct: Dataset[T] = {
       Distinct(ds)
     }
 
+    /** The first n rows (SQL LIMIT). */
     inline def limit(n: Int): Dataset[T] = {
       Limit(ds, n)
     }
 
+    /** All rows of both datasets, duplicates kept (SQL UNION ALL). */
     inline def union(other: Dataset[T]): Dataset[T] = {
       Union(ds, other)
     }
@@ -204,10 +276,12 @@ object Dataset {
       Except(ds, other)
     }
 
+    /** Rows ordered by the row type's Ordering. */
     inline def sort(using ord: Ordering[T]): Dataset[T] = {
       Sort(ds, ord)
     }
 
+    /** Rows ordered by the key function under its Ordering. */
     inline def sortBy[K](key: T => K)(using ord: Ordering[K]): Dataset[T] = {
       SortBy(ds, key, ord)
     }

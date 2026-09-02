@@ -3,6 +3,7 @@ package net.ghoula.strongbow.dataset
 /** Formats Dataset AST as a human-readable string. */
 object DatasetExplainer {
 
+  /** Renders the plan as an indented tree of its transformations. */
   def explain[T](dataset: Dataset[T], indent: Int = 0): String = {
     val prefix = "  " * indent
     val node = dataset match {

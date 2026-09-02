@@ -114,15 +114,16 @@ object DocCoverage {
 
   /** Members needing docs, and the scopes to descend into: package trees, template bodies, and
     * extension groups. Def and Val bodies are never descended into, so nested helpers stay out of
-    * the count. Given instances and exports are not members.
+    * the count. Members of private/protected aggregates are not user-facing API and are skipped
+    * along with the aggregate itself. Given instances and exports are not members.
     */
   private def membersOf(t: Tree): Vector[Member] = t match {
     case Source(stats) => stats.flatMap(membersOf).toVector
     case Pkg.After_4_9_9(_, stats) => stats.flatMap(membersOf).toVector
-    case t: Defn.Class => mkMember(t, t.name.value, t.mods) +: templateStats(t.templ).flatMap(membersOf).toVector
-    case t: Defn.Trait => mkMember(t, t.name.value, t.mods) +: templateStats(t.templ).flatMap(membersOf).toVector
-    case t: Defn.Object => mkMember(t, t.name.value, t.mods) +: templateStats(t.templ).flatMap(membersOf).toVector
-    case t: Defn.Enum => mkMember(t, t.name.value, t.mods) +: templateStats(t.templ).flatMap(membersOf).toVector
+    case t: Defn.Class => if excluded(t.mods) then Vector.empty else memberWithMembers(t, t.name.value, t.mods)
+    case t: Defn.Trait => if excluded(t.mods) then Vector.empty else memberWithMembers(t, t.name.value, t.mods)
+    case t: Defn.Object => if excluded(t.mods) then Vector.empty else memberWithMembers(t, t.name.value, t.mods)
+    case t: Defn.Enum => if excluded(t.mods) then Vector.empty else memberWithMembers(t, t.name.value, t.mods)
     case Defn.ExtensionGroup.After_4_6_0(_, Term.Block(stats)) => stats.flatMap(membersOf).toVector
     case Defn.ExtensionGroup.After_4_6_0(_, body: Tree) => membersOf(body)
     case m: Defn.EnumCase => Vector(mkMember(m, m.name.value, m.mods))
@@ -135,6 +136,16 @@ object DocCoverage {
     case m: Defn.Var => Vector(mkMember(m, patName(m.pats), m.mods))
     case m: Decl.Var => Vector(mkMember(m, patName(m.pats), m.mods))
     case _ => Vector.empty
+  }
+
+  private def memberWithMembers(t: Tree, name: String, mods: List[Mod]): Vector[Member] = {
+    val stats = t match {
+      case c: Defn.Class => c.templ
+      case tr: Defn.Trait => tr.templ
+      case o: Defn.Object => o.templ
+      case e: Defn.Enum => e.templ
+    }
+    mkMember(t, name, mods) +: templateStats(stats).flatMap(membersOf).toVector
   }
 
   /** Single forward pass over the token stream: a scaladoc comment counts as the doc of the member

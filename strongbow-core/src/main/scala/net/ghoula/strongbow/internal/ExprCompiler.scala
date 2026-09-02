@@ -9,6 +9,7 @@ import net.ghoula.strongbow.dataset.Dataset
 import net.ghoula.strongbow.expr.Expr as SExpr
 import net.ghoula.strongbow.types.ColumnIndex
 
+/** Compile-time extraction of field-access lambdas into typed expressions via Mirrors. */
 object ExprCompiler {
 
   /** Compile a field-access lambda to (Expr.Cell, ColumnType) at compile time. */

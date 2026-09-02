@@ -10,14 +10,27 @@ import net.ghoula.strongbow.expr.Expr
   * its `expr`.
   */
 sealed trait SortSpec[T] {
+
+  /** The sort key's type. */
   type K
+
+  /** The sort key expression. */
   val expr: Expr[T, K]
+
+  /** The key's ordering evidence. */
   val ordering: Ordering[K]
+
+  /** The key column's logical type. */
   val columnType: ColumnType
+
+  /** Whether the key sorts ascending. */
   val ascending: Boolean
 }
 
+/** Construction of typed sort specs. */
 object SortSpec {
+
+  /** A spec from expression, ordering, column type and direction. */
   def apply[T, K0](
     e: Expr[T, K0],
     ord: Ordering[K0],

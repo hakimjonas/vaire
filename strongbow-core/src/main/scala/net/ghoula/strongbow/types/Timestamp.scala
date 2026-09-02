@@ -7,10 +7,15 @@ package net.ghoula.strongbow.types
   */
 opaque type Timestamp = Long
 
+/** Construction of Timestamps. */
 object Timestamp {
+
+  /** A timestamp from microseconds since the epoch. */
   inline def ofEpochMicro(micros: Long): Timestamp = micros
 
   extension (t: Timestamp) {
+
+    /** Microseconds since the epoch. */
     inline def toEpochMicro: Long = t
   }
 

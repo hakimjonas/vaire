@@ -15,8 +15,19 @@ import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, 
   */
 object DatasetInterpreter extends Interpreter {
 
-  /** Execute a Dataset plan to produce a MaterializedDataset. */
-  def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] = {
+  /** Execute a Dataset plan to produce a MaterializedDataset.
+    *
+    * `errors` carries the active per-row error policy: the default `RowErrors.failFast` preserves
+    * the fail-fast contract, while `executeCollect` drives the walk with a Collect collector so
+    * per-row failures null-mark their row instead of aborting. A `withErrorPolicy` node reached
+    * here fails: the plain execute path has no result shape for collected errors.
+    */
+  def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] =
+    executeScoped(dataset)(using RowErrors.failFast)
+
+  def executeScoped[T](
+    dataset: Dataset[T]
+  )(using errors: RowErrors = RowErrors.failFast): Either[ExecutionError, MaterializedDataset[T]] = {
     dataset match {
       case root: Dataset.Root[T] =>
         root.source match {
@@ -29,28 +40,42 @@ object DatasetInterpreter extends Interpreter {
             )
         }
 
+      case _: Dataset.WithPolicy[T] =>
+        if errors.isCollect then
+          Left(
+            ExecutionError.UnsupportedOperation(
+              "Nested withErrorPolicy scopes are not supported: a policy scopes exactly one plan"
+            )
+          )
+        else
+          Left(
+            ExecutionError.UnsupportedOperation(
+              "Policy-scoped plans must run through executeCollect; the plain execute path carries no error result"
+            )
+          )
+
       case filt: Dataset.Filter[T] =>
-        execute(filt.parent).flatMap(parent => filter(parent, filt.predicate))
+        executeScoped(filt.parent).flatMap(parent => filter(parent, filt.predicate))
 
       case m: Dataset.Map[?, T] =>
-        execute(m.parent).flatMap(collectAndTransform(_, _.map(m.func), m.schema))
+        executeScoped(m.parent).flatMap(collectAndTransform(_, _.map(m.func), m.schema))
 
       case fm: Dataset.FlatMap[?, T] =>
-        execute(fm.parent).flatMap(collectAndTransform(_, _.flatMap(fm.func), fm.schema))
+        executeScoped(fm.parent).flatMap(collectAndTransform(_, _.flatMap(fm.func), fm.schema))
 
       case sel: Dataset.Select[?, T] =>
-        execute(sel.parent).flatMap(collectAndTransform(_, _.map(sel.projection), sel.schema))
+        executeScoped(sel.parent).flatMap(collectAndTransform(_, _.map(sel.projection), sel.schema))
 
       case selectExprs: Dataset.SelectExprs[_, T] =>
-        execute(selectExprs.parent).flatMap { parent =>
+        executeScoped(selectExprs.parent).flatMap { parent =>
           selectExpressions(parent, selectExprs.exprs, selectExprs.schema)
         }
 
       case dist: Dataset.Distinct[T] =>
-        execute(dist.parent).flatMap(distinct)
+        executeScoped(dist.parent).flatMap(distinct)
 
       case lim: Dataset.Limit[T] =>
-        execute(lim.parent).flatMap(parent => limit(parent, lim.n))
+        executeScoped(lim.parent).flatMap(parent => limit(parent, lim.n))
 
       case un: Dataset.Union[T] =>
         executeJoin(un.left, un.right)(union)
@@ -94,47 +119,47 @@ object DatasetInterpreter extends Interpreter {
         )
 
       case srt: Dataset.Sort[T] =>
-        execute(srt.parent).flatMap(parent => sort(parent, srt.ordering))
+        executeScoped(srt.parent).flatMap(parent => sort(parent, srt.ordering))
 
       case srtBy: Dataset.SortBy[T, _] =>
-        execute(srtBy.parent).flatMap(parent => sortBy(parent, srtBy.key, srtBy.ordering))
+        executeScoped(srtBy.parent).flatMap(parent => sortBy(parent, srtBy.key, srtBy.ordering))
 
       case srtExpr: Dataset.SortByExpr[T, _] =>
-        execute(srtExpr.parent).flatMap(parent => sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType))
+        executeScoped(srtExpr.parent).flatMap(parent => sortByExpr(parent, srtExpr.keyExpr, srtExpr.keyType))
 
       case samp: Dataset.Sample[T] =>
-        execute(samp.parent).map { parent =>
+        executeScoped(samp.parent).map { parent =>
           sample(parent, samp.fraction, samp.seed, samp.withReplacement)
         }
 
       case zip: Dataset.ZipWithIndex[?] =>
-        execute(zip.parent).flatMap { parent =>
+        executeScoped(zip.parent).flatMap { parent =>
           zipWithIndex(parent)
         }
 
       case zip: Dataset.ZipWithUniqueId[?] =>
-        execute(zip.parent).flatMap { parent =>
+        executeScoped(zip.parent).flatMap { parent =>
           zipWithIndex(parent)
         }
 
       case persist: Dataset.Persist[T] =>
-        execute(persist.parent)
+        executeScoped(persist.parent)
 
       case cp: Dataset.Checkpoint[T] =>
-        execute(cp.parent).flatMap { parent =>
+        executeScoped(cp.parent).flatMap { parent =>
           MaterializedDataset.fromVector(parent.toVectorUnsafe)(using parent.schema)
         }
 
       case reb: Dataset.Rebalance[T] =>
-        execute(reb.parent)
+        executeScoped(reb.parent)
 
       case gba: Dataset.GroupByAgg[_, T] =>
-        execute(gba.parent).flatMap { parent =>
+        executeScoped(gba.parent).flatMap { parent =>
           groupByAgg(parent, gba.keySpecs, gba.aggSpecs, gba.schema)
         }
 
       case srtExprs: Dataset.SortByExprs[T] =>
-        execute(srtExprs.parent).flatMap { parent =>
+        executeScoped(srtExprs.parent).flatMap { parent =>
           sortByExprs(parent, srtExprs.sortKeys)
         }
 
@@ -144,26 +169,48 @@ object DatasetInterpreter extends Interpreter {
         )
 
       case ww: Dataset.WithWindow[_, T] =>
-        execute(ww.parent).flatMap { parent =>
+        executeScoped(ww.parent).flatMap { parent =>
           withWindow(parent, ww.windowExprs, ww.windowSpec, ww.schema)
         }
 
       case agg: Dataset.Aggregate[_, T] =>
-        execute(agg.parent).flatMap { parent =>
+        executeScoped(agg.parent).flatMap { parent =>
           globalAggregate(parent, agg.aggSpecs, agg.resultSchema)
         }
     }
   }
+
+  /** Execute a policy-scoped plan: the outermost node must be a `withErrorPolicy` scope. The
+    * transformations inside the scope run under the scope's Collect policy — per-row failures
+    * null-mark their row and are recorded (bounded by `maxErrors`, with a by-kind summary) instead
+    * of aborting. Structural errors and aggregation-expression failures still abort the plan. On
+    * the Spark backend this entry point is rejected: policies are an in-memory interpreter feature.
+    */
+  def executeCollect[T](dataset: Dataset[T]): Either[ExecutionError, CollectedDataset[T]] =
+    dataset match {
+      case wp: Dataset.WithPolicy[T] =>
+        val collector = RowErrors(wp.policy)
+        executeScoped(wp.parent)(using collector).map { values =>
+          val (entries, truncated, byKind) = collector.result
+          CollectedDataset(values, entries, truncated, byKind)
+        }
+      case _ =>
+        Left(
+          ExecutionError.UnsupportedOperation(
+            "executeCollect requires a withErrorPolicy scope as the outermost plan node"
+          )
+        )
+    }
 
   private def executeJoin[A, B, R](
     leftDs: Dataset[A],
     rightDs: Dataset[B]
   )(
     f: (MaterializedDataset[A], MaterializedDataset[B]) => Either[ExecutionError, MaterializedDataset[R]]
-  ): Either[ExecutionError, MaterializedDataset[R]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[R]] =
     for {
-      left <- execute(leftDs)
-      right <- execute(rightDs)
+      left <- executeScoped(leftDs)
+      right <- executeScoped(rightDs)
       result <- f(left, right)
     } yield result
 
@@ -177,7 +224,7 @@ object DatasetInterpreter extends Interpreter {
   private def filter[T](
     dataset: MaterializedDataset[T],
     predicate: Expr[T, Boolean]
-  ): Either[ExecutionError, MaterializedDataset[T]] = {
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[T]] = {
     ExprInterpreter.evalColumn(predicate, dataset.columns, ColumnType.BooleanType).flatMap {
       case Column.BooleanColumn(data, _) =>
         val indices = data.indices.filter(data(_)).toArray
@@ -259,7 +306,7 @@ object DatasetInterpreter extends Interpreter {
     dataset: MaterializedDataset[T],
     keyExpr: Expr[T, K],
     keyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[T]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[T]] =
     ExprInterpreter.evalColumn(keyExpr, dataset.columns, keyType).map { keyCol =>
       reindexBy(dataset, Column.sortIndicesByColumn(keyCol, dataset.rowCount))
     }
@@ -268,7 +315,7 @@ object DatasetInterpreter extends Interpreter {
     dataset: MaterializedDataset[In],
     exprs: Vector[(String, Expr[In, Any], ColumnType)],
     outputSchema: Schema[Out]
-  ): Either[ExecutionError, MaterializedDataset[Out]] = {
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[Out]] = {
     traverseEither(exprs) { (name, expr, columnType) =>
       ExprInterpreter.evalColumn(expr, dataset.columns, columnType).flatMap { col =>
         if (col.columnType == columnType) Right(col)
@@ -461,7 +508,7 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(A, B)]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(A, B)]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
       val leftIndex = buildKeyIndex(leftKeyCol, left.rowCount)
       val leftIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
@@ -514,7 +561,7 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  )(f: (Column[?], Column[?]) => R): Either[ExecutionError, R] =
+  )(f: (Column[?], Column[?]) => R)(using errors: RowErrors): Either[ExecutionError, R] =
     for {
       leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
       rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
@@ -527,7 +574,7 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (lkc, rkc) =>
       probeJoinOnKeys(
         left.toVectorUnsafe,
@@ -548,7 +595,7 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (lkc, rkc) =>
       probeJoinOnKeys(
         right.toVectorUnsafe,
@@ -569,7 +616,7 @@ object DatasetInterpreter extends Interpreter {
     rightKey: Expr[B, K],
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
-  ): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
       val rightIndex = buildKeyIndex(rightKeyCol, right.rowCount)
       val leftRows = left.toVectorUnsafe
@@ -610,7 +657,7 @@ object DatasetInterpreter extends Interpreter {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType,
     include: Boolean
-  ): Either[ExecutionError, MaterializedDataset[A]] =
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[A]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
       val rightKeys = scala.collection.mutable.HashSet.empty[Any]
       (0 until right.rowCount).foreach { ri =>
@@ -647,7 +694,7 @@ object DatasetInterpreter extends Interpreter {
     keySpecs: Vector[KeySpec[In]],
     aggSpecs: Vector[AggSpec[In]],
     outputSchema: Schema[Out]
-  ): Either[ExecutionError, MaterializedDataset[Out]] = {
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[Out]] = {
     val rowCount = dataset.rowCount
     if (rowCount == 0) {
       emptyResult(keySpecs.map(_.columnType) ++ aggSpecs.map(_.columnType), outputSchema)
@@ -702,7 +749,7 @@ object DatasetInterpreter extends Interpreter {
   private def sortByExprs[T](
     dataset: MaterializedDataset[T],
     sortKeys: Vector[SortSpec[T]]
-  ): Either[ExecutionError, MaterializedDataset[T]] = {
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[T]] = {
     val rowCount = dataset.rowCount
     if (rowCount <= 1) Right(dataset)
     else {
@@ -719,7 +766,7 @@ object DatasetInterpreter extends Interpreter {
     windowExprs: Vector[WindowExprSpec[In]],
     windowSpec: WindowSpec[In],
     outputSchema: Schema[Out]
-  ): Either[ExecutionError, MaterializedDataset[Out]] = {
+  )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[Out]] = {
     val rowCount = dataset.rowCount
     if (rowCount == 0) {
       val parentCols = dataset.columns
@@ -835,7 +882,7 @@ object DatasetInterpreter extends Interpreter {
     sortedIndices: scala.collection.mutable.ArrayBuffer[Int],
     resultArray: Array[Any | Null],
     columns: Vector[Column[?]]
-  ): Option[ExecutionError] = {
+  )(using errors: RowErrors): Option[ExecutionError] = {
     val innerType = ExprInterpreter.inferExprColumnType(expr, columns)
     ExprInterpreter.evalColumn(expr, columns, innerType) match {
       case Right(innerCol) =>

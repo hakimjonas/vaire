@@ -8,7 +8,7 @@ import net.ghoula.strongbow.dataset.{Dataset, InMemorySource, MaterializedDatase
 import net.ghoula.strongbow.errors.ExecutionError
 import net.ghoula.strongbow.expr.Expr
 import net.ghoula.strongbow.internal.JoinOps
-import net.ghoula.strongbow.interpreter.{ExprInterpreter, Interpreter}
+import net.ghoula.strongbow.interpreter.{CollectedDataset, ExprInterpreter, Interpreter}
 import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Spark-based interpreter for Strongbow Dataset plans.
@@ -28,6 +28,13 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       RowConverter.toMaterialized(rows, plan.schema)
     }
   }
+
+  override def executeCollect[T](dataset: Dataset[T]): Either[ExecutionError, CollectedDataset[T]] =
+    Left(
+      ExecutionError.UnsupportedOperation(
+        "executeCollect is an in-memory interpreter feature; per-row error policies are unrepresentable on Spark (see docs/error-policy-design.md §5.3)"
+      )
+    )
 
   /** Build a Spark DataFrame from a Dataset plan without collecting results.
     *
@@ -223,6 +230,13 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         buildPlan(agg.parent).flatMap { parent =>
           applyGlobalAggregate(parent, agg.aggSpecs, agg.resultSchema)
         }
+
+      case _: Dataset.WithPolicy[T] =>
+        Left(
+          ExecutionError.UnsupportedOperation(
+            "withErrorPolicy scopes are an in-memory interpreter feature; per-row error policies are unrepresentable on Spark (see docs/error-policy-design.md §5.3)"
+          )
+        )
     }
   }
 

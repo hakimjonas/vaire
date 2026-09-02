@@ -1,7 +1,7 @@
 package net.ghoula.strongbow.dataset
 
 import net.ghoula.strongbow.errors.ExecutionError
-import net.ghoula.strongbow.interpreter.{DatasetInterpreter, Interpreter}
+import net.ghoula.strongbow.interpreter.{CollectedDataset, DatasetInterpreter, Interpreter}
 
 /** Action methods that materialize Dataset results.
   *
@@ -44,6 +44,18 @@ object DatasetActions {
       */
     def take(n: Int)(using interpreter: Interpreter = DatasetInterpreter): Either[ExecutionError, Vector[T]] = {
       dataset.limit(n).collect
+    }
+
+    /** Execute a policy-scoped plan and collect the materialized values together with the per-row
+      * errors recorded inside the `withErrorPolicy` scope.
+      *
+      * The plan's outermost node must be a `withErrorPolicy` scope; the plain `collect` path
+      * rejects such plans, and this path rejects plans without one. Fails on the Spark backend.
+      */
+    def executeCollect(using
+      interpreter: Interpreter = DatasetInterpreter
+    ): Either[ExecutionError, CollectedDataset[T]] = {
+      interpreter.executeCollect(dataset)
     }
 
     /** Return pretty-printed AST for debugging.

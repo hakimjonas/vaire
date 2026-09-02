@@ -10,4 +10,10 @@ import net.ghoula.strongbow.errors.ExecutionError
   */
 trait Interpreter {
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]]
+
+  /** Execute a policy-scoped plan (one carrying a `withErrorPolicy` node), returning the
+    * materialized values alongside the per-row errors recorded inside the scope. Backends that
+    * cannot surface per-row errors (Spark) reject the plan instead.
+    */
+  def executeCollect[T](dataset: Dataset[T]): Either[ExecutionError, CollectedDataset[T]]
 }

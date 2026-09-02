@@ -39,8 +39,22 @@ not the heap.
 ## Running locally
 
 ```bash
-sbt check                          # scalafix + scalafmt (CI gate)
-sbt testAll                        # core + spark, full (includes slow)
+sbt check                          # doc coverage + scalafix + scalafmt (CI gate)
+sbt testAll                        # core + spark + docTool, full (includes slow)
 FAST_TESTS=1 sbt spark/Test/testFull   # what ci.yml runs
 sbt testSlow                       # 5M stress + TPC-H only
+```
+
+## Scaladoc coverage gate
+
+`check` enforces the pana-style scaladoc ratchet: every public member of `src/main/scala`
+(defs, vals, types, classes/objects/enums, enum cases, extension methods) needs a non-empty
+`/** */` doc. Overrides, givens, exports, private/protected members, and test sources are
+exempt. Coverage may only improve — the checked-in `doc-coverage.json` records the per-file
+baseline, and `check` fails when a file's undocumented count grows (new member without a doc,
+or a doc removed). Documenting members never fails.
+
+```bash
+sbt docCoverage            # ratchet check (also runs as part of check)
+sbt docCoverageSnapshot    # regenerate the baseline after intentional doc work
 ```

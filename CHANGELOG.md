@@ -3,6 +3,17 @@
 All notable changes to Strongbow. Versions follow the automated release pipeline: every
 PR merge to `main` cuts the next patch tag and publishes to the registry.
 
+## Unreleased
+
+- **Error-policy E2 — dataset-level Collect surface** — `ds.withErrorPolicy(policy)`
+  scopes a plan's expression evaluation under a per-row error policy; `ds.executeCollect`
+  runs the plan and returns `CollectedDataset` (materialized values with failed rows
+  null-marked, bounded per-row error list, `truncated` flag, complete by-kind summary).
+  Policy-scoped plans are rejected on the plain `execute`/`collect` path, nested scopes
+  are rejected, and the Spark backend rejects the feature outright (per-row error policies
+  are unrepresentable there; see `docs/error-policy-design.md` §5.3). Structural errors
+  and aggregation expressions keep fail-fast semantics under every policy.
+
 ## 0.0.7 (2026-09-01)
 
 - **xpath\* family** — 16 new expression cases: `Xpath`, `XpathString`, `XpathBoolean`,

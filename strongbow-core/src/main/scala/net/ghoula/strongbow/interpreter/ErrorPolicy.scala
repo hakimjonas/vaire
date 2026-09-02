@@ -1,6 +1,7 @@
 package net.ghoula.strongbow.interpreter
 
 import net.ghoula.strongbow.column.Column
+import net.ghoula.strongbow.dataset.MaterializedDataset
 import net.ghoula.strongbow.errors.ExecutionError
 
 /** Per-row error handling policy for the in-memory interpreter.
@@ -23,6 +24,18 @@ enum ErrorPolicy derives CanEqual {
   */
 final case class Collected(
   values: Column[?],
+  errors: Vector[(Int, ExecutionError)],
+  truncated: Boolean,
+  byKind: Map[String, Int]
+)
+
+/** The dataset-level analogue of [[Collected]]: the materialized result of a policy-scoped plan
+  * plus the errors collected across every expression evaluation inside the `withErrorPolicy` scope.
+  * Row indices are positions within the operation that recorded the error (the column being
+  * evaluated at that point), not global row numbers.
+  */
+final case class CollectedDataset[T](
+  values: MaterializedDataset[T],
   errors: Vector[(Int, ExecutionError)],
   truncated: Boolean,
   byKind: Map[String, Int]

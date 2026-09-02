@@ -120,6 +120,9 @@ object DatasetExplainer {
       case Dataset.Aggregate(parent, aggSpecs, _) =>
         val aggs = aggSpecs.map(_.name).mkString(", ")
         s"Aggregate[aggs=($aggs)]\n${explain(parent, indent + 1)}"
+
+      case Dataset.WithPolicy(parent, policy) =>
+        s"WithErrorPolicy[$policy]\n${explain(parent, indent + 1)}"
     }
     s"$prefix$node"
   }

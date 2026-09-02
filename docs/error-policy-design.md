@@ -9,7 +9,11 @@ Companion to the parity plan (`strongbow-spark-4.2-parity-plan.md`) and the hand
 > **Decisions recorded (2026-09-01, operator):** result shape = separate
 > `evalColumnCollect` entry point; quarantine = separate method (E3); `maxErrors`
 > default = 100; input previews = `Off` (Collect) / `Truncated(120)` (quarantine).
-> Status: E1 pending (types, entry point, fallible-arm updates, specs).
+> Status: E1 shipped (`ErrorPolicy`, `evalColumnCollect`, `RowErrors`,
+> `ErrorPolicySpec`); E2 shipped (`Dataset.WithPolicy` via `ds.withErrorPolicy`,
+> `executeCollect` on `Interpreter`/`DatasetInterpreter`/`DatasetActions`,
+> `CollectedDataset`, dataset-level specs — the plain `execute` path and Spark
+> reject policy-scoped plans, nested scopes are rejected); E3 pending (quarantine).
 
 ---
 

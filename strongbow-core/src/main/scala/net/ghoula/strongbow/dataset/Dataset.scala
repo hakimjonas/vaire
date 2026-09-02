@@ -4,6 +4,7 @@ import net.ghoula.strongbow.Schema
 import net.ghoula.strongbow.column.{Column, ColumnType}
 import net.ghoula.strongbow.errors.{NonEmptyList, SchemaError}
 import net.ghoula.strongbow.expr.Expr
+import net.ghoula.strongbow.interpreter.ErrorPolicy
 import net.ghoula.strongbow.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Immutable description of dataset transformations.
@@ -128,6 +129,8 @@ enum Dataset[T] {
     aggSpecs: Vector[AggSpec[T]],
     resultSchema: Schema[R]
   ) extends Dataset[R]
+
+  case WithPolicy[T](parent: Dataset[T], policy: ErrorPolicy) extends Dataset[T]
 }
 
 object Dataset {
@@ -465,6 +468,18 @@ object Dataset {
       */
     inline def aggregate[R](aggSpecs: Vector[AggSpec[T]])(using schema: Schema[R]): Dataset[R] = {
       Aggregate(ds, aggSpecs, schema)
+    }
+
+    /** Scope every expression evaluation in this dataset's plan under a per-row error policy.
+      *
+      * The policy applies to the transformations already applied to `ds` — a filter, select, or
+      * aggregation below this point records per-row failures instead of aborting (under `Collect`)
+      * when the plan runs through `executeCollect`. Running a policy-scoped plan through the plain
+      * `execute` path fails structurally: a policy without a matching error-carrying entry point is
+      * a usage error, not something to ignore silently. See `docs/error-policy-design.md`.
+      */
+    inline def withErrorPolicy(policy: ErrorPolicy): Dataset[T] = {
+      WithPolicy(ds, policy)
     }
   }
 

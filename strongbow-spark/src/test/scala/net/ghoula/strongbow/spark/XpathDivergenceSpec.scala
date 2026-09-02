@@ -11,9 +11,7 @@ import net.ghoula.strongbow.prelude.*
 /** Pinned divergences between the in-memory xpath* family and Spark, each verified against Spark
   * 4.2 during the validation gate:
   *
-  *   1. Documents with a DTD: Rumil's XML parser has no DTD support, so in-memory xpath fails on
-  *      them while Spark's DOM expands internal-subset entities.
-  *   2. Prefixed name tests: Spark's engine runs over a namespace-unaware DOM — `b` matches both
+  *   1. Prefixed name tests: Spark's engine runs over a namespace-unaware DOM — `b` matches both
   *      `b` and `ns:b` (local-name semantics) and `*:b` fails the query ("Prefix must resolve to a
   *      namespace"). In-memory matches prefix-literally per XPath 1.0. (CDATA was the third
   *      divergence - resolved by sarati 0.3.12's cdata flag, tracked as sarati#11; both backends
@@ -48,10 +46,10 @@ class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   private def cell(xml: String): Expr[Doc, String] = Expr.const(xml)
 
-  "DTD documents" should "fail in-memory while Spark expands internal entities" in {
+  "DTD documents" should "expand internal-subset entities on both backends" in {
     val doc = """<!DOCTYPE r [<!ENTITY w "hello">]><r><m>&w;</m></r>"""
     val inMemory = evalInMemory(doc, cell(doc).xpathString("r/m"))
-    inMemory.isLeft shouldBe true
+    inMemory shouldBe Right("hello")
     val sparkSide = evalSpark(doc, "xpath_string", "r/m")
     sparkSide shouldBe Right("hello")
   }

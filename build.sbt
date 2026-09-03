@@ -4,7 +4,7 @@ ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-ThisBuild / licenses := List("MIT" -> uri("https://opensource.org/licenses/MIT"))
+ThisBuild / licenses := List("GPL-3.0-or-later" -> uri("https://www.gnu.org/licenses/gpl-3.0.txt"))
 ThisBuild / homepage := Some(uri("https://codeberg.org/hakim/strongbow"))
 ThisBuild / description := "A type-safe columnar dataset library for Scala 3 with Spark integration"
 ThisBuild / developers := List(

@@ -5,6 +5,15 @@ PR merge to `main` cuts the next patch tag and publishes to the registry.
 
 ## Unreleased
 
+- **Error-policy E3 — quarantine (dead-letter view)** — `evalColumnWithErrors` evaluates under
+  quarantine: per-row failures null-mark the value column and are recorded in a dense error
+  column (an `AnyColumn` boxing `QuarantinedRow` — log-safe reason plus opt-in input preview — at
+  every failed row, null where the row succeeded). Unlike the Collect list, the error column is
+  complete (exactly one entry per failed row, no bound), so `values.filter(errs.isNull)` /
+  `filter(errs.isNotNull)` routes good rows and dead-letter rows apart without dropping reasons.
+  Input previews default to `Truncated(120)` and are knobbed via `InputPreview`
+  (`Off | Truncated(n) | Full`) with a user-supplied redactor; the preview is the payload channel
+  from design §4 and never enters the log-safe `ExecutionError` messages.
 - **Error-policy E2 — dataset-level Collect surface** — `ds.withErrorPolicy(policy)`
   scopes a plan's expression evaluation under a per-row error policy; `ds.executeCollect`
   runs the plan and returns `CollectedDataset` (materialized values with failed rows

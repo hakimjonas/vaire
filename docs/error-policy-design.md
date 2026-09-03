@@ -13,7 +13,11 @@ Companion to the parity plan (`strongbow-spark-4.2-parity-plan.md`) and the hand
 > `ErrorPolicySpec`); E2 shipped (`Dataset.WithPolicy` via `ds.withErrorPolicy`,
 > `executeCollect` on `Interpreter`/`DatasetInterpreter`/`DatasetActions`,
 > `CollectedDataset`, dataset-level specs — the plain `execute` path and Spark
-> reject policy-scoped plans, nested scopes are rejected); E3 pending (quarantine).
+> reject policy-scoped plans, nested scopes are rejected); E3 shipped
+> (`evalColumnWithErrors`, `InputPreview`/`QuarantinedRow`/`Quarantined`, the
+> `RowErrors.quarantining` recorder, composition specs — the dense error column is
+> complete by contract; dataset-level quarantine is deferred until a shape for
+> per-column error columns in multi-expression scopes is decided).
 
 ---
 

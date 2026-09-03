@@ -53,6 +53,33 @@ object ExprInterpreter {
     }
   }
 
+  /** Evaluate under the quarantine policy: per-row data failures null-mark their row in the value
+    * column and are recorded in a dense error column — an AnyColumn boxing [[QuarantinedRow]] at
+    * every failed row, null where the row succeeded. The error column is complete (exactly one
+    * entry per failed row, no bound), so dead-letter routing can filter good rows (`errors.isNull`)
+    * from bad ones (`errors.isNotNull`) without silently dropping reasons.
+    *
+    * The `preview` knob and `redact` function control the payload channel: how much of the
+    * offending input each entry carries. The reason itself (`QuarantinedRow.error`) is always
+    * log-safe. Structural errors fail under quarantine as under every policy.
+    */
+  def evalColumnWithErrors[Row, A](
+    expr: Expr[Row, A],
+    columns: Vector[Column[?]],
+    columnType: ColumnType,
+    preview: InputPreview = InputPreview.Truncated(120),
+    redact: String => String = identity
+  )(using lambdaScope: LambdaScope = LambdaScope.empty): Either[ExecutionError, Quarantined] = {
+    val collector = RowErrors.quarantining(preview, redact)
+    evalColumn(expr, columns, columnType)(using lambdaScope, collector).map { col =>
+      val entries = collector.quarantineResult
+      val failedRows = BitSet.empty ++ entries.map(_._1)
+      val data = new Array[Any | Null](col.length)
+      entries.foreach { case (row, entry) => data(row) = entry }
+      Quarantined(col, Column.any(data, BitSet.empty ++ (0 until col.length) -- failedRows))
+    }
+  }
+
   private[strongbow] def inferExprColumnType[Row, A](expr: Expr[Row, A], columns: Vector[Column[?]]): ColumnType = {
     expr.outputType.getOrElse {
       expr match {
@@ -3425,7 +3452,7 @@ object ExprInterpreter {
     val outNulls = scala.collection.mutable.BitSet.empty
     (0 until rowCount).foreach { i =>
       if (isZero(right(i))) {
-        errors.add(i, ExecutionError.DivisionByZero(i))
+        errors.add(i, ExecutionError.DivisionByZero(i), s"${left(i)} / ${right(i)}")
         outNulls += i
       } else out(i) = op(left(i), right(i))
     }
@@ -4631,7 +4658,8 @@ object ExprInterpreter {
                         if (tryMode || errors.isCollect) {
                           errors.add(
                             i,
-                            ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300))
+                            ExecutionError.InvalidValue(s"Invalid XML document at row $i: $parseFailure".take(300)),
+                            xmlStr
                           )
                           outNulls += i
                           None

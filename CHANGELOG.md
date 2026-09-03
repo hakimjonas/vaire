@@ -5,6 +5,13 @@ PR merge to `main` cuts the next patch tag and publishes to the registry.
 
 ## Unreleased
 
+- **Scaladoc coverage gate (pana-style ratchet)** — new `docTool` module checks that every
+  public member of `src/main/scala` carries a non-empty `/** */` doc (defs, vals, types,
+  classes/objects/enums, enum cases, extension methods; overrides, givens, exports, and
+  private/protected members exempt). The `check` gate compares per-file counts against the
+  checked-in `doc-coverage.json` and fails when undocumented counts grow; `sbt
+  docCoverageSnapshot` regenerates the baseline after doc work. Baseline: 278/1138 (24.4%) —
+  ratcheting to 100% happens family by family.
 - **Error-policy E3 — quarantine (dead-letter view)** — `evalColumnWithErrors` evaluates under
   quarantine: per-row failures null-mark the value column and are recorded in a dense error
   column (an `AnyColumn` boxing `QuarantinedRow` — log-safe reason plus opt-in input preview — at

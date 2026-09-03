@@ -71,7 +71,7 @@ val sparkVersion = "4.2.0"
 
 lazy val root = project
   .in(file("."))
-  .aggregate(core, spark)
+  .aggregate(core, spark, docTool)
   .settings(
     name := "strongbow",
     publish / skip := true
@@ -179,8 +179,32 @@ lazy val spark = project
     }
   )
 
+lazy val docTool = project
+  .in(file("docTool"))
+  .settings(
+    name := "strongbow-doc-tool",
+    scalacOptions ++= sharedScalacOptions,
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "scalameta" % "4.14.2",
+      "org.scalatest" %% "scalatest" % "3.2.20" % Test
+    ),
+    Compile / run / mainClass := Some("net.ghoula.strongbow.doctool.DocCoverageMain")
+  )
+
 // Command aliases
 addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; Test/compile")
-addCommandAlias("check", "core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck")
-addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull")
+addCommandAlias(
+  "check",
+  "docCoverage; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
+)
+addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull; docTool/Test/testFull")
 addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.strongbow.Slow")
+addCommandAlias(
+  "docCoverage",
+  "docTool/run check doc-coverage.json strongbow-core/src/main/scala strongbow-spark/src/main/scala"
+)
+addCommandAlias(
+  "docCoverageSnapshot",
+  "docTool/run snapshot doc-coverage.json strongbow-core/src/main/scala strongbow-spark/src/main/scala"
+)

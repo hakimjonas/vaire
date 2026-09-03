@@ -143,6 +143,8 @@ sbt spark/testFull   # full Spark suite (includes Spark round-trip parity)
 
 `sbt 2.0` runs `test` incrementally and caches results; use `testFull` for a full run. CI runs these suites with `FAST_TESTS=1` (excluding the `Slow`-tagged stress suites); see [docs/ci.md](docs/ci.md).
 
+Public API carries enforced scaladoc coverage: every public member needs a `/** */` doc, and the `check` gate ratchets coverage so it can only improve (`sbt docCoverage` / `sbt docCoverageSnapshot`).
+
 ## Dependencies and the Arda Ecosystem
 
 Strongbow depends on two Arda libraries (both declared in `build.sbt`):

@@ -8,5 +8,5 @@ RUN apt-get update && apt-get install -y curl && \
     mv /tmp/spark-${SPARK_VERSION}-bin-hadoop3/* /opt/spark/ && \
     rm -rf /tmp/spark-${SPARK_VERSION}-bin-hadoop3 && \
     apt-get remove -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
-RUN mkdir -p /opt/strongbow/jars
+RUN mkdir -p /opt/vaire/jars
 USER spark

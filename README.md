@@ -1,15 +1,15 @@
-# Strongbow
+# Vairë
 
 A type-safe columnar dataset library for Scala 3 with Spark integration.
 
-> *Named after Beleg Strongbow, chief of the Marchwardens of Doriath*
+> *Named after Vairë the Weaver, who weaves all things that have been in Time into her storied webs — columns into the record.*
 
-## What is Strongbow?
+## What is Vairë?
 
-Strongbow is a columnar data processing library where the type system proves correctness at compile time. Datasets are immutable descriptions of computation — pure Scala 3 enums interpreted by pluggable backends (in-memory columnar or Apache Spark).
+Vairë is a columnar data processing library where the type system proves correctness at compile time. Datasets are immutable descriptions of computation — pure Scala 3 enums interpreted by pluggable backends (in-memory columnar or Apache Spark).
 
 ```scala
-import net.ghoula.strongbow.prelude.*
+import net.ghoula.vaire.prelude.*
 
 case class Trade(symbol: String, price: Double, quantity: Int)
 given Schema[Trade] = Schema.derived
@@ -40,17 +40,17 @@ The same Dataset plan executes on the in-memory columnar interpreter or pushes t
 
 ## Installation
 
-Strongbow publishes to the Codeberg Maven registry:
+Vairë publishes to the Codeberg Maven registry:
 
 ```scala
 resolvers += "codeberg" at "https://codeberg.org/api/packages/hakim/maven"
 libraryDependencies ++= Seq(
-  "net.ghoula" %% "strongbow-core" % "0.0.8",
-  "net.ghoula" %% "strongbow-spark" % "0.0.8" // Spark backend (optional)
+  "net.ghoula" %% "vaire-core" % "0.0.8",
+  "net.ghoula" %% "vaire-spark" % "0.0.8" // Spark backend (optional)
 )
 ```
 
-`strongbow-spark` pulls in Spark SQL 4.2.0 (`Provided` scope in the build; declare your own Spark dependency to match your cluster).
+`vaire-spark` pulls in Spark SQL 4.2.0 (`Provided` scope in the build; declare your own Spark dependency to match your cluster).
 
 ## Key Properties
 
@@ -93,15 +93,15 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
 - Window functions push to Spark window specs
 - No UDFs — everything goes through Catalyst optimization
 - Benchmark suites (`SparkOverheadBench`, `SparkComparativeBench`,
-  `SparkPlanVsExecBench`) measure Strongbow plan/execute overhead against native Spark
+  `SparkPlanVsExecBench`) measure Vairë plan/execute overhead against native Spark
   per release; run them locally for current numbers
 
 ## Modules
 
 | Module            | Dependencies    | Purpose                                             |
 |-------------------|-----------------|-----------------------------------------------------|
-| `strongbow-core`  | Rumil, Sarati   | Dataset/Expr/Column GADT, interpreters, Schema      |
-| `strongbow-spark` | Spark SQL 4.2.0 | Spark backend, ExprToColumn translation, benchmarks |
+| `vaire-core`  | Rumil, Sarati   | Dataset/Expr/Column GADT, interpreters, Schema      |
+| `vaire-spark` | Spark SQL 4.2.0 | Spark backend, ExprToColumn translation, benchmarks |
 
 ## Compiler Settings
 
@@ -147,18 +147,18 @@ Public API carries enforced scaladoc coverage: every public member needs a `/** 
 
 ## Dependencies and the Arda Ecosystem
 
-Strongbow depends on two Arda libraries (both declared in `build.sbt`):
+Vairë depends on two Arda libraries (both declared in `build.sbt`):
 
-- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators with left recursion; the JSON, XML and XPath parsers behind Strongbow's JSON and XML functions
-- [Sarati](https://codeberg.org/hakim/sarati) — binary codec with compile-time derivation and the structural AST layers (JSON, XML) that Strongbow's JSON/XPath evaluation runs on
+- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators with left recursion; the JSON, XML and XPath parsers behind Vairë's JSON and XML functions
+- [Sarati](https://codeberg.org/hakim/sarati) — binary codec with compile-time derivation and the structural AST layers (JSON, XML) that Vairë's JSON/XPath evaluation runs on
 
-Sibling Arda libraries (not Strongbow dependencies): [Eru](https://codeberg.org/hakim/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers and resource safety — and [Valar](https://codeberg.org/hakim/valar) — type-safe validation with compile-time derivation and error accumulation.
+Sibling Arda libraries (not Vairë dependencies): [Eru](https://codeberg.org/hakim/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers and resource safety — and [Valar](https://codeberg.org/hakim/valar) — type-safe validation with compile-time derivation and error accumulation.
 
 All Arda libraries share the same principles: Scala 3 native, compile-time metaprogramming, zero `asInstanceOf` in core logic, `-Yexplicit-nulls`, `-language:strictEquality`.
 
 ## License
 
-Strongbow is licensed under [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.txt) — same as the rest of the Arda stack; see [LICENSE](LICENSE).
+Vairë is licensed under [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.txt) — same as the rest of the Arda stack; see [LICENSE](LICENSE).
 
 ---
 

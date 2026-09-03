@@ -1,6 +1,6 @@
 # CI and testing strategy
 
-Strongbow's test suite is split into three tiers so the pull-request gate stays fast and
+Vairë's test suite is split into three tiers so the pull-request gate stays fast and
 memory-frugal on shared CI, while the heavy suites still run somewhere.
 
 ## Tiers

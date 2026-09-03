@@ -1,4 +1,4 @@
-package net.ghoula.strongbow.doctool
+package net.ghoula.vaire.doctool
 
 import java.nio.file.{Files, Path}
 

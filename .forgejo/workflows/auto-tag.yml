@@ -70,8 +70,8 @@ jobs:
             exit 0
           fi
 
-          git config user.name "strongbow-release-bot"
-          git config user.email "release@strongbow.local"
+          git config user.name "vaire-release-bot"
+          git config user.email "release@vaire.local"
           git tag "${newtag}"
           git push "http://hakim:${RELEASE_TOKEN}@forgejo:3000/${GITHUB_REPOSITORY}.git" "refs/tags/${newtag}"
 

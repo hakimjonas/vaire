@@ -1,7 +1,17 @@
 # Changelog
 
-All notable changes to Strongbow. Versions follow the automated release pipeline: every
+All notable changes to Vairë. Versions follow the automated release pipeline: every
 PR merge to `main` cuts the next patch tag and publishes to the registry.
+
+## 0.0.20
+
+- **Renamed from strongbow to Vairë** — the crossbow lineage (Arrow → Crossbow → strongbow)
+  named the inspiration, not the library. Vairë the Weaver weaves all things that have been
+  in Time into her storied webs: threads are columns, the weaving is execution, the web is
+  the record. Packages (`net.ghoula.vaire`), artifactIds (`vaire-core_3`, `vaire-spark_3`),
+  directories, and the repository move with the name; releases 0.0.1–0.0.19 were published
+  under the old coordinates and remain on the registry as history. Repository home moves to
+  `github.com/hakimjonas/vaire`, matching the ecosystem convention.
 
 ## 0.0.19 (2026-09-03)
 
@@ -55,7 +65,7 @@ PR merge to `main` cuts the next patch tag and publishes to the registry.
 - **DTD divergence resolved** — rumil-parsers 1.0.0-alpha.3 parses `<!DOCTYPE>` declarations
   with internal-subset entity expansion (consulting sarati's `resolveDtd` config); both
   backends now expand internal entities identically. `XpathDivergenceSpec` pins only the
-  prefixed-name divergence (deliberate, permanent — strongbow is more conformant per
+  prefixed-name divergence (deliberate, permanent — vaire is more conformant per
   XPath 1.0). Dependencies: sarati 1.0.0-alpha.2 (`resolveDtd` config), rumil-parsers
   1.0.0-alpha.3 (DTD parser).
 

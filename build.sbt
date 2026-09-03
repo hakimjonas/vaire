@@ -5,7 +5,7 @@ ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
 ThisBuild / licenses := List("GPL-3.0-or-later" -> uri("https://www.gnu.org/licenses/gpl-3.0.txt"))
-ThisBuild / homepage := Some(uri("https://codeberg.org/hakim/strongbow"))
+ThisBuild / homepage := Some(uri("https://github.com/hakimjonas/vaire"))
 ThisBuild / description := "A type-safe columnar dataset library for Scala 3 with Spark integration"
 ThisBuild / developers := List(
   Developer(
@@ -17,8 +17,8 @@ ThisBuild / developers := List(
 )
 ThisBuild / scmInfo := Some(
   ScmInfo(
-    uri("https://codeberg.org/hakim/strongbow"),
-    "scm:git@codeberg.org:hakim/strongbow.git"
+    uri("https://github.com/hakimjonas/vaire"),
+    "scm:git@github.com:hakimjonas/vaire.git"
   )
 )
 
@@ -73,14 +73,14 @@ lazy val root = project
   .in(file("."))
   .aggregate(core, spark, docTool)
   .settings(
-    name := "strongbow",
+    name := "vaire",
     publish / skip := true
   )
 
 lazy val core = project
-  .in(file("strongbow-core"))
+  .in(file("vaire-core"))
   .settings(
-    name := "strongbow-core",
+    name := "vaire-core",
     scalacOptions ++= sharedScalacOptions,
     libraryDependencies ++= Seq(
       "net.ghoula" %% "rumil-parsers" % rumilVersion,
@@ -91,10 +91,10 @@ lazy val core = project
   )
 
 lazy val spark = project
-  .in(file("strongbow-spark"))
+  .in(file("vaire-spark"))
   .dependsOn(core)
   .settings(
-    name := "strongbow-spark",
+    name := "vaire-spark",
     scalacOptions ++= sharedScalacOptions.filterNot(_ == "-language:strictEquality"),
     Test / scalacOptions ~= (_.map {
       case "-Wunused:all" => "-Wunused:imports"
@@ -113,10 +113,10 @@ lazy val spark = project
     ),
     Test / fork := true,
     Test / parallelExecution := false,
-    Test / testOptions += Tests.Argument("-l", "net.ghoula.strongbow.Benchmark"),
+    Test / testOptions += Tests.Argument("-l", "net.ghoula.vaire.Benchmark"),
     Test / testOptions ++= {
       if (sys.env.contains("FAST_TESTS"))
-        Seq(Tests.Argument("-l", "net.ghoula.strongbow.Slow"))
+        Seq(Tests.Argument("-l", "net.ghoula.vaire.Slow"))
       else Seq.empty
     },
     // Scala 3.8's unified scala-library uses TASTY metadata instead of ScalaSig annotations.
@@ -144,8 +144,8 @@ lazy val spark = project
       )
       scalaLib213 +: cp
     },
-    assembly / assemblyJarName := "strongbow-spark-bench.jar",
-    assembly / mainClass := Some("net.ghoula.strongbow.spark.BenchRunner"),
+    assembly / assemblyJarName := "vaire-spark-bench.jar",
+    assembly / mainClass := Some("net.ghoula.vaire.spark.BenchRunner"),
     assembly / fullClasspath := (Test / fullClasspath).value,
     assembly / assemblyMergeStrategy := {
       case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
@@ -182,14 +182,14 @@ lazy val spark = project
 lazy val docTool = project
   .in(file("docTool"))
   .settings(
-    name := "strongbow-doc-tool",
+    name := "vaire-doc-tool",
     scalacOptions ++= sharedScalacOptions,
     publish / skip := true,
     libraryDependencies ++= Seq(
       "org.scalameta" %% "scalameta" % "4.14.2",
       "org.scalatest" %% "scalatest" % "3.2.20" % Test
     ),
-    Compile / run / mainClass := Some("net.ghoula.strongbow.doctool.DocCoverageMain")
+    Compile / run / mainClass := Some("net.ghoula.vaire.doctool.DocCoverageMain")
   )
 
 // Command aliases
@@ -199,12 +199,12 @@ addCommandAlias(
   "docCoverage; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
 )
 addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull; docTool/Test/testFull")
-addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.strongbow.Slow")
+addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.vaire.Slow")
 addCommandAlias(
   "docCoverage",
-  "docTool/run check doc-coverage.json strongbow-core/src/main/scala strongbow-spark/src/main/scala"
+  "docTool/run check doc-coverage.json vaire-core/src/main/scala vaire-spark/src/main/scala"
 )
 addCommandAlias(
   "docCoverageSnapshot",
-  "docTool/run snapshot doc-coverage.json strongbow-core/src/main/scala strongbow-spark/src/main/scala"
+  "docTool/run snapshot doc-coverage.json vaire-core/src/main/scala vaire-spark/src/main/scala"
 )

@@ -3,17 +3,32 @@
 All notable changes to Strongbow. Versions follow the automated release pipeline: every
 PR merge to `main` cuts the next patch tag and publishes to the registry.
 
-## Unreleased
+## 0.0.19 (2026-09-03)
+
+- **License** — the POM license declaration was corrected from MIT (which the build metadata
+  had claimed since 0.0.1) to GPL-3.0-or-later, matching the rest of the Arda stack
+  (eru, sarati, rumil); the repository now carries the full license text. Previously
+  published 0.0.x artifacts carry the stale MIT claim in their POMs.
+
+## 0.0.18 (2026-09-03)
+
+- **Scaladoc backfill to 100%** — every public member of core and spark carries a scaladoc
+  (1133/1133): all 349 `Expr` enum cases and DSL methods anchored to their Spark SQL
+  functions, plus the Dataset, Column, ColumnType, errors, params, types, interpreter and
+  spark modules. At the 100% baseline the coverage ratchet acts as a hard gate: any new
+  undocumented member fails `check`.
+
+## 0.0.17 (2026-09-03)
 
 - **Scaladoc coverage gate (pana-style ratchet)** — new `docTool` module checks that every
   public member of `src/main/scala` carries a non-empty `/** */` doc (defs, vals, types,
   classes/objects/enums, enum cases, extension methods; overrides, givens, exports, and
   private/protected members exempt). The `check` gate compares per-file counts against the
   checked-in `doc-coverage.json` and fails when undocumented counts grow; `sbt
-  docCoverageSnapshot` regenerates the baseline after doc work. The backfill landed the same
-  cycle: every public member of core and spark now carries a scaladoc — 1133/1133 (100%) — so
-  the ratchet holds the line as a hard gate. Members of private/qualified-private aggregates
-  are outside the user-facing API surface and stay exempt.
+  docCoverageSnapshot` regenerates the baseline after doc work.
+
+## 0.0.16 (2026-09-03)
+
 - **Error-policy E3 — quarantine (dead-letter view)** — `evalColumnWithErrors` evaluates under
   quarantine: per-row failures null-mark the value column and are recorded in a dense error
   column (an `AnyColumn` boxing `QuarantinedRow` — log-safe reason plus opt-in input preview — at
@@ -23,6 +38,9 @@ PR merge to `main` cuts the next patch tag and publishes to the registry.
   Input previews default to `Truncated(120)` and are knobbed via `InputPreview`
   (`Off | Truncated(n) | Full`) with a user-supplied redactor; the preview is the payload channel
   from design §4 and never enters the log-safe `ExecutionError` messages.
+
+## 0.0.15 (2026-09-02)
+
 - **Error-policy E2 — dataset-level Collect surface** — `ds.withErrorPolicy(policy)`
   scopes a plan's expression evaluation under a per-row error policy; `ds.executeCollect`
   runs the plan and returns `CollectedDataset` (materialized values with failed rows
@@ -31,6 +49,52 @@ PR merge to `main` cuts the next patch tag and publishes to the registry.
   are rejected, and the Spark backend rejects the feature outright (per-row error policies
   are unrepresentable there; see `docs/error-policy-design.md` §5.3). Structural errors
   and aggregation expressions keep fail-fast semantics under every policy.
+
+## 0.0.14 (2026-09-02)
+
+- **DTD divergence resolved** — rumil-parsers 1.0.0-alpha.3 parses `<!DOCTYPE>` declarations
+  with internal-subset entity expansion (consulting sarati's `resolveDtd` config); both
+  backends now expand internal entities identically. `XpathDivergenceSpec` pins only the
+  prefixed-name divergence (deliberate, permanent — strongbow is more conformant per
+  XPath 1.0). Dependencies: sarati 1.0.0-alpha.2 (`resolveDtd` config), rumil-parsers
+  1.0.0-alpha.3 (DTD parser).
+
+## 0.0.13 (2026-09-02)
+
+- **Error-policy design document** — `docs/error-policy-design.md`: the three policies
+  (FailFast default, bounded Collect, quarantine), the log-safe/payload channel split,
+  the structural/per-row boundary (§5.2.1), the Spark asymmetry (§5.3), and the recorded
+  operator decisions.
+
+## 0.0.12 (2026-09-02)
+
+- **Error-policy E1 — Collect primitive** — `ErrorPolicy` (`FailFast` / `Collect(maxErrors)`,
+  default 100), `evalColumnCollect` returning `Collected` (value column with failed rows
+  null-marked, bounded per-row error list, `truncated` flag, complete by-kind summary), the
+  implicitly-threaded `RowErrors` collector, and per-row error-site updates (division, xpath
+  parse). Structural errors fail under every policy by construction.
+
+## 0.0.11 (2026-09-01)
+
+- Doc-audit follow-up: ecosystem section states the actual dependencies, `.jvmopts.example`
+  wording.
+
+## 0.0.10 (2026-09-01)
+
+- Dependencies resolve from Maven Central: `net.ghoula:sarati_3` and
+  `net.ghoula:rumil-parsers_3` at 1.0.0-alpha.
+
+## 0.0.9 (2026-09-01)
+
+- **Number rendering matches Spark** — Jackson node-type semantics via preserved raw tokens
+  (sarati 0.3.12 + rumil 0.3.12); the four number-formatting divergence rows flipped to
+  parity in `JsonTupleParitySpec`.
+
+## 0.0.8 (2026-09-01)
+
+- Documentation audit per `DOC-AUDIT-POLICY`: verified claims (349 expression cases, 20
+  Column variants), installation section citing the registry, this CHANGELOG created,
+  `SourcePolicySpec` pinning the stated purity guarantees.
 
 ## 0.0.7 (2026-09-01)
 

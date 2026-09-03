@@ -156,6 +156,10 @@ Sibling Arda libraries (not Strongbow dependencies): [Eru](https://codeberg.org/
 
 All Arda libraries share the same principles: Scala 3 native, compile-time metaprogramming, zero `asInstanceOf` in core logic, `-Yexplicit-nulls`, `-language:strictEquality`.
 
+## License
+
+Strongbow is licensed under [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.txt) — same as the rest of the Arda stack; see [LICENSE](LICENSE).
+
 ---
 
 *Designed and developed by Hakim Jonas Ghoula.*

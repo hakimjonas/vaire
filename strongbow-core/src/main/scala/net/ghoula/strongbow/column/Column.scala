@@ -17,27 +17,68 @@ import net.ghoula.strongbow.types.RowIndex
   * child column per flattened schema field.
   */
 enum Column[+A] {
+
+  /** 32-bit integer storage. */
   case IntColumn(data: Array[Int], nulls: BitSet) extends Column[Int]
+
+  /** 64-bit integer storage. */
   case LongColumn(data: Array[Long], nulls: BitSet) extends Column[Long]
+
+  /** 64-bit float storage. */
   case DoubleColumn(data: Array[Double], nulls: BitSet) extends Column[Double]
+
+  /** 32-bit float storage. */
   case FloatColumn(data: Array[Float], nulls: BitSet) extends Column[Float]
+
+  /** 16-bit integer storage. */
   case ShortColumn(data: Array[Short], nulls: BitSet) extends Column[Short]
+
+  /** 8-bit integer storage. */
   case ByteColumn(data: Array[Byte], nulls: BitSet) extends Column[Byte]
+
+  /** Timestamps as epoch microseconds (zone-aware). */
   case TimestampColumn(data: Array[Long], nulls: BitSet) extends Column[types.Timestamp]
+
+  /** Timestamps as epoch microseconds without a zone (local timestamps). */
   case TimestampNTZColumn(data: Array[Long], nulls: BitSet) extends Column[types.TimestampNTZ]
+
+  /** Times of day as microseconds since midnight. */
   case TimeColumn(data: Array[Long], nulls: BitSet) extends Column[types.Time]
+
+  /** Year-month intervals as total months. */
   case YearMonthIntervalColumn(data: Array[Int], nulls: BitSet) extends Column[types.YearMonthInterval]
+
+  /** Day-time intervals as total microseconds. */
   case DayTimeIntervalColumn(data: Array[Long], nulls: BitSet) extends Column[types.DayTimeInterval]
+
+  /** UTF-16 string storage; null rows hold unread placeholders. */
   case StringColumn(data: Array[String | Null], nulls: BitSet) extends Column[String]
+
+  /** Boolean storage. */
   case BooleanColumn(data: Array[Boolean], nulls: BitSet) extends Column[Boolean]
+
+  /** Dates as epoch days. */
   case DateColumn(data: Array[Int], nulls: BitSet) extends Column[types.Date]
+
+  /** Variable-length bytes in a flat array with per-row offsets. */
   case BinaryColumn(data: Array[Byte], offsets: Array[Int], nulls: BitSet) extends Column[types.Binary]
+
+  /** Decimals as unscaled Longs with column-level precision and scale. */
   case DecimalColumn(data: Array[Long], precision: Int, scale: Int, nulls: BitSet) extends Column[types.Decimal]
+
+  /** Arrays over one flat element column with per-row offsets. */
   case ArrayColumn[A](elements: Column[A], offsets: Array[Int], nulls: BitSet) extends Column[Seq[A]]
+
+  /** Maps as parallel flat key and value columns with per-row offsets. */
   case MapColumn[K, V](keys: Column[K], values: Column[V], offsets: Array[Int], nulls: BitSet) extends Column[Map[K, V]]
+
+  /** Structs as one child column per flattened schema field. */
   case StructColumn[T](columns: Vector[Column[?]], schema: Schema[T], nulls: BitSet) extends Column[T]
+
+  /** Boxed heterogeneous storage for variant and error payloads. */
   case AnyColumn(data: Array[Any | Null], nulls: BitSet) extends Column[Any]
 
+  /** Number of rows in the column. */
   inline def length: Int = this match {
     case IntColumn(data, _) => data.length
     case LongColumn(data, _) => data.length
@@ -61,6 +102,7 @@ enum Column[+A] {
     case AnyColumn(data, _) => data.length
   }
 
+  /** The column's logical type. */
   inline def columnType: ColumnType = this match {
     case IntColumn(_, _) => ColumnType.IntType
     case LongColumn(_, _) => ColumnType.LongType
@@ -107,6 +149,7 @@ enum Column[+A] {
     case AnyColumn(_, nulls) => nulls
   }
 
+  /** Whether the row at `index` is SQL NULL. */
   inline def isNull(index: RowIndex): Boolean = nullSet.contains(index.toInt)
 
   /** Untyped single-value extraction for interop boundaries.
@@ -394,6 +437,7 @@ enum Column[+A] {
   }
 }
 
+/** Typed column constructors and columnar operations. */
 object Column {
 
   private[strongbow] def structLength(columns: Vector[Column[?]]): Int =
@@ -423,26 +467,32 @@ object Column {
       case Left(err) => sys.error(s"Struct decode failed at row $index: $err")
     }
 
+  /** An IntColumn from values; positions in `nulls` are SQL NULL. */
   inline def int(data: Array[Int], nulls: BitSet = BitSet.empty): Column[Int] = {
     IntColumn(data, nulls)
   }
 
+  /** A LongColumn from values; positions in `nulls` are SQL NULL. */
   inline def long(data: Array[Long], nulls: BitSet = BitSet.empty): Column[Long] = {
     LongColumn(data, nulls)
   }
 
+  /** A DoubleColumn from values; positions in `nulls` are SQL NULL. */
   inline def double(data: Array[Double], nulls: BitSet = BitSet.empty): Column[Double] = {
     DoubleColumn(data, nulls)
   }
 
+  /** A FloatColumn from values; positions in `nulls` are SQL NULL. */
   inline def float(data: Array[Float], nulls: BitSet = BitSet.empty): Column[Float] = {
     FloatColumn(data, nulls)
   }
 
+  /** A ShortColumn from values; positions in `nulls` are SQL NULL. */
   inline def short(data: Array[Short], nulls: BitSet = BitSet.empty): Column[Short] = {
     ShortColumn(data, nulls)
   }
 
+  /** A ByteColumn from values; positions in `nulls` are SQL NULL. */
   inline def byte(data: Array[Byte], nulls: BitSet = BitSet.empty): Column[Byte] = {
     ByteColumn(data, nulls)
   }
@@ -472,10 +522,12 @@ object Column {
     DayTimeIntervalColumn(data, nulls)
   }
 
+  /** A StringColumn from values; positions in `nulls` are SQL NULL. */
   inline def string(data: Array[String | Null], nulls: BitSet = BitSet.empty): Column[String] = {
     StringColumn(data, nulls)
   }
 
+  /** A BooleanColumn from values; positions in `nulls` are SQL NULL. */
   inline def boolean(data: Array[Boolean], nulls: BitSet = BitSet.empty): Column[Boolean] = {
     BooleanColumn(data, nulls)
   }
@@ -485,6 +537,7 @@ object Column {
     DateColumn(data, nulls)
   }
 
+  /** A BinaryColumn from a flat byte array with per-row end offsets. */
   def binary(data: Array[Byte], offsets: Array[Int], nulls: BitSet = BitSet.empty): Column[types.Binary] =
     BinaryColumn(data, offsets, nulls)
 
@@ -504,6 +557,7 @@ object Column {
     result
   }
 
+  /** A BinaryColumn from per-row byte arrays, flattened with offsets. */
   def binaryFromArrays(byteArrays: Array[Array[Byte]], nulls: BitSet): Column[types.Binary] = {
     val (data, offsets) = byteArrays.foldLeft((Array.empty[Byte], Vector(0))) { case ((bytes, offs), ba) =>
       (concatByteArrays(bytes, ba), offs :+ (bytes.length + ba.length))
@@ -511,6 +565,7 @@ object Column {
     BinaryColumn(data, offsets.toArray, nulls)
   }
 
+  /** An AnyColumn from boxed values; positions in `nulls` are SQL NULL. */
   inline def any(data: Array[Any | Null], nulls: BitSet = BitSet.empty): Column[Any] = {
     AnyColumn(data, nulls)
   }
@@ -818,6 +873,7 @@ object Column {
     }
   }
 
+  /** Row comparison on the column's values: negative/zero/positive, nulls ordering first. */
   def compareAt(col: Column[?], a: Int, b: Int): Int = {
     val nulls = col.nullSet
     val na = nulls.contains(a); val nb = nulls.contains(b)
@@ -866,6 +922,7 @@ object Column {
     }
   }
 
+  /** Row indices that sort the column ascending under its natural ordering. */
   def sortIndicesByColumn(col: Column[?], rowCount: Int): Array[Int] = {
     def sort[T](data: IArray[T])(lt: (T, T) => Boolean): Array[Int] =
       (0 until rowCount).sortWith((a, b) => lt(data(a), data(b))).toArray

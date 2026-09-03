@@ -8,11 +8,18 @@ package net.ghoula.strongbow.types
   */
 opaque type Binary = Array[Byte]
 
+/** Construction of Binary values. */
 object Binary {
+
+  /** A Binary over the given bytes (no copy). */
   inline def apply(bytes: Array[Byte]): Binary = bytes
 
   extension (b: Binary) {
+
+    /** The underlying bytes. */
     inline def toBytes: Array[Byte] = b
+
+    /** The byte length. */
     inline def length: Int = b.length
   }
 

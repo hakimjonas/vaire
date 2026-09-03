@@ -6,10 +6,15 @@ package net.ghoula.strongbow.types
   */
 opaque type YearMonthInterval = Int
 
+/** Construction of year-month intervals. */
 object YearMonthInterval {
+
+  /** An interval from total months. */
   inline def ofMonths(months: Int): YearMonthInterval = months
 
   extension (i: YearMonthInterval) {
+
+    /** Total months. */
     inline def toMonths: Int = i
   }
 

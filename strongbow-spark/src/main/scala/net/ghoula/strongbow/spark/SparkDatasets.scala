@@ -18,6 +18,7 @@ import net.ghoula.strongbow.dataset.Dataset
   */
 object SparkDatasets {
 
+  /** A Dataset plan rooted at an existing Spark DataFrame. */
   def fromDataFrame[T](df: DataFrame, schema: Schema[T]): Dataset[T] =
     Dataset.Root(SparkSource(df), schema)
 }

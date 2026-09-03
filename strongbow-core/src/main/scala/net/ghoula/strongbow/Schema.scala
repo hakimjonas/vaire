@@ -13,8 +13,14 @@ import net.ghoula.strongbow.errors.DecodeError
   * runtime codec derivation.
   */
 trait Schema[T] {
+
+  /** Number of columns the encoded form of T occupies. */
   def columnCount: Int
+
+  /** Column names for the encoded form of T, in order. */
   def columnNames: Vector[String]
+
+  /** Column types for the encoded form of T, in order. */
   def columnTypes: Vector[ColumnType]
 
   /** Encode a value of type T to a vector of column values. */
@@ -40,7 +46,11 @@ trait Schema[T] {
     encode(value.asInstanceOf[T]) // scalafix:ok DisableSyntax.asInstanceOf
 }
 
+/** Derivation and instances for Schema: primitives, options, tuples, and case classes via Mirror.
+  */
 object Schema {
+
+  /** The Schema for T, resolved from the given instance. */
   def apply[T](using schema: Schema[T]): Schema[T] = schema
 
   private def decodeSingle[T](
@@ -195,6 +205,7 @@ object Schema {
     def decode(values: Vector[Any]): Either[DecodeError, types.Decimal] = decodeDecimalValue(values)
   }
 
+  /** A Decimal schema carrying a custom precision and scale. */
   def decimalWith(precision: Int, scale: Int): Schema[types.Decimal] = new Schema[types.Decimal] {
     def columnCount: Int = 1
     def columnNames: Vector[String] = Vector("value")

@@ -93,6 +93,25 @@ class DocCoverageSpec extends AnyFlatSpec with Matchers {
     violationNames(violations) shouldBe Vector("C")
   }
 
+  it should "skip members of private and qualified-private aggregates" in {
+    val (report, _) = analyzeSrc(
+      """private[doctool] object Internal {
+        |  def helper = 1
+        |}
+        |
+        |class Public {
+        |  private case class Hidden(a: Int) {
+        |    def alsoHidden = 2
+        |  }
+        |
+        |  /** documented. */
+        |  def m = 3
+        |}
+        |""".stripMargin
+    )
+    report shouldBe FileReport(1, 2)
+  }
+
   it should "skip private, protected, override and implicit members" in {
     val (report, violations) = analyzeSrc(
       """class C {

@@ -25,6 +25,7 @@ object DatasetInterpreter extends Interpreter {
   def execute[T](dataset: Dataset[T]): Either[ExecutionError, MaterializedDataset[T]] =
     executeScoped(dataset)(using RowErrors.failFast)
 
+  /** The plan walk; `errors` carries the active per-row collector (fail-fast by default). */
   def executeScoped[T](
     dataset: Dataset[T]
   )(using errors: RowErrors = RowErrors.failFast): Either[ExecutionError, MaterializedDataset[T]] = {

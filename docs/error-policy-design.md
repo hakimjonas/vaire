@@ -1,8 +1,8 @@
-# Strongbow error policy — fail-fast, Collect, and quarantine
+# Vairë error policy — fail-fast, Collect, and quarantine
 
 Design document for per-row error handling policy in the in-memory interpreter.
-Companion to the parity plan (`strongbow-spark-4.2-parity-plan.md`) and the handover
-(`strongbow-parity-handover-2.md`); grew out of the error-model discussion on the
+Companion to the parity plan (`vaire-spark-4.2-parity-plan.md`) and the handover
+(`vaire-parity-handover-2.md`); grew out of the error-model discussion on the
 `xpath*` work (PR #8), where the strict/try split raised the general question:
 **who decides what a single bad row costs?**
 
@@ -23,7 +23,7 @@ Companion to the parity plan (`strongbow-spark-4.2-parity-plan.md`) and the hand
 
 ## 1. The problem
 
-Strongbow's evaluation is fail-fast with first-error-only: `evalColumn` returns
+Vairë's evaluation is fail-fast with first-error-only: `evalColumn` returns
 `Either[ExecutionError, Column[?]]`, and a per-row failure in any arm aborts the whole
 column with the first error encountered. `ExecutionError` has no shape for "several rows
 failed" (`DivisionByZero(row)` and `IndexOutOfBounds(index, size)` carry row positions,
@@ -41,7 +41,7 @@ Both halves of that behavior are wrong for someone:
 
 Both are legitimate pipeline-design preferences, in the same sense that Spark's own
 parsers offer three modes: `FAILFAST` (fail), `DROPMALFORMED` (silently skip), and
-`PERMISSIVE` + `_corrupt_record` (proceed and carry the reason). Strongbow currently
+`PERMISSIVE` + `_corrupt_record` (proceed and carry the reason). Vairë currently
 offers only the first. The design question: what does the other half look like without
 breaking the default contract?
 
@@ -113,7 +113,7 @@ handling should tell the same story.
 ### 3.3 `Quarantine` — the dead-letter view
 
 A dense per-row **error column** (`Option[ExecutionError]` boxed, null where the row
-succeeded) alongside the value column. It composes with everything Strongbow does —
+succeeded) alongside the value column. It composes with everything Vairë does —
 filters, joins, selects — because it is just a column:
 
 ```scala
@@ -143,7 +143,7 @@ exception messages are passively harvested (log aggregation, job drivers, alerti
 and "error message contains sensitive information" is CWE-209. This is not hypothetical
 for the functions that motivated the design — Spark's own `UDFXPathUtil` embeds the
 entire XML document in its RuntimeException message, so the strict contract itself
-inherits the leak. Strongbow can be better than the contract here without changing
+inherits the leak. Vairë can be better than the contract here without changing
 which rows fail.
 
 Two channels, never mixed:
@@ -267,7 +267,7 @@ compose the try-family with filters (§3.3 style) or handle Spark's failures ups
 | E3 | Quarantine (dense error column) + composition tests | dead-letter view | 1–2 days |
 
 Single PR per phase, each gated (`check` + both `testFull`s). No library releases —
-everything lives in Strongbow core.
+everything lives in Vairë core.
 
 ---
 

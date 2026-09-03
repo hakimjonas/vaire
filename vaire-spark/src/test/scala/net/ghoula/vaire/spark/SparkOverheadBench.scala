@@ -1,0 +1,479 @@
+package net.ghoula.vaire.spark
+
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
+
+import net.ghoula.vaire.prelude.*
+
+/** Overhead benchmark: vaire Dataset plan vs native Spark for identical operations.
+  *
+  * Measures three phases separately: (a) DataFrame creation, (b) operation execution, (c)
+  * materialization. Reports vaire time, native time, and overhead ratio.
+  *
+  * Uses count() instead of collect() to avoid OOM on large datasets while still triggering full
+  * Spark execution. Data arrays allocated once, reused across iterations.
+  *
+  * Runs 5 warmup + 10 measured iterations per operation.
+  */
+class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
+
+  import org.apache.spark.sql.{functions => F, DataFrame, Row}
+  import org.apache.spark.sql.types.{
+    DoubleType => SparkDoubleType,
+    IntegerType,
+    StringType => SparkStringType,
+    StructField,
+    StructType
+  }
+  import org.apache.spark.sql.expressions.Window
+
+  private val N = 1_000_000
+  private val JoinN = 500_000
+  private val MultiN = 500_000
+  private val WindowN = 200_000
+  private val NumGroups = 1_000
+  private val Warmup = 3
+  private val Measured = 5
+
+  private val valueExpr: Expr[Int, Int] = Expr.Cell("value", ColumnIndex(0))
+
+  // --- data arrays allocated once ---
+
+  private lazy val fullData = Array.tabulate(N)(identity)
+  private lazy val halfDupeData = Array.tabulate(N)(i => i % (N / 2))
+  private lazy val joinData1 = Array.tabulate(JoinN)(identity)
+  private lazy val joinData2 = Array.tabulate(JoinN)(i => i + JoinN / 2)
+  private lazy val intersectData1 = Array.tabulate(N / 2)(identity)
+  private lazy val intersectData2 = Array.tabulate(N / 2)(i => i + N / 3)
+  private lazy val pipeData1 = Array.tabulate(JoinN)(identity)
+  private lazy val pipeData2 = Array.tabulate(JoinN)(i => i + JoinN / 2)
+
+  // --- helpers ---
+
+  private case class TimingResult(
+    createMs: Double,
+    planMs: Double,
+    collectMs: Double,
+    decodeMs: Double,
+    totalMs: Double,
+    rowCount: Long
+  )
+
+  private def median(values: Seq[Double]): Double = {
+    val sorted = values.sorted
+    val n = sorted.length
+    if (n % 2 == 0) (sorted(n / 2 - 1) + sorted(n / 2)) / 2.0
+    else sorted(n / 2)
+  }
+
+  private def medianOf(timings: Seq[TimingResult]): TimingResult =
+    TimingResult(
+      median(timings.map(_.createMs)),
+      median(timings.map(_.planMs)),
+      median(timings.map(_.collectMs)),
+      median(timings.map(_.decodeMs)),
+      median(timings.map(_.totalMs)),
+      timings.head.rowCount
+    )
+
+  private def formatResult(label: String, sb: TimingResult, native: TimingResult): Unit = {
+    val ratio = if (native.totalMs > 0) sb.totalMs / native.totalMs else Double.PositiveInfinity
+    info(f"--- $label ---")
+    info(
+      f"  Vairë  : create=${sb.createMs}%8.1f ms  plan=${sb.planMs}%8.1f ms  exec=${sb.collectMs}%8.1f ms  total=${sb.totalMs}%8.1f ms  rows=${sb.rowCount}"
+    )
+    info(
+      f"  Native     : create=${native.createMs}%8.1f ms  plan=${native.planMs}%8.1f ms  exec=${native.collectMs}%8.1f ms  total=${native.totalMs}%8.1f ms  rows=${native.rowCount}"
+    )
+    info(f"  Overhead   : ${ratio}%.2fx")
+  }
+
+  private def intDataset(data: Array[Int]): Dataset[Int] =
+    Dataset.fromColumns(Vector(Column.int(data)), Schema.intSchema).toOption.get
+
+  private def nativeIntDf(data: Array[Int]): DataFrame = {
+    val structType = StructType(Array(StructField("value", IntegerType, nullable = false)))
+    val rows = java.util.Arrays.asList(data.map(Row(_))*)
+    spark.createDataFrame(rows, structType)
+  }
+
+  // --- multi-column case classes ---
+
+  case class BenchRecord(dept: String, amount: Double, quantity: Int, id: Int)
+  given benchRecordSchema: Schema[BenchRecord] = Schema.derived
+
+  case class BenchAggResult(dept: String, totalAmount: Double, cnt: Long)
+  given benchAggResultSchema: Schema[BenchAggResult] = Schema.derived
+
+  case class BenchWindowResult(dept: String, amount: Double, quantity: Int, id: Int, rowNum: Int)
+  given benchWindowResultSchema: Schema[BenchWindowResult] = Schema.derived
+
+  private def benchRecordDataset(n: Int, groups: Int): Dataset[BenchRecord] = {
+    val depts = Array.tabulate[String | Null](n)(i => s"dept${i % groups}")
+    val amounts = Array.tabulate(n)(i => (i % 1000) + 0.5)
+    val quantities = Array.tabulate(n)(i => i % 100)
+    val ids = Array.tabulate(n)(identity)
+    Dataset
+      .fromColumns(
+        Vector(Column.string(depts), Column.double(amounts), Column.int(quantities), Column.int(ids)),
+        benchRecordSchema
+      )
+      .toOption
+      .get
+  }
+
+  private def nativeBenchDf(n: Int, groups: Int): DataFrame = {
+    val structType = StructType(
+      Array(
+        StructField("dept_value", SparkStringType, nullable = false),
+        StructField("amount_value", SparkDoubleType, nullable = false),
+        StructField("quantity_value", IntegerType, nullable = false),
+        StructField("id_value", IntegerType, nullable = false)
+      )
+    )
+    val rows = java.util.Arrays.asList(
+      Array.tabulate(n) { i =>
+        Row(s"dept${i % groups}", (i % 1000) + 0.5, i % 100, i)
+      }*
+    )
+    spark.createDataFrame(rows, structType)
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 1: Filter 1M rows
+  // ---------------------------------------------------------------------------
+
+  "Filter overhead" should "be measured for 1M rows" taggedAs Benchmark in {
+    val threshold = (N * 0.9).toInt
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = intDataset(fullData).filter(
+        Expr.Gt(valueExpr, Expr.Const(threshold), summon[Ordering[Int]])
+      )
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df = nativeIntDf(fullData)
+      val t1 = System.nanoTime()
+      val filtered = df.filter(F.col("value") > F.lit(threshold))
+      val t2 = System.nanoTime()
+      val count = filtered.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("Filter 1M rows (top 10%)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 2: Distinct on 1M rows
+  // ---------------------------------------------------------------------------
+
+  "Distinct overhead" should "be measured for 1M rows" taggedAs Benchmark in {
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = intDataset(halfDupeData).distinct
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df = nativeIntDf(halfDupeData)
+      val t1 = System.nanoTime()
+      val distinct = df.distinct()
+      val t2 = System.nanoTime()
+      val count = distinct.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("Distinct 1M rows (50% dupes)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 3: JoinOn 500K x 500K
+  // ---------------------------------------------------------------------------
+
+  "JoinOn overhead" should "be measured for 500K x 500K" taggedAs Benchmark in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+
+    val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val rightKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds =
+        intDataset(joinData1).joinOn(intDataset(joinData2), leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df1 = nativeIntDf(joinData1).alias("_l")
+      val df2 = nativeIntDf(joinData2).alias("_r")
+      val t1 = System.nanoTime()
+      val joined = df1.join(df2, F.col("_l.value") === F.col("_r.value"))
+      val t2 = System.nanoTime()
+      val count = joined.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("JoinOn 500K x 500K (50% overlap)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 4: SelectExprs arithmetic on 1M
+  // ---------------------------------------------------------------------------
+
+  "SelectExprs overhead" should "be measured for 1M rows" taggedAs Benchmark in {
+    val doubled = Expr
+      .Add(
+        Expr.Mul(valueExpr, Expr.Const(2)),
+        Expr.Const(1)
+      )
+      .asInstanceOf[Expr[Int, Any]]
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = intDataset(fullData).selectAs[Int](("result", doubled, ColumnType.IntType))
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df = nativeIntDf(fullData)
+      val t1 = System.nanoTime()
+      val selected = df.select((F.col("value") * F.lit(2) + F.lit(1)).as("result"))
+      val t2 = System.nanoTime()
+      val count = selected.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("SelectExprs value*2+1 on 1M rows", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 5: Intersect 500K x 500K
+  // ---------------------------------------------------------------------------
+
+  "Intersect overhead" should "be measured for 500K x 500K" taggedAs Benchmark in {
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = intDataset(intersectData1).intersect(intDataset(intersectData2))
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df1 = nativeIntDf(intersectData1)
+      val df2 = nativeIntDf(intersectData2)
+      val t1 = System.nanoTime()
+      val intersected = df1.intersect(df2)
+      val t2 = System.nanoTime()
+      val count = intersected.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("Intersect 500K x 500K", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 6: End-to-end: filter -> join -> distinct
+  // ---------------------------------------------------------------------------
+
+  "End-to-end pipeline overhead" should "be measured for filter -> join" taggedAs Benchmark in {
+    given Schema[(Int, Int)] = Schema.tuple2Schema[Int, Int]
+
+    val threshold = (JoinN * 0.5).toInt
+    val leftKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+    val rightKey = Expr.Cell[Int, Int]("value", ColumnIndex(0))
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = intDataset(pipeData1)
+        .filter(Expr.Gt(valueExpr, Expr.Const(threshold), summon[Ordering[Int]]))
+        .joinOn(intDataset(pipeData2), leftKey, rightKey, ColumnType.IntType, ColumnType.IntType)
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df1 = nativeIntDf(pipeData1).alias("_l").filter(F.col("value") > F.lit(threshold))
+      val df2 = nativeIntDf(pipeData2).alias("_r")
+      val t1 = System.nanoTime()
+      val joined = df1.join(df2, F.col("_l.value") === F.col("_r.value"))
+      val t2 = System.nanoTime()
+      val count = joined.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("End-to-end: filter -> join (500K x 500K)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 7: GroupByAgg (500K rows, 1K groups)
+  // ---------------------------------------------------------------------------
+
+  "GroupByAgg overhead" should "be measured for 500K rows with 1K groups" taggedAs Benchmark in {
+    val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
+    val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+
+    val keys = Vector(KeySpec[BenchRecord, Any]("dept", deptCell, ColumnType.StringType))
+    val aggs = Vector(
+      AggSpec("totalAmount", Expr.SumDouble(amountCell), ColumnType.DoubleType),
+      AggSpec("cnt", Expr.Count[BenchRecord](), ColumnType.LongType)
+    )
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = benchRecordDataset(MultiN, NumGroups).groupByAgg[BenchAggResult](keys, aggs)
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df = nativeBenchDf(MultiN, NumGroups)
+      val t1 = System.nanoTime()
+      val grouped = df.groupBy(F.col("dept_value")).agg(F.sum("amount_value").as("totalAmount"), F.count("*").as("cnt"))
+      val t2 = System.nanoTime()
+      val count = grouped.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("GroupByAgg 500K rows (1K groups)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 8: SortByExprs (500K rows, 2-column sort)
+  // ---------------------------------------------------------------------------
+
+  "SortByExprs overhead" should "be measured for 500K rows with 2-column sort" taggedAs Benchmark in {
+    val quantityCell: Expr[BenchRecord, Int] = Expr.Cell("quantity_value", ColumnIndex(2))
+    val idCell: Expr[BenchRecord, Int] = Expr.Cell("id_value", ColumnIndex(3))
+
+    val sortKeys = Vector(
+      SortSpec(quantityCell, summon[Ordering[Int]], ColumnType.IntType, true),
+      SortSpec(idCell, summon[Ordering[Int]], ColumnType.IntType, false)
+    )
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = benchRecordDataset(MultiN, NumGroups).sortByExprs(sortKeys)
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df = nativeBenchDf(MultiN, NumGroups)
+      val t1 = System.nanoTime()
+      val sorted = df.sort(F.col("quantity_value").asc, F.col("id_value").desc)
+      val t2 = System.nanoTime()
+      val count = sorted.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("SortByExprs 500K rows (2-column sort)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+
+  // ---------------------------------------------------------------------------
+  // Benchmark 9: WithWindow (500K rows, ROW_NUMBER)
+  // ---------------------------------------------------------------------------
+
+  "WithWindow overhead" should "be measured for 200K rows with ROW_NUMBER" taggedAs Benchmark in {
+    val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
+    val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+
+    val windowSpec = WindowSpec[BenchRecord](
+      partitionBy = Vector(KeySpec[BenchRecord, Any]("dept", deptCell, ColumnType.StringType)),
+      orderBy =
+        Vector(SortSpec[BenchRecord, Double](amountCell, summon[Ordering[Double]], ColumnType.DoubleType, false))
+    )
+
+    val windowExprs = Vector(WindowExprSpec("rowNum", Expr.RowNumber[BenchRecord](), ColumnType.IntType))
+
+    val sbTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val ds = benchRecordDataset(WindowN, NumGroups).withWindow[BenchWindowResult](windowExprs, windowSpec)
+      val t1 = System.nanoTime()
+      val df = sparkInterpreter.toDataFrame(ds).toOption.get
+      val t2 = System.nanoTime()
+      val count = df.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    val nativeTimings = (0 until Warmup + Measured).map { _ =>
+      val t0 = System.nanoTime()
+      val df = nativeBenchDf(WindowN, NumGroups)
+      val t1 = System.nanoTime()
+      val windowed = df.withColumn(
+        "rowNum",
+        F.row_number().over(Window.partitionBy("dept_value").orderBy(F.col("amount_value").desc))
+      )
+      val t2 = System.nanoTime()
+      val count = windowed.count()
+      val t3 = System.nanoTime()
+      TimingResult((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t3 - t2) / 1e6, 0.0, (t3 - t0) / 1e6, count)
+    }.drop(Warmup)
+
+    formatResult("WithWindow 200K rows (ROW_NUMBER, 1K groups)", medianOf(sbTimings), medianOf(nativeTimings))
+    sbTimings.head.rowCount shouldBe nativeTimings.head.rowCount
+  }
+}

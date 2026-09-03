@@ -1,4 +1,4 @@
-# The Strongbow Manifesto
+# The Vairë Manifesto
 
 > **"The dichotomies of yesterday are the synergies of tomorrow"**
 >
@@ -8,7 +8,7 @@
 
 ### Vision
 
-Strongbow is a **logically pure, execution-flexible dataset library** that treats datasets as **immutable descriptions of computation**, not eager collections. Transformations are represented as data, allowing multiple interpreters to execute the same logical plan on different backends (in-memory columnar, Spark).
+Vairë is a **logically pure, execution-flexible dataset library** that treats datasets as **immutable descriptions of computation**, not eager collections. Transformations are represented as data, allowing multiple interpreters to execute the same logical plan on different backends (in-memory columnar, Spark).
 
 **Core Insight:** Separate description (what) from execution (how). The logical plan is pure Scala 3 ADTs. Interpreters provide execution strategies.
 

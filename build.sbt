@@ -1,6 +1,10 @@
 ThisBuild / organization := "net.ghoula"
 ThisBuild / scalaVersion := "3.8.4"
 ThisBuild / versionScheme := Some("early-semver")
+// sarati 1.0.0-alpha.2 -> 1.0.0-alpha.3 was a license-metadata-only release (no code
+// change), so pre-release selection across that line is acknowledged explicitly rather
+// than treated as a potential binary break.
+ThisBuild / libraryDependencySchemes += "net.ghoula" % "sarati_3" % VersionScheme.Always
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
@@ -47,8 +51,8 @@ lazy val sharedScalacOptions = Seq(
 )
 
 // Dependencies
-val saratiVersion = "1.0.0-alpha.2"
-val rumilVersion = "1.0.0-alpha.5"
+val saratiVersion = "1.0.0-alpha.3"
+val rumilVersion = "1.0.0-alpha.7"
 val sparkVersion = "4.2.0"
 
 lazy val root = project

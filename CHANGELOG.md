@@ -1,7 +1,19 @@
 # Changelog
 
 All notable changes to Vairë. Versions follow the automated release pipeline: every
-PR merge to `main` cuts the next patch tag and publishes to the registry.
+PR merge to `main` cuts the next alpha tag and publishes to Maven Central; the first
+release tag (`v1.0.0-alpha`) is cut manually.
+
+## Unreleased
+
+- **License** — moved from GPL-3.0-or-later to LGPL-3.0-or-later across the LICENSE file,
+  build metadata, and documentation, matching the rest of the Arda stack. LGPL keeps the
+  copyleft protection of the source while permitting applications to link and use the
+  library without license obligations on application code.
+- **GitHub release pipeline** — publishing moves from the Forgejo/Codeberg Maven registry
+  to Maven Central under `net.ghoula` (Central Portal staging, sbt-pgp signing), with the
+  same SHA-pinned CI / auto-tag / release workflows the other Arda libraries run; the
+  Forgejo workflow remnants (`.forgejo/`) are removed. `rumil` moves to 1.0.0-alpha.5.
 
 ## 0.0.20
 

@@ -4,7 +4,7 @@ ThisBuild / versionScheme := Some("early-semver")
 ThisBuild / semanticdbEnabled := true
 ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
 
-ThisBuild / licenses := List("GPL-3.0-or-later" -> uri("https://www.gnu.org/licenses/gpl-3.0.txt"))
+ThisBuild / licenses := List("LGPL-3.0-or-later" -> uri("https://www.gnu.org/licenses/lgpl-3.0.txt"))
 ThisBuild / homepage := Some(uri("https://github.com/hakimjonas/vaire"))
 ThisBuild / description := "A type-safe columnar dataset library for Scala 3 with Spark integration"
 ThisBuild / developers := List(
@@ -12,7 +12,7 @@ ThisBuild / developers := List(
     id = "hakimjonas",
     name = "Hakim Jonas Ghoula",
     email = "hakim@ghoula.net",
-    url = uri("https://codeberg.org/hakim")
+    url = uri("https://github.com/hakimjonas")
   )
 )
 ThisBuild / scmInfo := Some(
@@ -23,32 +23,14 @@ ThisBuild / scmInfo := Some(
 )
 
 // ===== Publishing Settings =====
-val forgejoHost = sys.env.getOrElse("FORGEJO_HOST", "localhost")
-val forgejoUrl = s"http://$forgejoHost:3000"
-
 ThisBuild / publishTo := {
-  if (sys.env.contains("CODEBERG_TOKEN"))
-    Some("codeberg" at "https://codeberg.org/api/packages/hakim/maven")
-  else
-    Some(("local-forgejo" at s"$forgejoUrl/api/packages/hakim/maven").withAllowInsecureProtocol(true))
+  val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
+  if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
+  else localStaging.value
 }
 ThisBuild / publishMavenStyle := true
+ThisBuild / pomIncludeRepository := { _ => false }
 ThisBuild / Test / publishArtifact := false
-
-ThisBuild / resolvers ++= Seq(
-  "codeberg" at "https://codeberg.org/api/packages/hakim/maven",
-  ("local-forgejo" at s"$forgejoUrl/api/packages/hakim/maven").withAllowInsecureProtocol(true)
-)
-
-ThisBuild / credentials ++= sys.env
-  .get("CODEBERG_TOKEN")
-  .map(token => Credentials("Gitea Package API", "codeberg.org", "hakim", token))
-  .toSeq
-
-ThisBuild / credentials ++= sys.env
-  .get("FORGEJO_TOKEN")
-  .map(token => Credentials("Gitea Package API", forgejoHost, "hakim", token))
-  .toSeq
 
 // Java 25
 ThisBuild / javacOptions ++= Seq("--release", "25")
@@ -66,7 +48,7 @@ lazy val sharedScalacOptions = Seq(
 
 // Dependencies
 val saratiVersion = "1.0.0-alpha.2"
-val rumilVersion = "1.0.0-alpha.3"
+val rumilVersion = "1.0.0-alpha.5"
 val sparkVersion = "4.2.0"
 
 lazy val root = project

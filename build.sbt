@@ -47,6 +47,10 @@ lazy val sharedScalacOptions = Seq(
   "-Yexplicit-nulls"
 )
 
+// Validate quotes/splices at expansion time: the test suites exercise every
+// ExprCompiler expansion, so ill-typed trees surface in CI, not at user sites.
+ThisBuild / Test / scalacOptions += "-Xcheck-macros"
+
 // Dependencies
 val saratiVersion = "1.0.0-alpha.3"
 val rumilVersion = "1.0.0-alpha.9"

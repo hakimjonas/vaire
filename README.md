@@ -40,13 +40,12 @@ The same Dataset plan executes on the in-memory columnar interpreter or pushes t
 
 ## Installation
 
-Vairë publishes to the Codeberg Maven registry:
+Vairë is published to Maven Central:
 
 ```scala
-resolvers += "codeberg" at "https://codeberg.org/api/packages/hakim/maven"
 libraryDependencies ++= Seq(
-  "net.ghoula" %% "vaire-core" % "0.0.8",
-  "net.ghoula" %% "vaire-spark" % "0.0.8" // Spark backend (optional)
+  "net.ghoula" %% "vaire-core" % "1.0.0-alpha",
+  "net.ghoula" %% "vaire-spark" % "1.0.0-alpha" // Spark backend (optional)
 )
 ```
 
@@ -149,16 +148,16 @@ Public API carries enforced scaladoc coverage: every public member needs a `/** 
 
 Vairë depends on two Arda libraries (both declared in `build.sbt`):
 
-- [Rumil](https://codeberg.org/hakim/rumil) — parser combinators with left recursion; the JSON, XML and XPath parsers behind Vairë's JSON and XML functions
-- [Sarati](https://codeberg.org/hakim/sarati) — binary codec with compile-time derivation and the structural AST layers (JSON, XML) that Vairë's JSON/XPath evaluation runs on
+- [Rumil](https://github.com/hakimjonas/rumil) — parser combinators with left recursion; the JSON, XML and XPath parsers behind Vairë's JSON and XML functions
+- [Sarati](https://github.com/hakimjonas/sarati) — binary codec with compile-time derivation and the structural AST layers (JSON, XML) that Vairë's JSON/XPath evaluation runs on
 
-Sibling Arda libraries (not Vairë dependencies): [Eru](https://codeberg.org/hakim/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers and resource safety — and [Valar](https://codeberg.org/hakim/valar) — type-safe validation with compile-time derivation and error accumulation.
+Sibling Arda libraries (not Vairë dependencies): [Eru](https://github.com/hakimjonas/eru) — typed effect system (`Eru[E, A]`) with Virtual Thread fibers and resource safety — and [Valar](https://github.com/hakimjonas/valar) — type-safe validation with compile-time derivation and error accumulation.
 
 All Arda libraries share the same principles: Scala 3 native, compile-time metaprogramming, zero `asInstanceOf` in core logic, `-Yexplicit-nulls`, `-language:strictEquality`.
 
 ## License
 
-Vairë is licensed under [GPL-3.0-or-later](https://www.gnu.org/licenses/gpl-3.0.txt) — same as the rest of the Arda stack; see [LICENSE](LICENSE).
+Vairë is licensed under [LGPL-3.0-or-later](https://www.gnu.org/licenses/lgpl-3.0.txt) — same as the rest of the Arda stack; see [LICENSE](LICENSE).
 
 ---
 

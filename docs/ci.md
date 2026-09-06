@@ -19,9 +19,9 @@ memory-frugal on shared CI, while the heavy suites still run somewhere.
   cost is paid once, not once per suite.
 - **The 5M-row stress suite is memory-bound.** It needs a 4G fork heap and several minutes;
   running it on every push would burn shared-runner minutes for no additional signal.
-- **Resource fairness.** Free/shared CI runners (Codeberg, etc.) are metered. Oversized
-  heaps are antisocial and an OOM/eviction accident waiting to happen. CI heaps are
-  right-sized; local development keeps the larger `.jvmopts`.
+- **Resource fairness.** Shared CI runners (GitHub-hosted, and Codeberg before it) are
+  metered. Oversized heaps are antisocial and an OOM/eviction accident waiting to happen.
+  CI heaps are right-sized; local development keeps the larger `.jvmopts`.
 
 ## Memory model
 

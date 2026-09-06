@@ -63,7 +63,7 @@ class VariantSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     inMemory.size shouldBe 3
     inMemory.zip(sparkValues).map { case (mem, spark) =>
       val memJson = mem match {
-        case v: net.ghoula.sarati.ast.json.JsonValue => parsers.json.formatJson(v)
+        case v: net.ghoula.sarati.ast.json.JsonValue => net.ghoula.sarati.ast.json.formatJson(v)
         case other => other.toString
       }
       spark.toString shouldBe memJson

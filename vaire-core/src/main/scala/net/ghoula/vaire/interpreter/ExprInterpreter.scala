@@ -1,6 +1,6 @@
 package net.ghoula.vaire.interpreter
 
-import net.ghoula.sarati.ast.json.JsonValue
+import net.ghoula.sarati.ast.json.{JsonValue, formatJson}
 import net.ghoula.sarati.ast.xml.xpathXmlConfig
 import net.ghoula.sarati.xpath.{
   AttributeNode,
@@ -13,7 +13,7 @@ import net.ghoula.sarati.xpath.{
   XPathEval,
   XPathValue
 }
-import parsers.json.{formatJson, parseJson}
+import parsers.json.parseJson
 import parsers.xml.parseXml
 import parsers.xpath.parseXPath
 

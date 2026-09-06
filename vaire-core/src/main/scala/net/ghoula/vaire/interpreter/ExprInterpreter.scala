@@ -35,6 +35,17 @@ import net.ghoula.vaire.types.{Date, DayTimeInterval, RowIndex, Time, YearMonthI
   */
 object ExprInterpreter {
 
+  /** orNull without the binary dependency: Scala 3.9 made `Option.orNull` a real binary method
+    * whose erased signature the 2.13 `scala-library` (loaded first under the Spark arrangement)
+    * does not have. A match compiles to `Option`'s stable `isEmpty`/`get` API, identical across
+    * 2.13 and 3.x.
+    */
+  private def orNullOf[A](o: Option[A]): A | Null =
+    o match {
+      case Some(a) => a
+      case None => null // scalafix:ok DisableSyntax.null
+    }
+
   /** Evaluate under the `Collect` error policy: per-row data failures null-mark their row and are
     * recorded (bounded by the policy's `maxErrors`, with a by-kind summary) instead of aborting the
     * column. Structural errors fail under every policy. The default policy collects up to 100
@@ -1542,8 +1553,8 @@ object ExprInterpreter {
                         val v2: Option[Any] = rMap.get(k)
                         val scope2 = lambdaScope
                           .updated(mzw.keyBinder, elementColumn(Vector(k)))
-                          .updated(mzw.leftBinder, optionElementColumn(Vector(v1.orNull)))
-                          .updated(mzw.rightBinder, optionElementColumn(Vector(v2.orNull)))
+                          .updated(mzw.leftBinder, optionElementColumn(Vector(orNullOf(v1))))
+                          .updated(mzw.rightBinder, optionElementColumn(Vector(orNullOf(v2))))
                         evalColumn(mzw.body, rowColumns, ColumnType.AnyType)(using scope2, errors)
                           .map(_.getValue(0))
                           .toOption
@@ -3335,14 +3346,14 @@ object ExprInterpreter {
         case "REF" | "FRAGMENT" => uri.getFragment
         case "AUTHORITY" => uri.getAuthority
         case "FILE" =>
-          Option(uri.getPath)
-            .map(p => p + Option(uri.getQuery).map("?" + _).getOrElse(""))
-            .orNull
+          orNullOf(
+            Option(uri.getPath).map(p => p + Option(uri.getQuery).map("?" + _).getOrElse(""))
+          )
         case "USERINFO" => uri.getUserInfo
-        case _ => Option.empty[String].orNull
+        case _ => null // scalafix:ok DisableSyntax.null
       }
     } catch {
-      case _: IllegalArgumentException => Option.empty[String].orNull
+      case _: IllegalArgumentException => null // scalafix:ok DisableSyntax.null
     }
   }
 

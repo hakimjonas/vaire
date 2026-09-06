@@ -203,6 +203,17 @@ object DatasetInterpreter extends Interpreter {
         )
     }
 
+  /** orNull without the binary dependency: Scala 3.9 made `Option.orNull` a real binary method
+    * whose erased signature the 2.13 `scala-library` (loaded first under the Spark arrangement)
+    * does not have. A match compiles to `Option`'s stable `isEmpty`/`get` API, identical across
+    * 2.13 and 3.x.
+    */
+  private def orNullOf[A](o: Option[A]): A | Null =
+    o match {
+      case Some(a) => a
+      case None => null // scalafix:ok DisableSyntax.null
+    }
+
   private def executeJoin[A, B, R](
     leftDs: Dataset[A],
     rightDs: Dataset[B]
@@ -826,7 +837,7 @@ object DatasetInterpreter extends Interpreter {
                     applyShiftWindow(
                       lag.expr,
                       lag.offset,
-                      lag.default.orNull,
+                      orNullOf(lag.default),
                       -1,
                       partSize,
                       sortedIndices,
@@ -838,7 +849,7 @@ object DatasetInterpreter extends Interpreter {
                     applyShiftWindow(
                       lead.expr,
                       lead.offset,
-                      lead.default.orNull,
+                      orNullOf(lead.default),
                       1,
                       partSize,
                       sortedIndices,

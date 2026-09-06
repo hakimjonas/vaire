@@ -43,7 +43,7 @@ object ExprInterpreter {
   private def orNullOf[A](o: Option[A]): A | Null =
     o match {
       case Some(a) => a
-      case None    => null
+      case None => null // scalafix:ok DisableSyntax.null
     }
 
   /** Evaluate under the `Collect` error policy: per-row data failures null-mark their row and are
@@ -3350,10 +3350,10 @@ object ExprInterpreter {
             Option(uri.getPath).map(p => p + Option(uri.getQuery).map("?" + _).getOrElse(""))
           )
         case "USERINFO" => uri.getUserInfo
-        case _ => null
+        case _ => null // scalafix:ok DisableSyntax.null
       }
     } catch {
-      case _: IllegalArgumentException => null
+      case _: IllegalArgumentException => null // scalafix:ok DisableSyntax.null
     }
   }
 

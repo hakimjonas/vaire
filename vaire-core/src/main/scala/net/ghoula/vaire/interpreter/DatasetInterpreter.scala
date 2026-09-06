@@ -211,7 +211,7 @@ object DatasetInterpreter extends Interpreter {
   private def orNullOf[A](o: Option[A]): A | Null =
     o match {
       case Some(a) => a
-      case None    => null
+      case None => null // scalafix:ok DisableSyntax.null
     }
 
   private def executeJoin[A, B, R](
@@ -834,11 +834,11 @@ object DatasetInterpreter extends Interpreter {
                     None
 
                   case lag: Expr.Lag[_, _] =>
-                      applyShiftWindow(
-                        lag.expr,
-                        lag.offset,
-                        orNullOf(lag.default),
-                        -1,
+                    applyShiftWindow(
+                      lag.expr,
+                      lag.offset,
+                      orNullOf(lag.default),
+                      -1,
                       partSize,
                       sortedIndices,
                       resultArray,
@@ -846,11 +846,11 @@ object DatasetInterpreter extends Interpreter {
                     )
 
                   case lead: Expr.Lead[_, _] =>
-                      applyShiftWindow(
-                        lead.expr,
-                        lead.offset,
-                        orNullOf(lead.default),
-                        1,
+                    applyShiftWindow(
+                      lead.expr,
+                      lead.offset,
+                      orNullOf(lead.default),
+                      1,
                       partSize,
                       sortedIndices,
                       resultArray,

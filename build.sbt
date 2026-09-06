@@ -1,0 +1,197 @@
+ThisBuild / organization := "net.ghoula"
+ThisBuild / scalaVersion := "3.9.0"
+ThisBuild / versionScheme := Some("early-semver")
+ThisBuild / semanticdbEnabled := true
+ThisBuild / semanticdbVersion := scalafixSemanticdb.revision
+
+ThisBuild / licenses := List("LGPL-3.0-or-later" -> uri("https://www.gnu.org/licenses/lgpl-3.0.txt"))
+ThisBuild / homepage := Some(uri("https://github.com/hakimjonas/vaire"))
+ThisBuild / description := "A type-safe columnar dataset library for Scala 3 with Spark integration"
+ThisBuild / developers := List(
+  Developer(
+    id = "hakimjonas",
+    name = "Hakim Jonas Ghoula",
+    email = "hakim@ghoula.net",
+    url = uri("https://github.com/hakimjonas")
+  )
+)
+ThisBuild / scmInfo := Some(
+  ScmInfo(
+    uri("https://github.com/hakimjonas/vaire"),
+    "scm:git@github.com:hakimjonas/vaire.git"
+  )
+)
+
+// ===== Publishing Settings =====
+ThisBuild / publishTo := {
+  val centralSnapshots = "https://central.sonatype.com/repository/maven-snapshots/"
+  if (isSnapshot.value) Some("central-snapshots" at centralSnapshots)
+  else localStaging.value
+}
+ThisBuild / publishMavenStyle := true
+ThisBuild / pomIncludeRepository := { _ => false }
+ThisBuild / Test / publishArtifact := false
+
+// Java 25
+ThisBuild / javacOptions ++= Seq("--release", "25")
+
+// Compiler flags matching Eru
+lazy val sharedScalacOptions = Seq(
+  "-feature",
+  "-Werror",
+  "-Wunused:all",
+  "-deprecation",
+  "-Wrecurse-with-default",
+  "-no-indent",
+  "-language:strictEquality",
+  "-Yexplicit-nulls"
+)
+
+// Validate quotes/splices at expansion time: the test suites exercise every
+// ExprCompiler expansion, so ill-typed trees surface in CI, not at user sites.
+ThisBuild / Test / scalacOptions += "-Xcheck-macros"
+
+// Dependencies
+val saratiVersion = "1.0.0-alpha.5"
+val rumilVersion = "1.0.0-alpha.13"
+val sparkVersion = "4.2.0"
+
+lazy val root = project
+  .in(file("."))
+  .aggregate(core, spark, docTool)
+  .settings(
+    name := "vaire",
+    publish / skip := true
+  )
+
+lazy val core = project
+  .in(file("vaire-core"))
+  .settings(
+    name := "vaire-core",
+    scalacOptions ++= sharedScalacOptions,
+    libraryDependencies ++= Seq(
+      "net.ghoula" %% "rumil-parsers" % rumilVersion,
+      "net.ghoula" %% "sarati" % saratiVersion,
+      "org.scalatest" %% "scalatest" % "3.2.20" % Test,
+      "org.scalacheck" %% "scalacheck" % "1.20.0" % Test
+    )
+  )
+
+lazy val spark = project
+  .in(file("vaire-spark"))
+  .dependsOn(core)
+  .settings(
+    name := "vaire-spark",
+    scalacOptions ++= sharedScalacOptions.filterNot(_ == "-language:strictEquality"),
+    Test / scalacOptions ~= (_.map {
+      case "-Wunused:all" => "-Wunused:imports"
+      case other => other
+    }),
+    javacOptions := Seq("--release", "21"),
+    libraryDependencies ++= Seq(
+      ("org.apache.spark" %% "spark-sql" % sparkVersion % Provided)
+        .cross(CrossVersion.for3Use2_13)
+        .exclude("org.scala-lang.modules", "scala-xml_2.13"),
+      ("org.apache.spark" %% "spark-sql" % sparkVersion % Test)
+        .cross(CrossVersion.for3Use2_13)
+        .exclude("org.scala-lang.modules", "scala-xml_2.13"),
+      "org.scala-lang.modules" %% "scala-xml" % "2.4.0" % Test,
+      "org.scalatest" %% "scalatest" % "3.2.20" % Test
+    ),
+    Test / fork := true,
+    Test / parallelExecution := false,
+    Test / testOptions += Tests.Argument("-l", "net.ghoula.vaire.Benchmark"),
+    Test / testOptions ++= {
+      if (sys.env.contains("FAST_TESTS"))
+        Seq(Tests.Argument("-l", "net.ghoula.vaire.Slow"))
+      else Seq.empty
+    },
+    // Scala 3.8's unified scala-library uses TASTY metadata instead of ScalaSig annotations.
+    // scala-reflect 2.13 (used by Spark internals) reads ScalaSig to resolve types like
+    // Array.apply. Without ScalaSig, it fails: "class Array does not have a member apply".
+    // Fix: prepend scala-library 2.13 to the forked test classpath so scala-reflect finds
+    // ScalaSig metadata. The 2.13 classes are binary-compatible with 3.8; this only affects
+    // the annotation format that scala-reflect reads.
+    Test / fullClasspath := {
+      val cp = (Test / fullClasspath).value
+      val converter = fileConverter.value
+      val scalaReflectJar = cp
+        .find(_.data.name.startsWith("scala-reflect-"))
+        .getOrElse(
+          sys.error("scala-reflect jar not found on test classpath")
+        )
+      // Derive the 2.13.x version from the scala-reflect jar already on the classpath.
+      // Coursier cache: .../org/scala-lang/scala-reflect/<ver>/ → .../org/scala-lang/scala-library/<ver>/
+      val reflectVersion = scalaReflectJar.data.name.stripPrefix("scala-reflect-").stripSuffix(".jar")
+      val scalaLangDir = converter.toPath(scalaReflectJar.data).getParent.getParent.getParent
+      val scalaLib213 = Attributed.blank[xsbti.HashedVirtualFileRef](
+        converter.toVirtualFile(
+          scalaLangDir.resolve("scala-library").resolve(reflectVersion).resolve(s"scala-library-$reflectVersion.jar")
+        )
+      )
+      scalaLib213 +: cp
+    },
+    assembly / assemblyJarName := "vaire-spark-bench.jar",
+    assembly / mainClass := Some("net.ghoula.vaire.spark.BenchRunner"),
+    assembly / fullClasspath := (Test / fullClasspath).value,
+    assembly / assemblyMergeStrategy := {
+      case PathList("META-INF", "MANIFEST.MF") => MergeStrategy.discard
+      case PathList("META-INF", x, _*) if x.endsWith(".SF") || x.endsWith(".DSA") || x.endsWith(".RSA") =>
+        MergeStrategy.discard
+      case PathList("META-INF", "services", _*) => MergeStrategy.concat
+      case PathList("META-INF", _*) => MergeStrategy.first
+      case "module-info.class" => MergeStrategy.discard
+      case x if x.endsWith(".class") => MergeStrategy.first
+      case _ => MergeStrategy.first
+    },
+    Test / javaOptions ++= Seq(
+      "-Xmx4G",
+      "-Xss4M",
+      "-XX:+UseZGC",
+      "--add-opens=java.base/java.lang=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang.invoke=ALL-UNNAMED",
+      "--add-opens=java.base/java.lang.reflect=ALL-UNNAMED",
+      "--add-opens=java.base/java.io=ALL-UNNAMED",
+      "--add-opens=java.base/java.net=ALL-UNNAMED",
+      "--add-opens=java.base/java.nio=ALL-UNNAMED",
+      "--add-opens=java.base/java.util=ALL-UNNAMED",
+      "--add-opens=java.base/java.util.concurrent=ALL-UNNAMED",
+      "--add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED",
+      "--add-opens=java.base/jdk.internal.ref=ALL-UNNAMED",
+      "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED",
+      "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
+    ),
+    Test / javaOptions ++= {
+      sys.props.get("spark.test.master").map(v => s"-Dspark.test.master=$v").toSeq
+    }
+  )
+
+lazy val docTool = project
+  .in(file("docTool"))
+  .settings(
+    name := "vaire-doc-tool",
+    scalacOptions ++= sharedScalacOptions,
+    publish / skip := true,
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "scalameta" % "4.17.3",
+      "org.scalatest" %% "scalatest" % "3.2.20" % Test
+    ),
+    Compile / run / mainClass := Some("net.ghoula.vaire.doctool.DocCoverageMain")
+  )
+
+// Command aliases
+addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; Test/compile")
+addCommandAlias(
+  "check",
+  "docCoverage; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
+)
+addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull; docTool/Test/testFull")
+addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.vaire.Slow")
+addCommandAlias(
+  "docCoverage",
+  "docTool/run check doc-coverage.json vaire-core/src/main/scala vaire-spark/src/main/scala"
+)
+addCommandAlias(
+  "docCoverageSnapshot",
+  "docTool/run snapshot doc-coverage.json vaire-core/src/main/scala vaire-spark/src/main/scala"
+)

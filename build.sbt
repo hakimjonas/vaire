@@ -95,7 +95,7 @@ lazy val spark = project
       ("org.apache.spark" %% "spark-sql" % sparkVersion % Test)
         .cross(CrossVersion.for3Use2_13)
         .exclude("org.scala-lang.modules", "scala-xml_2.13"),
-      "org.scala-lang.modules" %% "scala-xml" % "2.4.0" % Test,
+      "org.scala-lang.modules" %% "scala-xml" % "2.5.0" % Test,
       "org.scalatest" %% "scalatest" % "3.2.20" % Test
     ),
     Test / fork := true,

@@ -53,15 +53,38 @@ private[vaire] object KeyIndex {
 
   /** Unboxed-key hash index for the primitive storage types.
     *
-    * One unboxed `LongMap` maps each key to the head row of a flat shared `next` array, so the
-    * build allocates no per-key object. The build iterates rows from the end so each key's chain
-    * lays out ascending, the same order the boxed index produced.
+    * A hand-rolled open-addressing table maps each key, unboxed, to the head row of a flat shared
+    * `next` array, so the build allocates no per-key object. The table stores the head row in
+    * [[slotHeads]] with -1 as the empty marker, so empty slots read as no head; the build iterates
+    * rows from the end so each key's chain lays out ascending, the same order the boxed index
+    * produced.
     */
   private final class PrimitiveIndex(keyCol: Column[?], rowCount: Int) extends KeyIndex {
     private val indexType: ColumnType = keyCol.columnType
     private val nullBucket: ArrayBuffer[Int] = ArrayBuffer.empty[Int]
-    private val heads: mutable.LongMap[Int] = mutable.LongMap.empty[Int]
     private val next: Array[Int] = Array.fill(rowCount)(-1)
+
+    private val cap: Int = {
+      val want = math.max(16L, math.min(rowCount.toLong * 2, (1 << 30).toLong)).toInt
+      if ((want & (want - 1)) == 0) want else Integer.highestOneBit(want) << 1
+    }
+    private val mask: Int = cap - 1
+    private val shift: Int = 64 - Integer.numberOfTrailingZeros(cap)
+    private val slotKeys: Array[Long] = new Array[Long](cap)
+    private val slotHeads: Array[Int] = Array.fill(cap)(-1)
+
+    private def hash(k: Long): Int = {
+      val h = (k ^ (k >>> 32)).toInt * -0x7ee3623b
+      h ^ (h >>> 16)
+    }
+
+    private def slot(k: Long): Int = (hash(k) * 0x9e3779b1L >>> shift).toInt
+
+    private def findSlot(k: Long): Int = {
+      def go(s: Int): Int =
+        if (slotHeads(s) >= 0 && slotKeys(s) != k) go((s + 1) & mask) else s
+      go(slot(k))
+    }
 
     (0 until rowCount).foreach { i =>
       if (keyCol.isNull(RowIndex(i))) nullBucket += i
@@ -69,8 +92,10 @@ private[vaire] object KeyIndex {
     (0 until rowCount).reverse.foreach { i =>
       if (!keyCol.isNull(RowIndex(i))) {
         val k = rawKey(keyCol, i)
-        next(i) = heads.getOrElse(k, -1)
-        heads.update(k, i)
+        val s = findSlot(k)
+        next(i) = if (slotHeads(s) >= 0) slotHeads(s) else -1
+        slotKeys(s) = k
+        slotHeads(s) = i
       }
     }
 
@@ -81,7 +106,10 @@ private[vaire] object KeyIndex {
         matched
       } else if (probeKeyCol.columnType != indexType) false
       else {
-        val head = heads.getOrElse(rawKey(probeKeyCol, row), -1)
+        val head = {
+          val s = findSlot(rawKey(probeKeyCol, row))
+          if (slotHeads(s) >= 0) slotHeads(s) else -1
+        }
         if (head < 0) false
         else if (next(head) < 0) {
           report(head)
@@ -133,6 +161,6 @@ private[vaire] object KeyIndex {
       case Column.TimestampNTZColumn(data, _) => data(row)
       case Column.FloatColumn(data, _) => java.lang.Float.floatToIntBits(data(row)).toLong
       case Column.DoubleColumn(data, _) => java.lang.Double.doubleToLongBits(data(row))
-      case other => throw new MatchError(other) // unreachable under the FastTypes gate. scalafix:ok DisableSyntax.throw
+      case other => throw new MatchError(other) // scalafix:ok DisableSyntax.throw
     }
 }

@@ -110,7 +110,7 @@ The evaluation already produces typed key `Column`s via `evalKeys` (`:569-580`),
 
 `buildKeyIndex` is replaced by `internal/KeyIndex.scala`: a `KeyIndex` built once per keyed join, with `probe(probeKeyCol, row)(report)` reporting build-side rows instead of returning a materialized sequence. Two implementations:
 
-- **`PrimitiveIndex`** — for `Int`, `Long`, `Short`, `Byte`, `Float`, `Double`, `Boolean`, `Date`, `Timestamp`, `TimestampNTZ`. Keys are read raw (no `getValue`, no box) and Long-normalized (`floatToIntBits`/`doubleToLongBits` for float/double). A single unboxed `LongMap` maps each key to the head of a flat shared `next` array; the build iterates rows **descending** so each key's chain lays out **ascending**, which reproduces the boxed index's within-bucket order. Null rows go to a dedicated ascending bucket, so null keys still match null keys exactly as the old `HashMap` treated its single null key. The fast path runs only when indexed and probed key columns share a `ColumnType`, so Long-normalized equality reproduces boxed `Any` equality (including `Integer` ≠ `Long` keys); null probes run first so null keys match even across a type mismatch. No per-key object is allocated — the bucket is the flat `next` array.
+- **`PrimitiveIndex`** — for `Int`, `Long`, `Short`, `Byte`, `Float`, `Double`, `Boolean`, `Date`, `Timestamp`, `TimestampNTZ`. Keys are read raw (no `getValue`, no box) and Long-normalized (`floatToIntBits`/`doubleToLongBits` for float/double). An unboxed open-addressing table — which replaced the initial `LongMap` (see the follow-up below) — maps each key to the head of a flat shared `next` array; the build iterates rows **descending** so each key's chain lays out **ascending**, which reproduces the boxed index's within-bucket order. Null rows go to a dedicated ascending bucket, so null keys still match null keys exactly as the old `HashMap` treated its single null key. The fast path runs only when indexed and probed key columns share a `ColumnType`, so Long-normalized equality reproduces boxed `Any` equality (including `Integer` ≠ `Long` keys); null probes run first so null keys match even across a type mismatch. No per-key object is allocated — the bucket is the flat `next` array.
 - **`ObjectIndex`** — `String`, `Decimal`, structs, arrays/maps, and the `Any` fallback keep the exact prior `HashMap[Any, Vector[Int]]` behavior.
 
 Callers (`innerJoinOnExpr`, `probeJoinOnKeys`, `fullJoinOnExpr`, `filterJoinOnExpr`) are rewired to the probing index. A new spec, `JoinOnNullKeysSpec`, locks null-key semantics for the primitive and object paths plus semi/anti. (Full join with null-valued rows is excluded: `fullJoinOnExpr` decodes via `toVectorUnsafe`, and the int schema decode `NPE`s on null rows — a pre-existing limitation unrelated to this change.)
@@ -133,7 +133,7 @@ Performance (JDK 25, 4G, ZGC, 1 warmup + 3 measured, median ms; Phase 0 column =
 
 Fit/probe shapes: InnerJoinOn 1k×500k 7.4 → 11.2; LeftJoinOn 1k×500k 53.2 → ~51; FullJoinOn 1k×500k 216.6 → ~215-229; InnerJoinOn 200k×200k 18.9 → ~19-22. LeftJoinOn 200k: hot 80.3 → ~93, few 65.9 → ~77-82, uniform 69.3 → ~72. FullJoinOn 200k: hot 197.2 → ~191-228, few 152.9 → ~148-155, uniform 160.0 → ~154-164.
 
-**Honest reading.** The hot/few regimes (the contended bucket, which did the boxed `Any` work per row twice) improved steadily, ~1.4-1.7x across 3 confirming runs; the build on the contended key in isolation is at the measured floor (~2.4ms at 400k rows, confirmed by a same-session A/B that also showed the rejected tails layout at ~2x and any per-key `Vector`/`ArrayBuffer` bucket at ~20-88ms). Uniform and fit shapes went sideways: large utterly-distinct keys regress ~15% and the probe-dominant 1k×500k shape regresses ~4ms. Both residuals are the cost of the choice itself, not a bug:
+**Honest reading.** The hot/few regimes (the contended bucket, which did the boxed `Any` work per row twice) improved steadily, ~1.4-1.7x across 3 confirming runs; the build on the contended key in isolation is at the measured floor (~2.4ms at 400k rows, confirmed by a same-session A/B that also showed the rejected tails layout at ~2x and any per-key `Vector`/`ArrayBuffer` bucket at ~20-88ms). Uniform and fit shapes went sideways: large utterly-distinct keys regress ~15% and the probe-dominant 1k×500k shape regresses ~4ms. Both residuals were the cost of the `LongMap` hash, not of unboxing: see the follow-up below, which keeps the unboxed path and removes the uniform cost with an open-addressing table.
 - Fully distinct keys put the whole cost on one unboxed `LongMap` op per row; `LongMap` hashes with a Murmur-mix and is measurably ~2x the per-op cost of the old `HashMap`'s escape-analysis-eliminated boxed-`Integer` ops at that size. An unboxed map cannot win that sweep except by what it saves elsewhere.
 - The 1k×500k shape is probe-only against a 1000-row index; the +4ms is the heavier per-probe hash on half a million lookups. Fingers showed the boxed-key `HashMap` (boxes elided by the JIT) can beat `LongMap` there, at the price of reintroducing internal boxing on the key read — defeating the point of 1b. The discrepancy is the boxed-`Int` map's simpler hash, which holds regardless of which map wins on build-heavy shapes.
 
@@ -141,7 +141,42 @@ Two disciplines make these numbers trustworthy:
 - The hot/few win and the uniform residual were each reproduced across multiple runs. Do not chase 1-2ms deltas on this machine: same-code re-runs move the sweep several ms session to session, so only stable signals (the ~1.4-1.7x hot win, the uniform/fit sideways movement) should be read as real.
 - The chosen structure was decided by same-session micro-A/B (heads vs tails vs CSR group-layout vs `ArrayBuffer` buckets), not by the join bench. It is the fastest measured layout that preserves within-key ascending order with zero per-key allocation.
 
-**Residual opportunities, in order.** (1) `fullJoinOnExpr`'s `matchedRight` `HashSet` + `unmatchedRight` pass is still the largest constant factor on full joins (Phase 2's 2a fix for the predicate `JoinOps.fullJoin` is the predicate-side analogue). (2) A sort-based join would dodge the hash cost on the uniform/fit shapes, but that is new machinery outside Phase 1's scope. (3) The probe side could keep a `HashMap[Int, Int]` fast path per raw-key space, but only for the `Int`/`Short`/`Byte`/`Date` types whose Long normalization fits `Int`; Long/Timestamp keys cannot, so this wins the 1k×500k shape for a subset of types at the cost of a second code path.
+**Residual opportunities, in order.** (1) `fullJoinOnExpr`'s `matchedRight` `HashSet` + `unmatchedRight` pass is still the largest constant factor on full joins (Phase 2's 2a fix for the predicate `JoinOps.fullJoin` is the predicate-side analogue). (2) A sort-based join would dodge the hash cost even further on the uniform/fit shapes, but that is new machinery outside Phase 1's scope. (3) superseded — the 1b follow-up's open-addressing table wins the uniform/fit sweep for all fast types with one code path, no boxing, and no `LongMap`; a per-raw-key-space `HashMap[Int, Int]` would now be a second code path to next to nothing.
+
+#### Phase 1b follow-up — regression analysis and open-addressing (September 2026)
+
+The two residuals named above (uniform ~15% @400k; 1k×500k fit ~+4ms) were reproduced same-session against `main`, isolated, and re-driven. Both live in the index, not the interpreter; the follow-up replaced the `LongMap` heads map with a hand-rolled unboxed open-addressing table.
+
+- **Uniform is a hash cost, not a boxing cost.** The micro-A/B finger (one `AnyFlatSpec`, build+probe over exact bench shapes, median of 12, n=200k unless noted) split the structural cost from the production path:
+
+  | shape | LongMap | HashMap[Int] | HashMap[Long] | open-addressing |
+  |---|---|---|---|---|
+  | hot/miss | 1.68–6.0 | 3.39–6.9 | 2.61–3.1 | 2.44–4.8 |
+  | few/miss | 4.17–4.55 | 2.47–2.9 | 2.54–2.6 | 2.56–3.3 |
+  | uniform/miss | 9.49–10.4 | 4.41–5.0 | 5.45–5.8 | 4.69–6.5 |
+  | small-1k/hits | 2.83–4.6 | 2.23–2.5 | 2.31–2.4 | 2.89–3.1 |
+
+  Within any one run the ordering holds; the ranges are same-code session drift. `LongMap` wins hot (few keys) because it is unboxed, but loses uniform ~2x because its Murmur-mix on sequential keys is a slower per-op cost than a boxed-`Integer` `HashMap` whose boxes the JIT eliminates. The boxed maps win only the strictly-distinct sweep, at the price of reintroducing the boxing 1b removes.
+- **Fix: unboxed open-addressing `long`-key table in `PrimitiveIndex`.** Power-of-two slots; `slotKeys: Array[Long]` plus `slotHeads: Array[Int]` with -1 as the free marker (row indices are ≥ 0, so the sentinel is unambiguous, and -1 threads through `next` unchanged); linear probing; slot = top bits of `hash(k) * 0x9e3779b1` where `hash` is the existing 32-bit mix `k ^ k>>>32`, `* -0x7ee3623b`, `^ >>>16`. One code path for all fast types, zero per-key allocation, presized at build (≤ 0.5 load; a static index never grows). It beats the `LongMap` on every finger shape and sits inside the boxed maps' band on uniform/few.
+- **Same-session bench after the fix** (feature branch vs `main` worktree; JDK 25, 4G, ZGC, 1 warmup + 3 measured, median ms):
+
+  | n | regime | main | 1b+OA |
+  |---|---|---|---|
+  | 100k | hot | 6.1 | 5.1 |
+  | 200k | hot | 12.0 | 9.5 |
+  | 400k | hot | 16.3 | 19.9 |
+  | 100k | few | 4.2 | 4.8 |
+  | 200k | few | 11.6 | 10.7 |
+  | 400k | few | 23.6 | 22.8 |
+  | 100k | uniform | 8.4 | 5.7 |
+  | 200k | uniform | 14.5 | 14.4 |
+  | 400k | uniform | 25.5 | 26.4 |
+
+  Uniform now sits at-or-under the boxed baseline (the delivered run's 30.5@400k no longer reproduces); the residual deltas (hot@400k +3.6, few@100k +0.6, uniform@400k +0.9) are inside this machine's same-code drift — `main` itself measured hot@400k 16.3 then 19.7 across sessions.
+- **Fit-inner 1k×500k is not an index regression.** The isolated production-path finger on the exact shape (1k keys, 500k probes, 25% hits) shows the new path beating the old boxed path same-session (PROD 4.02 vs PROD-BOX 4.84 ms); the delivered run's +4ms was a slow-session artifact. Consecutive bench runs still leave feature ~1ms above main (10.1–10.3 vs 8.7–9.1), but every isolated measurement points outside `KeyIndex`. Interpreter per-probe closure hoisting was tried and measured at zero effect (the JIT folds the non-escaping per-row lambdas) and was dropped.
+- **LJO/FJO hot deltas are noise.** `main` LJO@200k-hot measures 82.6 and 100.3 in different sessions; feature 121.1; the delivered run's 127.6 spike does not reproduce. These shapes are dominated by output/anti-join handling, not the index.
+
+The follow-up is scoped to `KeyIndex.PrimitiveIndex`; specs are unchanged and the core suite (445 tests) is green. No new API, no caller changes, no test changes.
 
 ---
 

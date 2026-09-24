@@ -50,8 +50,14 @@ class JoinOnNullKeysSpec extends AnyFlatSpec with Matchers {
     case class Row(value: String)
     given Schema[Row] = Schema.derived
 
-    val leftCol = Column.string(Array[String | Null]("a", null, "b"), scala.collection.immutable.BitSet(1))
-    val rightCol = Column.string(Array[String | Null]("b", null), scala.collection.immutable.BitSet(1))
+    val leftCol = Column.string(
+      Array[String | Null]("a", null, "b"), // scalafix:ok DisableSyntax.null
+      scala.collection.immutable.BitSet(1)
+    )
+    val rightCol = Column.string(
+      Array[String | Null]("b", null), // scalafix:ok DisableSyntax.null
+      scala.collection.immutable.BitSet(1)
+    )
     val left = Dataset.fromColumns(Vector(leftCol), summon[Schema[Row]]).toOption.get
     val right = Dataset.fromColumns(Vector(rightCol), summon[Schema[Row]]).toOption.get
 

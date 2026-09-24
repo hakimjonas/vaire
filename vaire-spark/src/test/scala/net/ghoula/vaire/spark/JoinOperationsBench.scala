@@ -12,7 +12,7 @@ import net.ghoula.vaire.prelude.*
   *
   * The keyed-family sweeps put the skew on the side each join *indexes*, which differs per
   * operator: `InnerJoinOn` indexes the left, `LeftJoinOn`/`FullJoinOn` index the right
-  * (`DatasetInterpreter.scala` `buildKeyIndex` / `innerJoinOnExpr` / `probeJoinOnKeys` /
+  * (`DatasetInterpreter.scala` `KeyIndex.build` / `innerJoinOnExpr` / `probeJoinOnKeys` /
   * `fullJoinOnExpr`). The probe side is kept disjoint from the index keys so the output stays small
   * and the measured time isolates the index build.
   *

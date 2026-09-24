@@ -19,6 +19,13 @@ import net.ghoula.vaire.types.RowIndex
   * so Long-normalized equality reproduces the boxed-`Any` equality exactly, including null keys
   * matching null keys. Matched build-side rows are reported ascending via the probe callback, the
   * same order the boxed index produced.
+  *
+  * The index is a warm-up-then-quench cache: it mutates internally while it is built and then
+  * serves reads only. It is `private[vaire]`, created per join inside the interpreter, and never
+  * exposed to caller code, so the mutation is confined to construction and the functional surface
+  * ([[KeyIndex.probe]] and `[[KeyIndex.build]]`) stays pure. The mutable internals are the point of
+  * the structure — flat primitive arrays keep key reads unboxed and allocation-free, which is why
+  * no immutable hash structure is used here.
   */
 private[vaire] sealed trait KeyIndex {
 
@@ -55,9 +62,13 @@ private[vaire] object KeyIndex {
     *
     * A hand-rolled open-addressing table maps each key, unboxed, to the head row of a flat shared
     * `next` array, so the build allocates no per-key object. The table stores the head row in
-    * [[slotHeads]] with -1 as the empty marker, so empty slots read as no head; the build iterates
+    * `slotHeads` with -1 as the empty marker, so empty slots read as no head; the build iterates
     * rows from the end so each key's chain lays out ascending, the same order the boxed index
     * produced.
+    *
+    * The capacity is sized to 2× the row count (clamped at 2^30 slots), keeping the load factor at
+    * or under 0.5 for any realistic input, so probes stay O(1) and misses always land on a free
+    * slot.
     */
   private final class PrimitiveIndex(keyCol: Column[?], rowCount: Int) extends KeyIndex {
     private val indexType: ColumnType = keyCol.columnType

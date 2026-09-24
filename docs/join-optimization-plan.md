@@ -176,7 +176,7 @@ The two residuals named above (uniform ~15% @400k; 1k×500k fit ~+4ms) were repr
 - **Fit-inner 1k×500k is not an index regression.** The isolated production-path finger on the exact shape (1k keys, 500k probes, 25% hits) shows the new path beating the old boxed path same-session (PROD 4.02 vs PROD-BOX 4.84 ms); the delivered run's +4ms was a slow-session artifact. Consecutive bench runs still leave feature ~1ms above main (10.1–10.3 vs 8.7–9.1), but every isolated measurement points outside `KeyIndex`. Interpreter per-probe closure hoisting was tried and measured at zero effect (the JIT folds the non-escaping per-row lambdas) and was dropped.
 - **LJO/FJO hot deltas are noise.** `main` LJO@200k-hot measures 82.6 and 100.3 in different sessions; feature 121.1; the delivered run's 127.6 spike does not reproduce. These shapes are dominated by output/anti-join handling, not the index.
 
-The follow-up is scoped to `KeyIndex.PrimitiveIndex`; specs are unchanged and the core suite (445 tests) is green. No new API, no caller changes, no test changes.
+The follow-up is scoped to `KeyIndex.PrimitiveIndex`; join semantics are unchanged and the core suite (`testFull`, 589 tests) is green. No new API and no caller changes; the only test-file touch is scalafix suppression formatting in `JoinOnNullKeysSpec` (null-literal rewrite), no behavioral changes.
 
 ---
 

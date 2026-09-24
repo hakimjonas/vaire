@@ -1,0 +1,218 @@
+# Join optimization plan
+
+Take-home work plan for improving the in-memory join operators in `vaire-core`. Written after an algorithmic review of the current join implementations (September 2026). Phases are self-contained; Phase 0 must come first, but Phases 1–3 can be done one at a time or in any order after 0.
+
+All line references are to `vaire-core/src/main/scala/net/ghoula/vaire/` as of `main`; verify line numbers when implementing.
+
+## Why this matters
+
+An earlier claim about the in-memory interpreter — "scales linearly with input" — is **false for two classes of join today**:
+
+1. The predicate-join family (`InnerJoin`, `LeftJoin`, `RightJoin`, `FullJoin`, `LeftAntiJoin`) is O(n·m) by construction, because the condition is an arbitrary `(A, B) => Boolean`. This cannot be fixed asymptotically; Phase 2 is constant-factor work only.
+2. The keyed-join family (`*JoinOn`) is *supposed* to be linear (hash index), but the index bucket is built with `Vector :+`, whose amortized cost is O(log n), making keyed joins O(n·log n) under skewed keys rather than the ideal O(n). This was initially misread as O(n²): it is a super-linear factor confined to a small constant, not a quadratic cliff.
+
+The boxing issue compounds both: keys and rows travel as boxed `Any` through `getValue`, the exact per-row object traffic the columnar design exists to avoid.
+
+## Current state (evidence)
+
+- Join case dispatch in `executeScoped` (`interpreter/DatasetInterpreter.scala:90-117`): predicate joins `:90-99`, `LeftAntiJoin :102`, keyed joins `:105-117`.
+- `innerJoinDatasets` (`:384-400`): `toVectorUnsafe` both sides, nested `for` with `condition(l, r)` per pair. O(n·m), boxed rows.
+- `outerJoinDatasets` (`:427-445`): `flatMap` over primary, `filter` over secondary. O(n·m); backs `:447-466` (left/right joins).
+- `JoinOps.fullJoin` (`internal/JoinOps.scala:5-17`): materializes a `pairs` vector of all matches (up to n·m), then two `.map(...).toSet`, then `inner ++ unmatchedLeft ++ unmatchedRight`. Worst constant factor and worst memory profile in the file.
+- `leftAntiJoinDatasets` (`:477-490`): `exists` per left row. O(n·m) worst case.
+- `buildKeyIndex` (`:492-502`): `HashMap[Any, Vector[Int]]`; `keyCol.getValue(i)` boxes every key (`column/Column.scala:161` returns `Any | Null`); bucket append `existing :+ i` is amortized O(log n) per row, so keyed joins are O(n·log n) under skew — a small constant factor beyond linear, not a quadratic.
+- Probe side of keyed joins boxes again: `rightKeyCol.getValue(ri)` (`:530`), and `probeJoinOnKeys` (`:543-567`) boxes lookups the same way.
+- `evalKeys` (`:569-580`) evaluates both key columns once into `Column`s via `ExprInterpreter.evalColumn` — good; the columns already exist, so the index/probe only needs unboxed reads.
+
+### Tests and benchmarks today
+
+- Functional correctness: `test/scala/net/ghoula/vaire/DatasetJoinSpec.scala`, `SemiJoinSpec.scala`.
+- No join benchmark existed anywhere.
+
+---
+
+## Phase 0 — Benchmark harness (do this first)
+
+**Goal:** establish the current performance curve so every later phase has a before/after. Skew must be represented, or the contended (boxed, log-factor) path stays invisible.
+
+Create `vaire-core/src/test/scala/net/ghoula/vaire/interpreter/JoinOperationsBench.scala` (or alongside `ColumnOperationsBench` if that lives in spark; keep core benchmarks in core). Do not commit benchmark time assertions as pass/fail tests — benchmarks report; correctness stays in the existing specs.
+
+Sweep across:
+
+- **Keyed joins** (`InnerJoinOn`, `LeftJoinOn`, `FullJoinOn`): small side × large side; both sides large.
+- **Key skew:** one hot key (n rows, single key — the contended bucket), few distinct keys (k ≈ √n), uniform distinct keys (k ≈ n). This matrix is the whole point of the bench.
+- **Predicate joins** (`InnerJoin`, `LeftJoin` via `outerJoinDatasets`, `FullJoin`, `LeftAntiJoin`): small × small, small × medium.
+- Data: use the `generateData`-style generators already in `SparkComparativeBench`/`SparkPlanVsExecBench`; match their seeded-generation idiom for reproducibility.
+
+Report, per case: wall time, and rows-in/rows-out. Keep the numbers next to the code so a later phase's improvement is readable.
+
+**Phase 0 acceptance:** ~~a committed benchmark that, run now, demonstrates keyed joins degrading with the number of rows under a single hot key (visible super-linearity)~~ **DELIVERED, result below.** The bench (**`vaire-spark/src/test/scala/net/ghoula/vaire/spark/JoinOperationsBench.scala`**) is in place and reports predicate-join times at the chosen sizes. It does **not** show the predicted hot-key quadratic, because the build is O(n·log n), not O(n²).
+
+Phase 0 measured (JDK 25, 4G, ZGC, 1 warmup + 3 measured, median ms):
+
+| n | regime | InnerJoinOn build+probe ms | ratio |
+|---|---|---|---|
+| 100k | hot | 6.8 | — |
+| 200k | hot | 13.1 | 1.92x |
+| 400k | hot | 24.6 | 1.88x |
+| 100k | few | 6.6 | — |
+| 200k | few | 12.5 | 1.88x |
+| 400k | few | 24.0 | 1.92x |
+| 100k | uniform | 7.9 | — |
+| 200k | uniform | 11.2 | 1.41x |
+| 400k | uniform | 23.5 | 2.11x |
+
+Doubling n grows time ~1.9-2x, i.e. linear (the O(log n) factor is invisible at these sizes). A quadratic build would show ~4x per doubling — it does not.
+
+LeftJoinOn / FullJoinOn at n=200k per side (built on RIGHT; probe left disjoint):
+
+| op | regime | ms |
+|---|---|---|
+| LeftJoinOn | hot | 80.3 |
+| LeftJoinOn | few | 65.9 |
+| LeftJoinOn | uniform | 69.3 |
+| FullJoinOn | hot | 197.2 |
+| FullJoinOn | few | 152.9 |
+| FullJoinOn | uniform | 154.4 |
+
+FullJoinOn is ~2.5x LeftJoinOn — the `matchedRight` `HashSet` + `unmatchedRight` pass (`fullJoinOnExpr :636-655`) dominates, and its hot-key penalty (~28% vs uniform) is the constant-factor tail, not a quadratic.
+
+Fit/probe shapes (real output): InnerJoinOn 1k×500k → 125k rows, 7.4 ms; LeftJoinOn same → 53.2 ms; FullJoinOn same → 216.6 ms; InnerJoinOn 200k×200k → 25% overlap, 200k rows, 18.9 ms. Predicate joins: inner 2k×2k → 12.3 ms; inner 2k×20k → 94 ms; left 2k×20k → 80.5 ms; full 2k×20k → 102.3 ms; anti 2k×20k → 3.9 ms.
+
+**Corrected takeaway for the rest of the plan:** the keyed path is *linear but boxed*. The live costs to attack are (a) the per-row `Any` boxing on key reads at index build and probe, (b) the `fullJoinOnExpr` extra HashSet/pass, (c) predicate-family constant factors. The O(log n) bucket factor is a rounding error next to them. Phase 1's 1b (unboxed key read) and the `Any`-key map matter more than 1a's bucket structure; the README claim should stop saying the keyed path is "a quadratic hiding in the fast path" — the honest claim is "linear and hash-based, but boxing on key access."
+
+---
+
+## Phase 1 — Kill the boxing, tighten the buckets, in the keyed path
+
+**Goal:** keyed joins keep their linear-ish curve while shedding per-row boxing. This is the highest-value change: it restores the honest "linear columnar" claim without the boxed keys.
+
+### 1a. Buckets: `Vector :+` → growable int array / `ArrayBuffer`
+
+In `buildKeyIndex` (`:492-502`) the append `existing :+ i` grows the bucket by persisting a new `Vector` on every insertion (amortized O(log n) per append, O(n·log n) for a hot bucket of size n). Replace per-bucket `Vector[Int]` with a mutable growable int buffer (`scala.collection.mutable.ArrayBuffer[Int]`) so the build is amortized O(1) per row regardless of duplicates.
+
+- This converts the per-bucket append from amortized log to amortized constant and removes the repeated `Vector` spine copies under a hot key. Phase 0 measured the effect as sub-2x at 100k-400k rows, i.e. it is a constant-factor win, not a cliff — take it for the memory profile (no per-insert spine allocation) rather than for an asymptotic rescue.
+- Keep the `HashMap` keyed on `Any` for now; boxing removal is 1b.
+
+### 1b. Primitive-specialized hash maps per `ColumnType`
+
+The `Any` key from `getValue` is a box per row, on both the index and probe sides — the live cost Phase 0 identified. Add a small internal keying layer that dispatches on the column's `ColumnType` and, for primitive types, hashes unboxed:
+
+- `IntType`, `LongType`, `ShortType`, `ByteType`, `FloatType`, `DoubleType`, `BooleanType`, `DateType`, `TimestampType`, `TimestampNTZType` → specialized `PrimitiveHashIndex` (int/long/double keys) using the column's raw array directly, no `getValue`.
+- `StringType`, `DecimalType`, `StructType`, arrays/maps, and the `Any` fallback keep the `Any`/object path.
+- Empty/null handling must match existing semantics: SQL NULL keys must behave exactly as they do today (check the current specs before and after).
+
+The evaluation already produces typed key `Column`s via `evalKeys` (`:569-580`), so the raw primitive array is available without extra work. The unboxed read lives in `KeyIndex.rawKey`, which pattern-matches the `Column` variants directly; no `Column` API change was needed.
+
+**Phase 1 acceptance (outcome):** keyed joins improved ~1.4-1.7x under hot/few skew (specs unchanged and green, plus a new null-key spec). Uniform distinct keys moved sideways: no regression at ≤200k, ~15% at 400k. The plan's "measurable reduction on uniform keys" was not met at the largest uniform size; that residual is the unboxed `LongMap`'s hash cost against a boxed-`HashMap` whose boxes the JIT eliminates, and is documented in the 1b results below along with the residual options.
+
+#### Phase 1b delivered (September 2026)
+
+`buildKeyIndex` is replaced by `internal/KeyIndex.scala`: a `KeyIndex` built once per keyed join, with `probe(probeKeyCol, row)(report)` reporting build-side rows instead of returning a materialized sequence. Two implementations:
+
+- **`PrimitiveIndex`** — for `Int`, `Long`, `Short`, `Byte`, `Float`, `Double`, `Boolean`, `Date`, `Timestamp`, `TimestampNTZ`. Keys are read raw (no `getValue`, no box) and Long-normalized (`floatToIntBits`/`doubleToLongBits` for float/double). A single unboxed `LongMap` maps each key to the head of a flat shared `next` array; the build iterates rows **descending** so each key's chain lays out **ascending**, which reproduces the boxed index's within-bucket order. Null rows go to a dedicated ascending bucket, so null keys still match null keys exactly as the old `HashMap` treated its single null key. The fast path runs only when indexed and probed key columns share a `ColumnType`, so Long-normalized equality reproduces boxed `Any` equality (including `Integer` ≠ `Long` keys); null probes run first so null keys match even across a type mismatch. No per-key object is allocated — the bucket is the flat `next` array.
+- **`ObjectIndex`** — `String`, `Decimal`, structs, arrays/maps, and the `Any` fallback keep the exact prior `HashMap[Any, Vector[Int]]` behavior.
+
+Callers (`innerJoinOnExpr`, `probeJoinOnKeys`, `fullJoinOnExpr`, `filterJoinOnExpr`) are rewired to the probing index. A new spec, `JoinOnNullKeysSpec`, locks null-key semantics for the primitive and object paths plus semi/anti. (Full join with null-valued rows is excluded: `fullJoinOnExpr` decodes via `toVectorUnsafe`, and the int schema decode `NPE`s on null rows — a pre-existing limitation unrelated to this change.)
+
+Functional: core suite 444 tests green, including `DatasetJoinSpec`, `SemiJoinSpec`, `JoinOnNullKeysSpec`.
+
+Performance (JDK 25, 4G, ZGC, 1 warmup + 3 measured, median ms; Phase 0 column = before):
+
+| n | regime | before | after |
+|---|---|---|---|
+| 100k | hot | 6.8 | 4.1 |
+| 200k | hot | 13.1 | 7.9 |
+| 400k | hot | 24.6 | 15.7 |
+| 100k | few | 6.6 | 4.3 |
+| 200k | few | 12.5 | 9.0 |
+| 400k | few | 24.0 | 15.0 |
+| 100k | uniform | 7.9 | 6.0 |
+| 200k | uniform | 11.2 | 12.1 |
+| 400k | uniform | 23.5 | 27.1 |
+
+Fit/probe shapes: InnerJoinOn 1k×500k 7.4 → 11.2; LeftJoinOn 1k×500k 53.2 → ~51; FullJoinOn 1k×500k 216.6 → ~215-229; InnerJoinOn 200k×200k 18.9 → ~19-22. LeftJoinOn 200k: hot 80.3 → ~93, few 65.9 → ~77-82, uniform 69.3 → ~72. FullJoinOn 200k: hot 197.2 → ~191-228, few 152.9 → ~148-155, uniform 160.0 → ~154-164.
+
+**Honest reading.** The hot/few regimes (the contended bucket, which did the boxed `Any` work per row twice) improved steadily, ~1.4-1.7x across 3 confirming runs; the build on the contended key in isolation is at the measured floor (~2.4ms at 400k rows, confirmed by a same-session A/B that also showed the rejected tails layout at ~2x and any per-key `Vector`/`ArrayBuffer` bucket at ~20-88ms). Uniform and fit shapes went sideways: large utterly-distinct keys regress ~15% and the probe-dominant 1k×500k shape regresses ~4ms. Both residuals are the cost of the choice itself, not a bug:
+- Fully distinct keys put the whole cost on one unboxed `LongMap` op per row; `LongMap` hashes with a Murmur-mix and is measurably ~2x the per-op cost of the old `HashMap`'s escape-analysis-eliminated boxed-`Integer` ops at that size. An unboxed map cannot win that sweep except by what it saves elsewhere.
+- The 1k×500k shape is probe-only against a 1000-row index; the +4ms is the heavier per-probe hash on half a million lookups. Fingers showed the boxed-key `HashMap` (boxes elided by the JIT) can beat `LongMap` there, at the price of reintroducing internal boxing on the key read — defeating the point of 1b. The discrepancy is the boxed-`Int` map's simpler hash, which holds regardless of which map wins on build-heavy shapes.
+
+Two disciplines make these numbers trustworthy:
+- The hot/few win and the uniform residual were each reproduced across multiple runs. Do not chase 1-2ms deltas on this machine: same-code re-runs move the sweep several ms session to session, so only stable signals (the ~1.4-1.7x hot win, the uniform/fit sideways movement) should be read as real.
+- The chosen structure was decided by same-session micro-A/B (heads vs tails vs CSR group-layout vs `ArrayBuffer` buckets), not by the join bench. It is the fastest measured layout that preserves within-key ascending order with zero per-key allocation.
+
+**Residual opportunities, in order.** (1) `fullJoinOnExpr`'s `matchedRight` `HashSet` + `unmatchedRight` pass is still the largest constant factor on full joins (Phase 2's 2a fix for the predicate `JoinOps.fullJoin` is the predicate-side analogue). (2) A sort-based join would dodge the hash cost on the uniform/fit shapes, but that is new machinery outside Phase 1's scope. (3) The probe side could keep a `HashMap[Int, Int]` fast path per raw-key space, but only for the `Int`/`Short`/`Byte`/`Date` types whose Long normalization fits `Int`; Long/Timestamp keys cannot, so this wins the 1k×500k shape for a subset of types at the cost of a second code path.
+
+---
+
+## Phase 2 — Constant-factor work on the predicate family
+
+**Goal:** cut the wasteful passes and allocations. Do **not** attempt to make arbitrary-predicate joins sub-quadratic; the condition is opaque, so there is no index to build.
+
+### 2a. Rewrite `JoinOps.fullJoin` (`internal/JoinOps.scala:5-17`)
+
+Current behavior materializes `pairs` (up to n·m), then `.toSet` of each side's matched elements, then three list constructions. Replace with a single pass that, per left row, finds matches over right and marks matched indexes, so unmatched halves are computed without a second `pairs` materialization:
+
+- Walk `lefts` once; for each, `filter`-scan `rights` under the condition, collecting matched right indexes into a per-left bucket and a shared matched-right set.
+- Emit matched and left-unmatched rows in the same pass; after the walk, emit right-unmatched rows (those never marked).
+- Same output ordering and duplicate semantics as today — check `DatasetJoinSpec` for the expected shape (duplicates are currently preserved per matched pair; preserve that).
+
+### 2b. `outerJoinDatasets` (`:427-445`)
+
+`rights.filter(...)` re-scans the whole secondary per primary row, and builds a fresh vector per row. Keep it as-is asymptotically, but:
+
+- Guard the cheap path: when secondary is empty, emit `mkUnmatched` for every primary row and return immediately.
+- When no matches exist (`found.isEmpty`), skip the `map` allocation.
+
+### 2c. `innerJoinDatasets` (`:384-400`)
+
+Minor: hoist `toVectorUnsafe` results (already done), but add the same early-exit when either side is empty (current code runs the full nested loop to zero matches). Apply the empty-input shortcut to `leftAntiJoinDatasets` (`:477-490`) too.
+
+### 2d. Documented contract
+
+Add a note to the README (or the operator scaladoc) that predicate joins are intended for small frames; large-frame joins should be expressed as `*JoinOn`. This makes the quadratic a known, deliberate boundary rather than a surprise.
+
+**Phase 2 acceptance:** Phase 0 benchmarks show predicate-join times at the working sizes either flat or improved; `FullJoin`'s memory stays bounded (no giant intermediate `pairs` — check with a size the old code would over-allocate on). Specs green.
+
+---
+
+## Phase 3 — Correctness guard and direction of the build index
+
+**Goal:** make linearity under skew hold from the right direction, and lock the semantics.
+
+### 3a. Index the smaller side
+
+`innerJoinOnExpr` (`:516-541`) currently indexes the *left* and probes the *right*. Under skew, the index build is the sensitive part, so building the index on the smaller side (and probing the larger) matters. Add a size-aware choice (or a documented decision) for `InnerJoinOn`/`LeftJoinOn`/`RightJoinOn`/`FullJoinOn`/`LeftAntiJoinOn`. Where the datastructure is a `HashMap`, hash on the smaller input; the probe then repeats the larger side's per-row lookups, which is the cheaper direction.
+
+### 3b. Assert/spec enforcement
+
+Add `PropertySpec`-style checks (match the existing spec style) asserting that results are equal between:
+
+- keyed join and the equivalent predicate join, on random small datasets (skewed and uniform), and
+- `innerJoinOnExpr` with left-indexed vs right-indexed (i.e. parameterize the direction and assert identical output).
+
+This locks correctness while Phase 1 changes indexing internals.
+
+### 3c. Claim revision
+
+Update the README's performance claims to state exactly what holds: columnar elementwise ops are linear; *keyed* joins are hash-based and near-linear (O(n·log n) under skew from the boxed bucket append, O(n) in the common case); predicate joins are O(n·m) and intended for small inputs; in-memory execution is bounded by heap. (The "no input size limit" phrasing should also be corrected elsewhere — in-memory is heap-bounded and `MaterializedDataset.rowCount`/column `length` are `Int`, capping rows per column near 2^31.)
+
+**Phase 3 acceptance:** a `PropertySpec` that passes both before and after Phase 1, plus README claims that no longer overstate linearity.
+
+---
+
+## Suggested order
+
+1. Phase 0 (bench) — required first; nothing changes yet.
+2. Phase 1 — biggest win; needs Phase 0 to see it.
+3. Phase 3 (specs + claim revision) — locks in what Phase 1 changed, can be done right after 1a/1b or anytime.
+4. Phase 2 — independent constant-factor work; lowest priority.
+
+Each phase is verifiable on its own. Keep the Phase 0 bench committed before and after each phase so the numbers tell the story later.
+
+## Artifacts to produce
+
+- `interpreter/JoinOperationsBench.scala` (Phase 0).
+- Keyed-index rework in `DatasetInterpreter.scala` (`buildKeyIndex`, `probeJoinOnKeys`, join case handlers) — Phase 1.
+- `JoinOps.fullJoin` / `outerJoinDatasets` / `innerJoinDatasets` / `leftAntiJoinDatasets` — Phase 2.
+- Size-aware indexing + join-direction `PropertySpec` + README claim edit — Phase 3.

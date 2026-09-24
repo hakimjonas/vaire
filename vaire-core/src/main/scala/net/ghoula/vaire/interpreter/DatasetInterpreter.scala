@@ -5,7 +5,7 @@ import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.dataset.{Dataset, InMemorySource, MaterializedDataset}
 import net.ghoula.vaire.errors.ExecutionError
 import net.ghoula.vaire.expr.Expr
-import net.ghoula.vaire.internal.JoinOps
+import net.ghoula.vaire.internal.{JoinOps, KeyIndex}
 import net.ghoula.vaire.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Main interpreter for Dataset execution.
@@ -489,18 +489,6 @@ object DatasetInterpreter extends Interpreter {
     MaterializedDataset.fromVector(resultRows)(using left.schema)
   }
 
-  private def buildKeyIndex(keyCol: Column[?], rowCount: Int): scala.collection.mutable.HashMap[Any, Vector[Int]] = {
-    val index = scala.collection.mutable.HashMap.empty[Any, Vector[Int]]
-    (0 until rowCount).foreach { i =>
-      val key = keyCol.getValue(i)
-      index.updateWith(key) {
-        case Some(existing) => Some(existing :+ i)
-        case None => Some(Vector(i))
-      }
-    }
-    index
-  }
-
   private def assembleJoinColumns[A, B](
     left: MaterializedDataset[A],
     right: MaterializedDataset[B],
@@ -522,17 +510,14 @@ object DatasetInterpreter extends Interpreter {
     rightKeyType: ColumnType
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(A, B)]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
-      val leftIndex = buildKeyIndex(leftKeyCol, left.rowCount)
+      val leftIndex = KeyIndex.build(leftKeyCol, left.rowCount)
       val leftIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
       val rightIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
 
       (0 until right.rowCount).foreach { ri =>
-        val rKey = rightKeyCol.getValue(ri)
-        leftIndex.get(rKey).foreach { leftRows =>
-          leftRows.foreach { li =>
-            leftIdxBuf += li
-            rightIdxBuf += ri
-          }
+        val _ = leftIndex.probe(rightKeyCol, ri) { li =>
+          leftIdxBuf += li
+          rightIdxBuf += ri
         }
       }
 
@@ -550,14 +535,12 @@ object DatasetInterpreter extends Interpreter {
     mkUnmatched: P => R,
     schema: Schema[R]
   ): MaterializedDataset[R] = {
-    val lookupIndex = buildKeyIndex(lookupKeyCol, lookupRowCount)
+    val lookupIndex = KeyIndex.build(lookupKeyCol, lookupRowCount)
 
     val resultRows: Vector[R] = probeRows.zipWithIndex.flatMap { case (pVal, pi) =>
-      val pKey = probeKeyCol.getValue(pi)
-      lookupIndex.get(pKey) match {
-        case Some(sIdxs) => sIdxs.map(si => mkMatched(pVal, lookupRows(si)))
-        case None => Vector(mkUnmatched(pVal))
-      }
+      val builder = Vector.newBuilder[R]
+      if (lookupIndex.probe(probeKeyCol, pi)(si => builder += mkMatched(pVal, lookupRows(si)))) builder.result()
+      else Vector(mkUnmatched(pVal))
     }
 
     MaterializedDataset.fromVector(resultRows)(using schema) match {
@@ -630,22 +613,20 @@ object DatasetInterpreter extends Interpreter {
     rightKeyType: ColumnType
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(Option[A], Option[B])]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
-      val rightIndex = buildKeyIndex(rightKeyCol, right.rowCount)
+      val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
       val leftRows = left.toVectorUnsafe
       val rightRows = right.toVectorUnsafe
       val matchedRight = scala.collection.mutable.HashSet.empty[Int]
 
-      val leftSideResults: Vector[(Option[A], Option[B])] = leftRows.zipWithIndex.flatMap { case (leftVal, li) =>
-        val lKey = leftKeyCol.getValue(li)
-        rightIndex.get(lKey) match {
-          case Some(rightIdxs) =>
-            rightIdxs.map { ri =>
-              matchedRight += ri
-              (Option(leftVal), Option(rightRows(ri)))
-            }
-          case None => Vector((Option(leftVal), Option.empty[B]))
+      val leftSide = Vector.newBuilder[(Option[A], Option[B])]
+      leftRows.zipWithIndex.foreach { case (leftVal, li) =>
+        val matched = rightIndex.probe(leftKeyCol, li) { ri =>
+          matchedRight += ri
+          leftSide += ((Option(leftVal), Option(rightRows(ri))))
         }
+        if (!matched) leftSide += ((Option(leftVal), Option.empty[B]))
       }
+      val leftSideResults = leftSide.result()
 
       val unmatchedRight: Vector[(Option[A], Option[B])] = rightRows.zipWithIndex.collect {
         case (rightVal, ri) if !matchedRight.contains(ri) =>
@@ -671,13 +652,10 @@ object DatasetInterpreter extends Interpreter {
     include: Boolean
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[A]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
-      val rightKeys = scala.collection.mutable.HashSet.empty[Any]
-      (0 until right.rowCount).foreach { ri =>
-        rightKeys += rightKeyCol.getValue(ri)
-      }
+      val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
 
       val indices = (0 until left.rowCount).filter { li =>
-        rightKeys.contains(leftKeyCol.getValue(li)) == include
+        rightIndex.probe(leftKeyCol, li)(_ => ()) == include
       }.toArray
 
       reindexBy(left, indices)

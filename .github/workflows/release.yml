@@ -26,6 +26,20 @@ jobs:
           cache: sbt
 
       - uses: sbt/setup-sbt@c7d2d6258b4bd0d3ec5129e6b3453199d3c79729 # v1.5.8
+        with:
+          disk-cache: false
+
+      # Own the sbt 2 disk cache so its key is scoped to the sbt version
+      # (project/build.properties). setup-sbt's built-in cache restores on a
+      # broad prefix, which let a 2.0.8 cache be reused under 2.0.9, skipping
+      # the core compile and leaving scalafix without SemanticDB.
+      - name: Cache sbt 2.x disk cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/sbt
+          key: sbt-disk-${{ runner.os }}-jdk25-${{ hashFiles('project/build.properties') }}-${{ hashFiles('build.sbt', 'project/*.sbt') }}-v1
+          restore-keys: |
+            sbt-disk-${{ runner.os }}-jdk25-${{ hashFiles('project/build.properties') }}-
 
       - name: Check style, formatting, and doc coverage
         run: sbt check
@@ -49,6 +63,20 @@ jobs:
           cache: sbt
 
       - uses: sbt/setup-sbt@c7d2d6258b4bd0d3ec5129e6b3453199d3c79729 # v1.5.8
+        with:
+          disk-cache: false
+
+      # Own the sbt 2 disk cache so its key is scoped to the sbt version
+      # (project/build.properties). setup-sbt's built-in cache restores on a
+      # broad prefix, which let a 2.0.8 cache be reused under 2.0.9, skipping
+      # the core compile and leaving scalafix without SemanticDB.
+      - name: Cache sbt 2.x disk cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/sbt
+          key: sbt-disk-${{ runner.os }}-jdk25-${{ hashFiles('project/build.properties') }}-${{ hashFiles('build.sbt', 'project/*.sbt') }}-v1
+          restore-keys: |
+            sbt-disk-${{ runner.os }}-jdk25-${{ hashFiles('project/build.properties') }}-
 
       - name: Import GPG key
         env:

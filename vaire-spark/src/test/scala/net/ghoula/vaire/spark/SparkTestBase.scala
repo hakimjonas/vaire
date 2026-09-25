@@ -26,6 +26,11 @@ object SparkTestSession {
       .master(master)
       .appName("vaire-test")
       .config("spark.sql.shuffle.partitions", "2")
+      // Spark 4.x artifact session isolation (default on) stores dynamic Catalyst codegen
+      // classes in session-scoped dirs that the executor artifact class server cannot serve
+      // back to Janino during whole-stage codegen, aborting every codegen job with
+      // RemoteClassLoaderError. Disable it to restore the Spark 3.x artifact behavior.
+      .config("spark.sql.artifact.isolation.enabled", "false")
 
     if (isCluster) {
       builder
@@ -36,7 +41,12 @@ object SparkTestSession {
         )
         .config("spark.ui.enabled", "true")
     } else {
-      builder.config("spark.ui.enabled", "false")
+      builder
+        // In local mode the executor reaches the driver's artifact class server over
+        // spark.driver.host. Avoid non-loopback (VPN) interfaces, which can restart the
+        // class-stream fetch as RemoteClassLoaderError (see SPARK-58827).
+        .config("spark.driver.host", "127.0.0.1")
+        .config("spark.ui.enabled", "false")
     }
 
     builder.getOrCreate()

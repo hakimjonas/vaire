@@ -437,6 +437,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         for {
           left <- buildPlan(leftDs)
           right <- buildPlan(rightDs)
+          _ <- checkKeyColumn(left, leftKey, leftKeyType, "left")
+          _ <- checkKeyColumn(right, rightKey, rightKeyType, "right")
         } yield {
           val leftColName = getColName(leftKey)
           val rightColName = getColName(rightKey)
@@ -496,6 +498,28 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     case named: Expr.Named[_, _] => named.name
     case _ => "_expr"
   }
+
+  /** Check the declared key type against the key column's type in the built plan.
+    *
+    * Only `Cell` and `Named` keys resolve to a plan column, which is the surface the Spark keyed
+    * join supports (`getColName` returns a placeholder name for anything else, which fails at
+    * analysis). Non-column keys are left to Spark's own resolution.
+    */
+  private def checkKeyColumn[T](
+    plan: SparkPlan[T],
+    key: Expr[T, ?],
+    declared: ColumnType,
+    side: String
+  ): Either[ExecutionError, Unit] =
+    key match {
+      case cell: Expr.Cell[_, _] =>
+        plan.schema.columnTypes.lift(cell.index.toInt) match {
+          case Some(actual) => KeyedJoin.checkColumnType(actual, declared, side)
+          case None => Right(())
+        }
+      case named: Expr.Named[_, _] => checkKeyColumn(plan, named.expr, declared, side)
+      case _ => Right(())
+    }
 
   private def applyZipWithIndex[A](parent: SparkPlan[A]): SparkPlan[(A, Long)] =
     wrapAsSparkPlan(

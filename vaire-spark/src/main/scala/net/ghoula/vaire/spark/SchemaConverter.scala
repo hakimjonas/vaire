@@ -33,15 +33,17 @@ import net.ghoula.vaire.column.ColumnType
 /** Bidirectional conversion between Vairë Schema/ColumnType and Spark StructType/DataType. */
 object SchemaConverter {
 
-  /** Convert a Vairë Schema[T] to a Spark StructType. */
+  /** Convert a Vairë Schema[T] to a Spark StructType.
+    *
+    * Every field is marked nullable. Vairë tracks nulls per column in a `BitSet`, independently of
+    * whether the schema type is wrapped in `OptionType`, so a non-optional column can still hold
+    * null rows. Marking those fields non-nullable made `createDataFrame` replace the nulls with
+    * type defaults (0, empty string, ...), which diverged from the in-memory interpreter. Spark's
+    * default nullability is `true`, and `fromSparkType` ignores nullability, so nothing is lost.
+    */
   def toStructType[T](schema: Schema[T]): SparkStructType = {
     val fields = schema.columnNames.zip(schema.columnTypes).map { case (name, ct) =>
-      ct match {
-        case ColumnType.OptionType(inner) =>
-          StructField(name, toSparkType(inner), nullable = true)
-        case _ =>
-          StructField(name, toSparkType(ct), nullable = false)
-      }
+      StructField(name, toSparkType(ct), nullable = true)
     }
     SparkStructType(fields.toArray)
   }

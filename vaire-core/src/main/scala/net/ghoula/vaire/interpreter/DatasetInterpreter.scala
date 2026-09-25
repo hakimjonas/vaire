@@ -563,6 +563,8 @@ object DatasetInterpreter extends Interpreter {
         for {
           leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
           rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+          _ <- KeyedJoin.checkColumnType(leftKeyCol.columnType, leftKeyType, "left")
+          _ <- KeyedJoin.checkColumnType(rightKeyCol.columnType, rightKeyType, "right")
         } yield f(leftKeyCol, rightKeyCol)
     }
 

@@ -64,6 +64,25 @@ class KeyedJoinKeyTypeSpec extends AnyFlatSpec with Matchers {
     }
   }
 
+  it should "reject a declared key type that disagrees with the evaluated column" in {
+    val longSide = dsLong(1L)
+
+    val plan = longSide.joinOn(
+      longSide,
+      longKey[Long],
+      longKey[Long],
+      ColumnType.IntType,
+      ColumnType.IntType
+    )
+
+    DatasetInterpreter.execute(plan) match {
+      case Left(ExecutionError.TypeMismatch(expected, actual, _)) =>
+        expected shouldBe "IntType"
+        actual shouldBe "LongType"
+      case other => fail(s"expected TypeMismatch, got $other")
+    }
+  }
+
   it should "reject mismatched key types for semi and anti too" in {
     val longSide = dsLong(1L)
     val intSide = dsInt(1)

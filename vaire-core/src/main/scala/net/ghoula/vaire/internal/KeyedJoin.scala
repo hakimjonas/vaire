@@ -11,6 +11,11 @@ import net.ghoula.vaire.errors.ExecutionError
   * here rather than trusting the caller. A mismatch is a caller error and is surfaced as an
   * `ExecutionError.TypeMismatch` instead of silently producing an empty result.
   *
+  * The declared key type is also checked against the column the key expression resolves to.
+  * `ExprInterpreter.evalColumn` returns a `Cell` column as-is, so without this check a caller could
+  * label a `Long` column as `Int` and defeat the equality check above; the in-memory and Spark
+  * backends both enforce it so they reject the same plans.
+  *
   * Spark 4.2 (`spark.sql.ansi` is on by default) implicitly coerces some pairs (e.g. Int vs Long)
   * and rejects others (e.g. Long vs Timestamp). Requiring an explicit cast to a common type keeps
   * the typed API honest and the in-memory and Spark backends in agreement; see
@@ -28,6 +33,18 @@ private[vaire] object KeyedJoin {
           actual = right.toString,
           context =
             "keyed join: left and right key columns must have the same ColumnType (cast one side explicitly to widen)"
+        )
+      )
+
+  /** `Right(())` when the resolved key column has the declared type, else the error to surface. */
+  def checkColumnType(actual: ColumnType, declared: ColumnType, side: String): Either[ExecutionError, Unit] =
+    if (actual == declared) Right(())
+    else
+      Left(
+        ExecutionError.TypeMismatch(
+          expected = declared.toString,
+          actual = actual.toString,
+          context = s"keyed join: $side key expression resolves to a different ColumnType than declared"
         )
       )
 }

@@ -180,13 +180,16 @@ The follow-up is scoped to `KeyIndex.PrimitiveIndex`; join semantics are unchang
 
 #### Phase 1c — Spark 4.2 key semantics (September 2026)
 
-The initial fast path gated cross-type probes on `ColumnType` and matched null keys to null keys. Review against Spark 4.2 showed both were wrong relative to the target backend, and the gate was order-dependent (it lived only in `PrimitiveIndex`, so `Long ⋈ Time` returned no rows while `Time ⋈ Long` matched). Phase 1c aligns the keyed-join key contract with Spark 4.2:
+The initial fast path gated cross-type probes on `ColumnType` and matched null keys to null keys. Both disagreed with Spark 4.2, and the gate was order-dependent: it lived only in `PrimitiveIndex`, so `Long ⋈ Time` returned no rows while `Time ⋈ Long` matched. Phase 1c aligns the keyed-join key contract with Spark 4.2:
 
-- **Key types must match.** `KeyedJoin.validateKeyTypes` runs once at the keyed-join boundary, called by both `DatasetInterpreter.evalKeys` and `SparkInterpreter.joinOnExprBase`; a mismatch fails with `ExecutionError.TypeMismatch` instead of silently returning no rows. This mirrors Spark rejecting incompatible key types and keeps the two backends in agreement. Widening (e.g. `Int` vs `Long`) now requires an explicit cast so both sides share a type.
-- **Null keys never match.** Spark 4.2 runs ANSI mode by default and `EqualTo` is null-intolerant, so the in-memory index no longer indexes null rows or matches null probes. This replaces the earlier null-matches-null behavior and rewrites `JoinOnNullKeysSpec`.
-- The per-probe type gate is gone: with boundary validation in place, `KeyIndex` assumes same-type keys and the fast path stays unboxed.
+- Key types must match. `KeyedJoin.validateKeyTypes` runs once at the keyed-join boundary, called by both `DatasetInterpreter.evalKeys` and `SparkInterpreter.joinOnExprBase`; a mismatch fails with `ExecutionError.TypeMismatch` instead of silently returning no rows. This matches Spark rejecting incompatible key types and keeps the two backends in agreement. Widening (`Int` vs `Long`) now requires an explicit cast so both sides share a type.
+- The declared type is checked against the resolved column. `KeyedJoin.checkColumnType` compares the evaluated key column's `ColumnType` (core) or the key column's type in the built plan (Spark) against the declared type, so a caller cannot label a `Long` column as `Int`. This is what stops the equality check from being defeated by a lie on both sides.
+- Null keys never match. Spark 4.2 runs ANSI mode by default and `EqualTo` is null-intolerant, so the in-memory index no longer indexes null rows or matches null probes. This replaces the earlier null-matches-null behavior and rewrites `JoinOnNullKeysSpec`.
+- The per-probe type gate is gone. With boundary validation in place, `KeyIndex` assumes same-type keys and the fast path stays unboxed.
 
-The core suite (`testFull`, 595 tests) is green, including the rewritten `JoinOnNullKeysSpec` and the new `KeyedJoinKeyTypeSpec` (mismatch errors, fast-type coverage, inner-join symmetry). `SparkKeyedJoinParitySpec` asserts both backends agree on valid joins and fail the same way on mismatched key types.
+`SparkKeyedJoinParitySpec` covers valid joins, null keys, mismatched key types, and a declared type that disagrees with the column, across both backends.
+
+The core suite (`testFull`, 596 tests) is green, including the rewritten `JoinOnNullKeysSpec` and the new `KeyedJoinKeyTypeSpec` (mismatch errors, resolved-column check, fast-type coverage, inner-join symmetry).
 
 ---
 

@@ -110,10 +110,10 @@ The evaluation already produces typed key `Column`s via `evalKeys` (`:569-580`),
 
 `buildKeyIndex` is replaced by `internal/KeyIndex.scala`: a `KeyIndex` built once per keyed join, with `probe(probeKeyCol, row)(report)` reporting build-side rows instead of returning a materialized sequence. Two implementations:
 
-- **`PrimitiveIndex`** — for `Int`, `Long`, `Short`, `Byte`, `Float`, `Double`, `Boolean`, `Date`, `Timestamp`, `TimestampNTZ`. Keys are read raw (no `getValue`, no box) and Long-normalized (`floatToIntBits`/`doubleToLongBits` for float/double). An unboxed open-addressing table — which replaced the initial `LongMap` (see the follow-up below) — maps each key to the head of a flat shared `next` array; the build iterates rows **descending** so each key's chain lays out **ascending**, which reproduces the boxed index's within-bucket order. Null rows go to a dedicated ascending bucket, so null keys still match null keys exactly as the old `HashMap` treated its single null key. The fast path runs only when indexed and probed key columns share a `ColumnType`, so Long-normalized equality reproduces boxed `Any` equality (including `Integer` ≠ `Long` keys); null probes run first so null keys match even across a type mismatch. No per-key object is allocated — the bucket is the flat `next` array.
-- **`ObjectIndex`** — `String`, `Decimal`, structs, arrays/maps, and the `Any` fallback keep the exact prior `HashMap[Any, Vector[Int]]` behavior.
+- **`PrimitiveIndex`** — for `Int`, `Long`, `Short`, `Byte`, `Float`, `Double`, `Boolean`, `Date`, `Timestamp`, `TimestampNTZ`. Keys are read raw (no `getValue`, no box) and Long-normalized (`floatToIntBits`/`doubleToLongBits` for float/double). An unboxed open-addressing table — which replaced the initial `LongMap` (see the follow-up below) — maps each key to the head of a flat shared `next` array; the build iterates rows **descending** so each key's chain lays out **ascending**, which reproduces the prior index's within-bucket order. No per-key object is allocated — the bucket is the flat `next` array. Null rows are not indexed and null probes never match, matching Spark 4.2's null-intolerant `EqualTo` (`spark.sql.ansi` is on by default). The fast path only runs for the `ColumnType` the index was built from: the interpreter validates that both key columns share that type at the keyed-join boundary (`KeyedJoin.validateKeyTypes`) and fails with `ExecutionError.TypeMismatch` otherwise, rather than silently returning no rows.
+- **`ObjectIndex`** — `String`, `Decimal`, structs, arrays/maps, and the `Any` fallback use a `HashMap[Any, Vector[Int]]`. Null rows are not indexed and null probes never match.
 
-Callers (`innerJoinOnExpr`, `probeJoinOnKeys`, `fullJoinOnExpr`, `filterJoinOnExpr`) are rewired to the probing index. A new spec, `JoinOnNullKeysSpec`, locks null-key semantics for the primitive and object paths plus semi/anti. (Full join with null-valued rows is excluded: `fullJoinOnExpr` decodes via `toVectorUnsafe`, and the int schema decode `NPE`s on null rows — a pre-existing limitation unrelated to this change.)
+Callers (`innerJoinOnExpr`, `probeJoinOnKeys`, `fullJoinOnExpr`, `filterJoinOnExpr`) are rewired to the probing index. `JoinOnNullKeysSpec` locks the null-key semantics (nulls match nothing) for the primitive and object paths plus semi/anti, and `KeyedJoinKeyTypeSpec` locks the key-type contract, fast-type coverage, and inner-join symmetry. (Full join with null-valued rows is excluded: `fullJoinOnExpr` decodes via `toVectorUnsafe`, and the int schema decode `NPE`s on null rows — a pre-existing limitation unrelated to this change.)
 
 Functional: core suite 444 tests green, including `DatasetJoinSpec`, `SemiJoinSpec`, `JoinOnNullKeysSpec`.
 
@@ -177,6 +177,16 @@ The two residuals named above (uniform ~15% @400k; 1k×500k fit ~+4ms) were repr
 - **LJO/FJO hot deltas are noise.** `main` LJO@200k-hot measures 82.6 and 100.3 in different sessions; feature 121.1; the delivered run's 127.6 spike does not reproduce. These shapes are dominated by output/anti-join handling, not the index.
 
 The follow-up is scoped to `KeyIndex.PrimitiveIndex`; join semantics are unchanged and the core suite (`testFull`, 589 tests) is green. No new API and no caller changes; the only test-file touch is scalafix suppression formatting in `JoinOnNullKeysSpec` (null-literal rewrite), no behavioral changes.
+
+#### Phase 1c — Spark 4.2 key semantics (September 2026)
+
+The initial fast path gated cross-type probes on `ColumnType` and matched null keys to null keys. Review against Spark 4.2 showed both were wrong relative to the target backend, and the gate was order-dependent (it lived only in `PrimitiveIndex`, so `Long ⋈ Time` returned no rows while `Time ⋈ Long` matched). Phase 1c aligns the keyed-join key contract with Spark 4.2:
+
+- **Key types must match.** `KeyedJoin.validateKeyTypes` runs once at the keyed-join boundary, called by both `DatasetInterpreter.evalKeys` and `SparkInterpreter.joinOnExprBase`; a mismatch fails with `ExecutionError.TypeMismatch` instead of silently returning no rows. This mirrors Spark rejecting incompatible key types and keeps the two backends in agreement. Widening (e.g. `Int` vs `Long`) now requires an explicit cast so both sides share a type.
+- **Null keys never match.** Spark 4.2 runs ANSI mode by default and `EqualTo` is null-intolerant, so the in-memory index no longer indexes null rows or matches null probes. This replaces the earlier null-matches-null behavior and rewrites `JoinOnNullKeysSpec`.
+- The per-probe type gate is gone: with boundary validation in place, `KeyIndex` assumes same-type keys and the fast path stays unboxed.
+
+The core suite (`testFull`, 595 tests) is green, including the rewritten `JoinOnNullKeysSpec` and the new `KeyedJoinKeyTypeSpec` (mismatch errors, fast-type coverage, inner-join symmetry). `SparkKeyedJoinParitySpec` asserts both backends agree on valid joins and fail the same way on mismatched key types.
 
 ---
 

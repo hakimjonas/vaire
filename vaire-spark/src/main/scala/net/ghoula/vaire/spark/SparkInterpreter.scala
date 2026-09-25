@@ -7,7 +7,7 @@ import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.dataset.{Dataset, InMemorySource, MaterializedDataset}
 import net.ghoula.vaire.errors.ExecutionError
 import net.ghoula.vaire.expr.Expr
-import net.ghoula.vaire.internal.JoinOps
+import net.ghoula.vaire.internal.{JoinOps, KeyedJoin}
 import net.ghoula.vaire.interpreter.{CollectedDataset, ExprInterpreter, Interpreter}
 import net.ghoula.vaire.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
@@ -167,6 +167,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           jn.right,
           jn.leftKey,
           jn.rightKey,
+          jn.leftKeyType,
+          jn.rightKeyType,
           "inner",
           (ls, rs) => Schema.tuple2Schema[a, b](using ls, rs)
         )
@@ -177,6 +179,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           jn.right,
           jn.leftKey,
           jn.rightKey,
+          jn.leftKeyType,
+          jn.rightKeyType,
           "left",
           (ls, rs) => Schema.tuple2Schema[a, Option[b]](using ls, Schema.optionSchema[b](using rs))
         )
@@ -187,6 +191,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           jn.right,
           jn.leftKey,
           jn.rightKey,
+          jn.leftKeyType,
+          jn.rightKeyType,
           "right",
           (ls, rs) => Schema.tuple2Schema[Option[a], b](using Schema.optionSchema[a](using ls), rs)
         )
@@ -197,6 +203,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           jn.right,
           jn.leftKey,
           jn.rightKey,
+          jn.leftKeyType,
+          jn.rightKeyType,
           "full",
           (ls, rs) =>
             Schema.tuple2Schema[Option[a], Option[b]](using
@@ -206,7 +214,15 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         )
 
       case jn: Dataset.LeftAntiJoinOn[a, b, _] =>
-        applyLeftOnlyJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_anti")
+        applyLeftOnlyJoinOnExpr[a, b](
+          jn.left,
+          jn.right,
+          jn.leftKey,
+          jn.rightKey,
+          jn.leftKeyType,
+          jn.rightKeyType,
+          "left_anti"
+        )
 
       case gba: Dataset.GroupByAgg[_, T] =>
         buildPlan(gba.parent).flatMap { parent =>
@@ -219,7 +235,15 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         }
 
       case jn: Dataset.LeftSemiJoinOn[a, b, _] =>
-        applyLeftOnlyJoinOnExpr[a, b](jn.left, jn.right, jn.leftKey, jn.rightKey, "left_semi")
+        applyLeftOnlyJoinOnExpr[a, b](
+          jn.left,
+          jn.right,
+          jn.leftKey,
+          jn.rightKey,
+          jn.leftKeyType,
+          jn.rightKeyType,
+          "left_semi"
+        )
 
       case ww: Dataset.WithWindow[_, T] =>
         buildPlan(ww.parent).flatMap { parent =>
@@ -403,46 +427,54 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     rightDs: Dataset[B],
     leftKey: Expr[A, ?],
     rightKey: Expr[B, ?],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType,
     joinType: String
-  ): Either[ExecutionError, (SparkPlan[A], SparkPlan[B], DataFrame)] = {
-    for {
-      left <- buildPlan(leftDs)
-      right <- buildPlan(rightDs)
-    } yield {
-      val leftColName = getColName(leftKey)
-      val rightColName = getColName(rightKey)
+  ): Either[ExecutionError, (SparkPlan[A], SparkPlan[B], DataFrame)] =
+    KeyedJoin.validateKeyTypes(leftKeyType, rightKeyType) match {
+      case Some(error) => Left(error)
+      case None =>
+        for {
+          left <- buildPlan(leftDs)
+          right <- buildPlan(rightDs)
+        } yield {
+          val leftColName = getColName(leftKey)
+          val rightColName = getColName(rightKey)
 
-      val leftAlias = left.df.alias("_l")
-      val rightAlias = right.df.alias("_r")
+          val leftAlias = left.df.alias("_l")
+          val rightAlias = right.df.alias("_r")
 
-      import org.apache.spark.sql.functions.col
-      val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
-      val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
+          import org.apache.spark.sql.functions.col
+          val joinCondition = col(s"_l.$leftColName") === col(s"_r.$rightColName")
+          val joinedDf = leftAlias.join(rightAlias, joinCondition, joinType)
 
-      val leftColNames = left.schema.columnNames.map(c => col(s"_l.$c")).toArray
-      val rightColNames = right.schema.columnNames.map(c => col(s"_r.$c")).toArray
+          val leftColNames = left.schema.columnNames.map(c => col(s"_l.$c")).toArray
+          val rightColNames = right.schema.columnNames.map(c => col(s"_r.$c")).toArray
 
-      val selectedDf = joinType match {
-        case "left_anti" | "left_semi" =>
-          joinedDf.select(leftColNames*)
-        case _ =>
-          joinedDf.select(leftColNames ++ rightColNames*)
-      }
+          val selectedDf = joinType match {
+            case "left_anti" | "left_semi" =>
+              joinedDf.select(leftColNames*)
+            case _ =>
+              joinedDf.select(leftColNames ++ rightColNames*)
+          }
 
-      (left, right, selectedDf)
+          (left, right, selectedDf)
+        }
     }
-  }
 
   private def joinOnExprHelper[A, B, R](
     leftDs: Dataset[A],
     rightDs: Dataset[B],
     leftKey: Expr[A, ?],
     rightKey: Expr[B, ?],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType,
     joinType: String,
     schemaFunc: (Schema[A], Schema[B]) => Schema[R]
   ): Either[ExecutionError, SparkPlan[R]] =
-    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, joinType).map { case (left, right, selectedDf) =>
-      SparkPlan(selectedDf, schemaFunc(left.schema, right.schema))
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, leftKeyType, rightKeyType, joinType).map {
+      case (left, right, selectedDf) =>
+        SparkPlan(selectedDf, schemaFunc(left.schema, right.schema))
     }
 
   private def applyLeftOnlyJoinOnExpr[A, B](
@@ -450,12 +482,14 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     rightDs: Dataset[B],
     leftKey: Expr[A, ?],
     rightKey: Expr[B, ?],
+    leftKeyType: ColumnType,
+    rightKeyType: ColumnType,
     joinType: String
-  ): Either[ExecutionError, SparkPlan[A]] = {
-    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, joinType).map { case (left, _, selectedDf) =>
-      SparkPlan(selectedDf, left.schema)
+  ): Either[ExecutionError, SparkPlan[A]] =
+    joinOnExprBase(leftDs, rightDs, leftKey, rightKey, leftKeyType, rightKeyType, joinType).map {
+      case (left, _, selectedDf) =>
+        SparkPlan(selectedDf, left.schema)
     }
-  }
 
   private def getColName[Row, A](expr: Expr[Row, A]): String = expr match {
     case cell: Expr.Cell[_, _] => cell.name

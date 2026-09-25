@@ -5,7 +5,7 @@ import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.dataset.{Dataset, InMemorySource, MaterializedDataset}
 import net.ghoula.vaire.errors.ExecutionError
 import net.ghoula.vaire.expr.Expr
-import net.ghoula.vaire.internal.{JoinOps, KeyIndex}
+import net.ghoula.vaire.internal.{JoinOps, KeyIndex, KeyedJoin}
 import net.ghoula.vaire.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
 /** Main interpreter for Dataset execution.
@@ -557,10 +557,14 @@ object DatasetInterpreter extends Interpreter {
     leftKeyType: ColumnType,
     rightKeyType: ColumnType
   )(f: (Column[?], Column[?]) => R)(using errors: RowErrors): Either[ExecutionError, R] =
-    for {
-      leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
-      rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
-    } yield f(leftKeyCol, rightKeyCol)
+    KeyedJoin.validateKeyTypes(leftKeyType, rightKeyType) match {
+      case Some(error) => Left(error)
+      case None =>
+        for {
+          leftKeyCol <- ExprInterpreter.evalColumn(leftKey, left.columns, leftKeyType)
+          rightKeyCol <- ExprInterpreter.evalColumn(rightKey, right.columns, rightKeyType)
+        } yield f(leftKeyCol, rightKeyCol)
+    }
 
   private def leftJoinOnExpr[A, B, K](
     left: MaterializedDataset[A],

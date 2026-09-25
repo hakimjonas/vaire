@@ -1,7 +1,6 @@
 package net.ghoula.vaire.internal
 
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 
 import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.types.RowIndex
@@ -11,19 +10,23 @@ import net.ghoula.vaire.types.RowIndex
   * The keyed-join path reads every key through `Column.getValue`, which boxes each primitive (`Int`
   * → `Integer`, `Long` → `Long`, ...) and then hashes and compares the boxed `Any`. For the
   * primitive storage types in [[KeyIndex]]'s fast set, this index reads the column's raw array
-  * directly (no `getValue`, no box) and stores each key as an unboxed `Long`, with null rows in a
-  * dedicated bucket. Other key types (String, Decimal, structs, arrays, maps, ...) fall back to the
-  * object path, which stays behavior-identical with the prior `HashMap[Any, Vector[Int]]` index.
+  * directly (no `getValue`, no box) and stores each key as an unboxed `Long`. Other key types
+  * (String, Decimal, structs, arrays, maps, ...) fall back to the object path.
   *
   * The fast path is used only when the indexed and probed key columns have the same `ColumnType`,
-  * so Long-normalized equality reproduces the boxed-`Any` equality exactly, including null keys
-  * matching null keys. Matched build-side rows are reported ascending via the probe callback, the
-  * same order the boxed index produced.
+  * which the interpreter enforces at the keyed-join boundary before building the index. Matched
+  * build-side rows are reported ascending via the probe callback, the same order the prior boxed
+  * index produced.
+  *
+  * Null keys are not indexed and never match, matching Spark 4.2's `EqualTo` (`spark.sql.ansi` on
+  * by default), whose comparison is null-intolerant: a null on either side yields no match. This is
+  * a deliberate departure from the prior boxed index, which treated null as a single shared key and
+  * matched null to null.
   *
   * The index is a warm-up-then-quench cache: it mutates internally while it is built and then
   * serves reads only. It is `private[vaire]`, created per join inside the interpreter, and never
   * exposed to caller code, so the mutation is confined to construction and the functional surface
-  * ([[KeyIndex.probe]] and `[[KeyIndex.build]]`) stays pure. The mutable internals are the point of
+  * ([[KeyIndex.probe]] and [[KeyIndex.build]]) stays pure. The mutable internals are the point of
   * the structure — flat primitive arrays keep key reads unboxed and allocation-free, which is why
   * no immutable hash structure is used here.
   */
@@ -31,8 +34,8 @@ private[vaire] sealed trait KeyIndex {
 
   /** Report each build-side row whose key matches the probe key at `row`; true when any matched.
     *
-    * Probes with a column type different from the indexed key column match nothing, reproducing the
-    * boxed behavior where `Integer` and `Long` keys never equal each other.
+    * The probe column must have the same `ColumnType` as the column the index was built from, and
+    * the interpreter guarantees this before calling. A null probe key never matches.
     */
   def probe(probeKeyCol: Column[?], row: Int)(report: Int => Unit): Boolean
 }
@@ -40,7 +43,7 @@ private[vaire] sealed trait KeyIndex {
 private[vaire] object KeyIndex {
 
   /** Raw-storage types whose keys normalize losslessly to a primitive Long. */
-  private val FastTypes: Set[ColumnType] = Set(
+  private[vaire] val FastTypes: Set[ColumnType] = Set(
     ColumnType.IntType,
     ColumnType.LongType,
     ColumnType.ShortType,
@@ -53,9 +56,18 @@ private[vaire] object KeyIndex {
     ColumnType.TimestampNTZType
   )
 
+  /** Largest row count the open-addressing table can hold with a free slot guaranteed.
+    *
+    * The table indexes slots with an `Int`, so the largest power-of-two capacity is 2^30. Keeping
+    * `rowCount < 2^30` guarantees at least one free slot, so a miss or insert always terminates.
+    * Larger inputs fall back to [[ObjectIndex]]; at that size the primitive table would not fit in
+    * memory anyway, and the fallback avoids a probe that can never find a free slot.
+    */
+  private val MaxFastRows: Int = 1 << 30
+
   /** Build an index over the first `rowCount` keys of `keyCol`. */
   def build(keyCol: Column[?], rowCount: Int): KeyIndex =
-    if (FastTypes(keyCol.columnType)) new PrimitiveIndex(keyCol, rowCount)
+    if (FastTypes(keyCol.columnType) && rowCount < MaxFastRows) new PrimitiveIndex(keyCol, rowCount)
     else new ObjectIndex(keyCol, rowCount)
 
   /** Unboxed-key hash index for the primitive storage types.
@@ -63,16 +75,14 @@ private[vaire] object KeyIndex {
     * A hand-rolled open-addressing table maps each key, unboxed, to the head row of a flat shared
     * `next` array, so the build allocates no per-key object. The table stores the head row in
     * `slotHeads` with -1 as the empty marker, so empty slots read as no head; the build iterates
-    * rows from the end so each key's chain lays out ascending, the same order the boxed index
-    * produced.
+    * rows from the end so each key's chain lays out ascending, the same order the prior boxed index
+    * produced. Null rows are skipped.
     *
     * The capacity is sized to 2× the row count (clamped at 2^30 slots), keeping the load factor at
     * or under 0.5 for any realistic input, so probes stay O(1) and misses always land on a free
     * slot.
     */
   private final class PrimitiveIndex(keyCol: Column[?], rowCount: Int) extends KeyIndex {
-    private val indexType: ColumnType = keyCol.columnType
-    private val nullBucket: ArrayBuffer[Int] = ArrayBuffer.empty[Int]
     private val next: Array[Int] = Array.fill(rowCount)(-1)
 
     private val cap: Int = {
@@ -97,9 +107,6 @@ private[vaire] object KeyIndex {
       go(slot(k))
     }
 
-    (0 until rowCount).foreach { i =>
-      if (keyCol.isNull(RowIndex(i))) nullBucket += i
-    }
     (0 until rowCount).reverse.foreach { i =>
       if (!keyCol.isNull(RowIndex(i))) {
         val k = rawKey(keyCol, i)
@@ -111,16 +118,10 @@ private[vaire] object KeyIndex {
     }
 
     override def probe(probeKeyCol: Column[?], row: Int)(report: Int => Unit): Boolean =
-      if (probeKeyCol.isNull(RowIndex(row))) {
-        val matched = nullBucket.nonEmpty
-        nullBucket.foreach(report)
-        matched
-      } else if (probeKeyCol.columnType != indexType) false
+      if (probeKeyCol.isNull(RowIndex(row))) false
       else {
-        val head = {
-          val s = findSlot(rawKey(probeKeyCol, row))
-          if (slotHeads(s) >= 0) slotHeads(s) else -1
-        }
+        val s = findSlot(rawKey(probeKeyCol, row))
+        val head = slotHeads(s)
         if (head < 0) false
         else if (next(head) < 0) {
           report(head)
@@ -132,26 +133,30 @@ private[vaire] object KeyIndex {
       }
   }
 
-  /** Boxed-key index preserving the prior `HashMap[Any, Vector[Int]]` behavior. */
+  /** Boxed-key index for the non-primitive storage types. */
   private final class ObjectIndex(keyCol: Column[?], rowCount: Int) extends KeyIndex {
     private val buckets: mutable.HashMap[Any, Vector[Int]] = {
       val index = mutable.HashMap.empty[Any, Vector[Int]]
       (0 until rowCount).foreach { i =>
-        val key = keyCol.getValue(i)
-        index.updateWith(key) {
-          case Some(existing) => Some(existing :+ i)
-          case None => Some(Vector(i))
+        if (!keyCol.isNull(RowIndex(i))) {
+          val key = keyCol.getValue(i)
+          index.updateWith(key) {
+            case Some(existing) => Some(existing :+ i)
+            case None => Some(Vector(i))
+          }
         }
       }
       index
     }
 
-    override def probe(probeKeyCol: Column[?], row: Int)(report: Int => Unit): Boolean = {
-      val rows = buckets.getOrElse(probeKeyCol.getValue(row), collection.Seq.empty)
-      val matched = rows.nonEmpty
-      rows.foreach(report)
-      matched
-    }
+    override def probe(probeKeyCol: Column[?], row: Int)(report: Int => Unit): Boolean =
+      if (probeKeyCol.isNull(RowIndex(row))) false
+      else {
+        val rows = buckets.getOrElse(probeKeyCol.getValue(row), Vector.empty)
+        val matched = rows.nonEmpty
+        rows.foreach(report)
+        matched
+      }
   }
 
   /** Long-normalized key for a fast primitive column row.

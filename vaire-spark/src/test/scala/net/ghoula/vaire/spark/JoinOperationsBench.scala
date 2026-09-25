@@ -14,7 +14,7 @@ import net.ghoula.vaire.prelude.*
   * operator: `InnerJoinOn` indexes the left, `LeftJoinOn`/`FullJoinOn` index the right
   * (`DatasetInterpreter.scala` `KeyIndex.build` / `innerJoinOnExpr` / `probeJoinOnKeys` /
   * `fullJoinOnExpr`). The probe side is kept disjoint from the index keys so the output stays small
-  * and the measured time isolates the index build.
+  * and the measured time is dominated by the index build and probe.
   *
   * Run via the assembled jar (`sbt spark/assembly; java -jar vaire-spark-bench.jar -s
   * net.ghoula.vaire.spark.JoinOperationsBench`) or by clearing the suite's Benchmark exclusion:

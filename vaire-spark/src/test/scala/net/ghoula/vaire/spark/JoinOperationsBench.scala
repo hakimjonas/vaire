@@ -23,8 +23,11 @@ import net.ghoula.vaire.prelude.*
   */
 class JoinOperationsBench extends AnyFlatSpec with Matchers {
 
-  private val Warmup = 1
-  private val Measured = 3
+  /** Warmup/measured iterations; override with `-Dvaire.bench.warmup=N -Dvaire.bench.measured=M`
+    * for a longer, less JIT-sensitive run.
+    */
+  private val Warmup: Int = sys.props.get("vaire.bench.warmup").flatMap(_.toIntOption).getOrElse(1)
+  private val Measured: Int = sys.props.get("vaire.bench.measured").flatMap(_.toIntOption).getOrElse(3)
 
   private val keyExpr: Expr[Int, Int] = Expr.Cell("value", ColumnIndex(0))
   private val intType = ColumnType.IntType
@@ -33,7 +36,15 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
   // data
   // ---------------------------------------------------------------------------
 
-  private val skewSizes = Vector(100_000, 200_000, 400_000)
+  /** Sweep sizes; override with `-Dvaire.bench.sizes=100000,200000,...`. The 1M-10M sizes need more
+    * than the default `-Xmx4G` on the boxed baseline.
+    */
+  private val skewSizes: Vector[Int] =
+    sys.props
+      .get("vaire.bench.sizes")
+      .map(_.split(',').toVector.flatMap(_.trim.toIntOption))
+      .filter(_.nonEmpty)
+      .getOrElse(Vector(100_000, 200_000, 400_000, 1_000_000, 2_000_000, 5_000_000, 10_000_000))
   private val KeyBase = 1_000_000
   private val ProbeBase = 900_000_000
   private val HotKey = 424_242
@@ -41,7 +52,8 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
   private def indexSide(regime: String, n: Int): Array[Int] = regime match {
     case "hot" => Array.fill(n)(HotKey) // one distinct key, n rows — the contended build
     case "few" => Array.tabulate(n)(i => i % (math.sqrt(n.toDouble).toInt.max(1))) // k ≈ √n
-    case "uniform" => Array.tabulate(n)(i => KeyBase + i) // k ≈ n, no duplicates
+    case "uniform" => Array.tabulate(n)(i => KeyBase + i)
+    case "sparse" => Array.tabulate(n)(i => KeyBase + i * 37) // k ≈ n, no duplicates
   }
 
   // Disjoint from every index side above, so matched output stays ~0.
@@ -54,21 +66,48 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
   // benchmarking
   // ---------------------------------------------------------------------------
 
-  private case class MeasuredRows(ms: Double, rowsOut: Int)
+  private case class MeasuredRows(ms: Double, rowsOut: Int, allocMb: Double, gcMs: Double)
 
-  private def medianMs(values: Seq[Long]): Double = {
+  private def median(values: Seq[Long]): Long = {
     val sorted = values.sorted
-    sorted(sorted.length / 2) / 1e6
+    sorted(sorted.length / 2)
   }
 
+  private def medianMs(values: Seq[Long]): Double = median(values) / 1e6
+
+  private val threadMx: Option[com.sun.management.ThreadMXBean] =
+    java.lang.management.ManagementFactory.getThreadMXBean match {
+      case t: com.sun.management.ThreadMXBean => Some(t)
+      case _ => None
+    }
+
+  private val gcBeans = java.lang.management.ManagementFactory.getGarbageCollectorMXBeans
+
+  private def allocatedBytes: Long =
+    threadMx.fold(0L)(_.getThreadAllocatedBytes(Thread.currentThread().threadId()))
+
+  private def gcTimeMs: Long =
+    gcBeans.stream().mapToLong(_.getCollectionTime).sum()
+
+  /** Median wall time, allocated bytes and GC time per measured run. Allocation is the boxing axis:
+    * it isolates the per-key object traffic a boxed index pays and the flat arrays do not.
+    */
   private def bench(f: => Int): MeasuredRows = {
     var rowsOut = -1
-    val timings = (0 until Warmup + Measured).map { _ =>
+    val samples = (0 until Warmup + Measured).map { _ =>
+      val alloc0 = allocatedBytes
+      val gc0 = gcTimeMs
       val t0 = System.nanoTime()
       rowsOut = f
-      System.nanoTime() - t0
+      val dt = System.nanoTime() - t0
+      (dt, allocatedBytes - alloc0, gcTimeMs - gc0)
     }.drop(Warmup)
-    MeasuredRows(medianMs(timings), rowsOut)
+    MeasuredRows(
+      medianMs(samples.map(_._1)),
+      rowsOut,
+      median(samples.map(_._2)) / 1e6,
+      median(samples.map(_._3)).toDouble
+    )
   }
 
   private def runKeyed(plan: Dataset[?]): Int = DatasetInterpreter.execute(plan).toOption.get.rowCount
@@ -82,20 +121,18 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
     info("InnerJoinOn — index built on LEFT; RIGHT probe disjoint (output ~0)")
     info(f"${"=" * 78}")
     info(
-      f"${"n"}%-8s ${"regime"}%-8s ${"probe"}%-8s ${"rows-in"}%-12s ${"rows-out"}%-10s ${"median ms"}%10s ${"vs prev"}%8s"
+      f"${"n"}%-8s ${"regime"}%-8s ${"rows-in"}%-12s ${"median ms"}%10s ${"alloc MB"}%10s ${"gc ms"}%8s ${"vs prev"}%8s"
     )
     info("-" * 78)
 
-    Vector("hot", "few", "uniform").foreach { regime =>
+    Vector("hot", "few", "uniform", "sparse").foreach { regime =>
       var prev: Option[Double] = None
       skewSizes.foreach { n =>
-        val leftN = n
-        val rightN = n
-        val left = intDs(indexSide(regime, leftN))
-        val right = intDs(probeSide(rightN))
+        val left = intDs(indexSide(regime, n))
+        val right = intDs(probeSide(n))
         val m = bench(runKeyed(left.joinOn(right, keyExpr, keyExpr, intType, intType)))
         val ratio = prev.fold("—")(p => f"${m.ms / p}%6.2fx")
-        info(f"$n%-8d $regime%-8s $rightN%-8d ${leftN + rightN}%-12d ${m.rowsOut}%-10d ${m.ms}%9.1f  $ratio")
+        info(f"$n%-8d $regime%-8s ${2 * n}%-12d ${m.ms}%9.1f ${m.allocMb}%9.1f ${m.gcMs}%7.1f  $ratio")
         prev = Some(m.ms)
       }
     }
@@ -111,7 +148,7 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
     info("-" * 78)
 
     val n = 200_000
-    Vector("hot", "few", "uniform").foreach { regime =>
+    Vector("hot", "few", "uniform", "sparse").foreach { regime =>
       val left = intDs(probeSide(n)) // probe, disjoint
       val right = intDs(indexSide(regime, n)) // indexed side carries the skew
       val rowsIn = n + n

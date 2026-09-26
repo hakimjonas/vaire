@@ -202,7 +202,32 @@ The schema and the column disagreed about nullability: a column carries a null `
 
 The core suite (`testFull`, 609 tests) and the Spark suite (`testFull`, 247) are green, including `NullModelSpec`, `NullDecodeSpec`, `NarrowSpec`, `SparkNullabilitySpec`, `SparkSchemaValidationSpec`, and the nested struct nullability mapping.
 
-Re-measured same-window on one machine at the end of the branch (feature vs boxed `main`, median ms): hot 2.6 vs 7.1 / 4.9 vs 14.3 / 10.2 vs 15.2 at 100k/200k/400k, few 2.5 vs 6.7 / 5.4 vs 6.5 / 7.4 vs 13.9, uniform 3.7 vs 6.5 / 8.8 vs 15.6 / 16.9 vs 20.6. The null model and type-check work does not touch the index hot path.
+#### Phase 1e — dense-key index (September 2026)
+
+The open-addressing table was sized to the row count (`2 × rowCount`, load ≤ 0.5), so it was sized for the worst case (all-distinct) even for a single hot key, and at 5-10M it was ~2× the boxed map's table. Measured with proper warmup (5 warmup + 10 measured) the earlier "uniform regression eliminated" claim did not hold: at 10M the fixed table was slower than boxed `main` across every regime (uniform 1139 vs 525 ms), and it allocated less but not enough to matter under ZGC.
+
+Phase 1e replaces the fixed table with two slot layouts chosen from the key range measured in a first pass:
+
+- Dense keys (`max - min + 1` within 4× the distinct count and under 2^26) use a direct-address `Array[Int]` indexed by `key - min`: one array access, no hashing, no collisions, and the array is exactly the key range. This is the common join-key shape (ids, dates, enums) and the uniform sweep.
+- Sparse keys keep the open-addressing table as a fallback.
+
+Both map a key to the head of the flat `next` chain, so nothing per-key is allocated and the ascending order is preserved. The structure is immutable after construction and contains no `var` (the min/max pass is tail-recursive, satisfying `SourcePolicySpec`).
+
+Same-window A/B on one machine (feature vs boxed `main`, median ms, 5 warmup + 10 measured), with a `sparse` regime (`key = base + 37·i`, forcing the fallback):
+
+| n | hot | few | uniform | sparse |
+| --- | --- | --- | --- | --- |
+| 100k | 1.6 / 6.7 | 1.1 / 3.2 | 1.2 / 3.1 | 4.1 / 3.7 |
+| 200k | 3.1 / 13.6 | 2.1 / 6.2 | 2.4 / 9.2 | 6.6 / 14.8 |
+| 400k | 6.1 / 9.4 | 4.2 / 12.5 | 4.9 / 21.0 | 14.7 / 41.3 |
+| 1M | 15.3 / 23.5 | 10.7 / 31.3 | 12.9 / 53.2 | 52.2 / 131.5 |
+| 2M | 26.7 / 47.5 | 21.1 / 51.9 | 25.1 / 102.1 | 170.4 / 301.2 |
+| 5M | 84.0 / 124.1 | 52.1 / 130.9 | 64.3 / 246.7 | 524.2 / 758.9 |
+| 10M | 139.2 / 273.6 | 103.6 / 270.7 | 124.1 / 483.6 | 1093.2 / 1568.2 |
+
+Allocation (median MB per run) is ~7-10× lower for dense keys (360 vs 2508-3670 at 10M) and ~3-4× lower for sparse, and the 10M GC time drops from 26-193 ms on `main` to 0. The Spark backend is native Catalyst and unchanged.
+
+The earlier same-window numbers (fixed table, 5 warmup + 10 measured): hot 2.5 vs 6.7 / 4.9 vs 13.6 / 10.2 vs 15.2 at 100k/200k/400k, uniform 3.2 vs 3.1 / 8.7 vs 9.1 / 15.2 vs 21.0.
 
 ---
 

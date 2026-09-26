@@ -59,8 +59,10 @@ release tag (`v1.0.0-alpha`) is cut manually.
 - **`Dataset.narrow[U]`** reinterprets the schema, asserting that fields `U` declares
   non-optional hold no nulls, in both backends.
 - **Unboxed keyed-join index** — the per-join `HashMap[Any, Vector[Int]]` is replaced by an
-  open-addressing index that reads primitive columns unboxed. The uniform-key regression is
-  gone; see `docs/join-optimization-plan.md`, Phase 1b.
+  unboxed index: dense keys use a direct-address array (`key - min`), sparse keys an
+  open-addressing table, both mapping a key to the head of a flat chain. On one machine,
+  100k-10M, 2-4x faster than the boxed index and 3-10x less allocation, with the 10M GC time
+  dropping to zero; see `docs/join-optimization-plan.md`, Phase 1e.
 
 ## 0.0.20
 

@@ -112,7 +112,9 @@ import net.ghoula.vaire.spark.{SparkDatasets, SparkInterpreter}
 
 val interpreter = SparkInterpreter(spark)
 
-val df = spark.read.parquet("/data/trades")
+// A derived schema names its columns symbol_value, price_value, quantity_value;
+// rename the source to match before wrapping it.
+val df = spark.read.parquet("/data/trades").toDF("symbol_value", "price_value", "quantity_value")
 val trades = SparkDatasets.fromDataFrame(df, summon[Schema[Trade]])
 
 val filtered = trades.where(_.price > 100.0)

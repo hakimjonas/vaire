@@ -202,6 +202,8 @@ The schema and the column disagreed about nullability: a column carries a null `
 
 The core suite (`testFull`, 609 tests) and the Spark suite (`testFull`, 247) are green, including `NullModelSpec`, `NullDecodeSpec`, `NarrowSpec`, `SparkNullabilitySpec`, `SparkSchemaValidationSpec`, and the nested struct nullability mapping.
 
+Re-measured same-window on one machine at the end of the branch (feature vs boxed `main`, median ms): hot 2.6 vs 7.1 / 4.9 vs 14.3 / 10.2 vs 15.2 at 100k/200k/400k, few 2.5 vs 6.7 / 5.4 vs 6.5 / 7.4 vs 13.9, uniform 3.7 vs 6.5 / 8.8 vs 15.6 / 16.9 vs 20.6. The null model and type-check work does not touch the index hot path.
+
 ---
 
 ## Phase 2 — Constant-factor work on the predicate family

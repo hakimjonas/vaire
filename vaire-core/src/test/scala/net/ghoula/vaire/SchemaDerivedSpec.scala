@@ -19,9 +19,18 @@ class SchemaDerivedSpec extends AnyFlatSpec with Matchers {
     val schema = summon[Schema[Person]]
 
     schema.columnCount shouldBe 2
-    schema.columnNames should contain("name_value")
-    schema.columnNames should contain("age_value")
+    schema.columnNames should contain("name")
+    schema.columnNames should contain("age")
     schema.columnTypes shouldBe Vector(ColumnType.StringType, ColumnType.IntType)
+  }
+
+  "Schema.derived" should "name a single-column field after the field and prefix a multi-column field" in {
+    case class Address(city: String, zip: Int)
+    case class Person(name: String, address: Address)
+    given Schema[Address] = Schema.derived
+    given Schema[Person] = Schema.derived
+
+    summon[Schema[Person]].columnNames shouldBe Vector("name", "address_city", "address_zip")
   }
 
   "Schema.derived" should "encode case class correctly" in {

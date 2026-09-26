@@ -24,7 +24,7 @@ class JsonWalkParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct('{"a":1,"b":{"c":[10,20]},"d":"x"}'),
         struct('[1,2,3]'),
         struct('"plain"')
-      )) AS (j_value)
+      )) AS (j)
     """)
 
   private lazy val materialized = {
@@ -32,7 +32,7 @@ class JsonWalkParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def jCell: Expr[Doc, String] = Expr.cell("j_value", ColumnIndex(0))
+  private def jCell: Expr[Doc, String] = Expr.cell("j", ColumnIndex(0))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],

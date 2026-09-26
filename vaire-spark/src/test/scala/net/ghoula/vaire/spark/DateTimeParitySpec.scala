@@ -21,7 +21,7 @@ class DateTimeParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
       SELECT inline(array(
         struct(cast('2024-01-15 10:30:45' as timestamp), cast('2024-01-15' as date)),
         struct(cast('2024-06-30 23:59:59' as timestamp), cast('2024-06-30' as date))
-      )) AS (ts_value, d_value)
+      )) AS (ts, d)
     """)
   }
 
@@ -30,8 +30,8 @@ class DateTimeParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Ev]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def tsCell: Expr[Ev, Timestamp] = Expr.cell("ts_value", ColumnIndex(0))
-  private def dCell: Expr[Ev, Date] = Expr.cell("d_value", ColumnIndex(1))
+  private def tsCell: Expr[Ev, Timestamp] = Expr.cell("ts", ColumnIndex(0))
+  private def dCell: Expr[Ev, Date] = Expr.cell("d", ColumnIndex(1))
 
   private def checkParity[A](expr: Expr[Ev, A], columnType: ColumnType, expected: Vector[Any | Null]): Unit = {
     val inMemory = ExprInterpreter.evalColumn(expr, materialized.columns, columnType) match {

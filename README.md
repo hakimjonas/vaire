@@ -25,9 +25,9 @@ val columns = Vector(
 val trades: Dataset[Trade] = Dataset.fromColumns(columns, summon[Schema[Trade]]).toOption.get
 
 val result = trades
-  .filter(Expr.Cell[Trade, Double]("price_value", ColumnIndex(1)) > Expr.const(100.0))
+  .filter(Expr.Cell[Trade, Double]("price", ColumnIndex(1)) > Expr.const(100.0))
   .groupByAgg[SymbolTotal](
-    keys = Vector(KeySpec("symbol", Expr.Cell("symbol_value", ColumnIndex(0)), ColumnType.StringType)),
+    keys = Vector(KeySpec("symbol", Expr.Cell("symbol", ColumnIndex(0)), ColumnType.StringType)),
     aggs = Vector(agg.sumDouble[Trade](_.price).as("total"))
   )
 

@@ -29,17 +29,17 @@ class StructExprSpec extends AnyFlatSpec with Matchers {
     case Left(err) => fail(s"Dataset creation failed: $err")
   }
 
-  val scoreCell: Expr[Row, Int] = Expr.cell("score_value", ColumnIndex(1))
-  val labelCell: Expr[Row, String] = Expr.cell("label_value", ColumnIndex(2))
+  val scoreCell: Expr[Row, Int] = Expr.cell("score", ColumnIndex(1))
+  val labelCell: Expr[Row, String] = Expr.cell("label", ColumnIndex(2))
 
   val structExpr: Expr[Row, Point] =
     Expr.struct[Row, Point](
-      ("x_value", scoreCell, ColumnType.IntType),
-      ("y_value", labelCell, ColumnType.StringType)
+      ("x", scoreCell, ColumnType.IntType),
+      ("y", labelCell, ColumnType.StringType)
     )
 
   val structColumnType: ColumnType = ColumnType.StructType(
-    Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType))
+    Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType))
   )
 
   "Expr.Struct" should "report the struct's flattened column type" in {
@@ -62,7 +62,7 @@ class StructExprSpec extends AnyFlatSpec with Matchers {
   }
 
   "Expr.GetField" should "extract a field column in-memory" in {
-    val getFieldExpr: Expr[Row, Int] = structExpr.getField[Int](ColumnIndex(0), "x_value")
+    val getFieldExpr: Expr[Row, Int] = structExpr.getField[Int](ColumnIndex(0), "x")
     val projected = dataset.selectAs[OnlyX](("x", getFieldExpr, ColumnType.IntType))
     DatasetInterpreter.execute(projected) match {
       case Right(md) =>
@@ -73,7 +73,7 @@ class StructExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "extract by field position, not global position" in {
-    val getFieldExpr: Expr[Row, String] = structExpr.getField[String](ColumnIndex(1), "y_value")
+    val getFieldExpr: Expr[Row, String] = structExpr.getField[String](ColumnIndex(1), "y")
     val projected = dataset.selectAs[OnlyY](("y", getFieldExpr, ColumnType.StringType))
     DatasetInterpreter.execute(projected) match {
       case Right(md) =>
@@ -83,7 +83,7 @@ class StructExprSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "reject out-of-bounds field indexes" in {
-    val getFieldExpr: Expr[Row, Int] = structExpr.getField[Int](ColumnIndex(7), "x_value")
+    val getFieldExpr: Expr[Row, Int] = structExpr.getField[Int](ColumnIndex(7), "x")
     val projected = dataset.selectAs[OnlyX](("x", getFieldExpr, ColumnType.IntType))
     DatasetInterpreter.execute(projected).isLeft shouldBe true
   }

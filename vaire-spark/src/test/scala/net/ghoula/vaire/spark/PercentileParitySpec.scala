@@ -26,7 +26,7 @@ class PercentileParitySpec extends AnyFlatSpec with Matchers with SparkTestBase 
         struct(cast(5.0 as double)),
         struct(cast(4.0 as double)),
         struct(cast(5.0 as double))
-      )) AS (y_value)
+      )) AS (y)
     """)
 
   private lazy val materialized = {
@@ -34,7 +34,7 @@ class PercentileParitySpec extends AnyFlatSpec with Matchers with SparkTestBase 
     RowConverter.toMaterialized(rows, summon[Schema[Vals]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def yCell: Expr[Vals, Double] = Expr.cell("y_value", ColumnIndex(0))
+  private def yCell: Expr[Vals, Double] = Expr.cell("y", ColumnIndex(0))
   private def constD(v: Double): Expr[Vals, Double] = Expr.const[Vals, Double](v)
 
   private def checkPercentile(p: Double, anchor: Double): Unit = {

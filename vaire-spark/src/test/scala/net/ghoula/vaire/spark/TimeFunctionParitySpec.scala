@@ -21,7 +21,7 @@ class TimeFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBas
         struct(1, make_time(0, 0, 0)),
         struct(2, make_time(10, 15, 30.5)),
         struct(3, make_time(23, 59, 59.999999))
-      )) AS (id_value, at_value)
+      )) AS (id, at)
     """)
   }
 
@@ -33,7 +33,7 @@ class TimeFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBas
   case class Timed(id: Int, at: Time)
   given Schema[Timed] = Schema.derived
 
-  private def atCell: Expr[Timed, Time] = Expr.cell("at_value", ColumnIndex(1))
+  private def atCell: Expr[Timed, Time] = Expr.cell("at", ColumnIndex(1))
 
   /** Runs the expr on both backends and returns (in-memory values, Spark values). */
   private def evalBoth[A](
@@ -89,12 +89,12 @@ class TimeFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBas
 
   it should "agree on both backends for time_from_millis and time_from_micros" in {
     checkParity(
-      Expr.timeFromMillis[Timed](Expr.cell[Timed, Int]("id_value", ColumnIndex(0)).castToLong),
+      Expr.timeFromMillis[Timed](Expr.cell[Timed, Int]("id", ColumnIndex(0)).castToLong),
       ColumnType.TimeType,
       Vector[Any | Null](Time.ofMicros(1000L), Time.ofMicros(2000L), Time.ofMicros(3000L))
     )
     checkParity(
-      Expr.timeFromMicros[Timed](Expr.cell[Timed, Int]("id_value", ColumnIndex(0)).castToLong),
+      Expr.timeFromMicros[Timed](Expr.cell[Timed, Int]("id", ColumnIndex(0)).castToLong),
       ColumnType.TimeType,
       Vector[Any | Null](Time.ofMicros(1L), Time.ofMicros(2L), Time.ofMicros(3L))
     )
@@ -119,7 +119,7 @@ class TimeFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBas
       case other => fail(s"Spark conversion failed: $other")
     }
     val sparkValues = base
-      .select(col("id_value").cast("double").as("s"))
+      .select(col("id").cast("double").as("s"))
       .select(sparkCol)
       .collect()
       .map(r => r.get(0): Any | Null)
@@ -145,7 +145,7 @@ class TimeFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBas
     val withTs = materialized.copy(columns = materialized.columns :+ tsCol)
     val expr = Expr.timeBucket[Timed](
       Expr.const(DayTimeInterval.ofMicros(15 * 60L * 1000000L)),
-      Expr.cell[Timed, Timestamp]("ts_value", ColumnIndex(2)),
+      Expr.cell[Timed, Timestamp]("ts", ColumnIndex(2)),
       Expr.const(origin)
     )
 
@@ -160,7 +160,7 @@ class TimeFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBas
       case other => fail(s"Spark conversion failed: $other")
     }
     val sparkValues = base
-      .select(lit(new java.sql.Timestamp(tsMicros / 1000L)).as("ts_value"))
+      .select(lit(new java.sql.Timestamp(tsMicros / 1000L)).as("ts"))
       .select(sparkCol)
       .collect()
       .map(r => r.get(0): Any | Null)

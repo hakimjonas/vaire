@@ -27,7 +27,7 @@ class RegrParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct(cast(3.0 as double), cast(5.0 as double)),
         struct(cast(4.0 as double), cast(4.0 as double)),
         struct(cast(5.0 as double), cast(5.0 as double))
-      )) AS (x_value, y_value)
+      )) AS (x, y)
     """)
 
   private lazy val materialized = {
@@ -35,8 +35,8 @@ class RegrParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Pts]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def xCell: Expr[Pts, Double] = Expr.cell("x_value", ColumnIndex(0))
-  private def yCell: Expr[Pts, Double] = Expr.cell("y_value", ColumnIndex(1))
+  private def xCell: Expr[Pts, Double] = Expr.cell("x", ColumnIndex(0))
+  private def yCell: Expr[Pts, Double] = Expr.cell("y", ColumnIndex(1))
 
   private def sparkValueOf(expr: Expr[Pts, ?]): Any | Null =
     base
@@ -88,7 +88,7 @@ class RegrParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         SELECT inline(array(
           struct(cast(0.0 as double), cast(2.0 as double)),
           struct(cast(0.0 as double), cast(4.0 as double))
-        )) AS (x_value, y_value)
+        )) AS (x, y)
       """)
     val md = RowConverter.toMaterialized(vertical.collect(), summon[Schema[Pts]]).fold(err => fail(s"$err"), identity)
     ExprInterpreter.evalAggregation(Expr.regrSlope[Pts](yCell, xCell), md.columns) shouldBe Right(None)

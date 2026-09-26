@@ -29,7 +29,7 @@ class XpathParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct('<r><item id="7" kind="x">v1</item><item id="8">v2</item></r>'),
         struct('<r><v>42</v><v> 4.5 </v></r>'),
         struct('<r><m>&amp;lt;</m><t><![CDATA[cd]]></t></r>')
-      )) AS (xml_value)
+      )) AS (xml)
     """)
 
   private lazy val materialized = {
@@ -37,7 +37,7 @@ class XpathParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def xmlCell: Expr[Doc, String] = Expr.cell("xml_value", ColumnIndex(0))
+  private def xmlCell: Expr[Doc, String] = Expr.cell("xml", ColumnIndex(0))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],

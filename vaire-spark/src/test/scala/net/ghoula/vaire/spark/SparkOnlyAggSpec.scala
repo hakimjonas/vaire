@@ -23,7 +23,7 @@ class SparkOnlyAggSpec extends AnyFlatSpec with Matchers with SparkTestBase {
       SELECT inline(array(
         struct('a', cast(1 as bigint)), struct('a', cast(2 as bigint)),
         struct('b', cast(3 as bigint))
-      )) AS (k_value, v_value)
+      )) AS (k, v)
     """)
 
   private lazy val materialized = {
@@ -31,8 +31,8 @@ class SparkOnlyAggSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[G]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def kCell: Expr[G, Any] = Expr.cell("k_value", ColumnIndex(0))
-  private def vCell: Expr[G, Any] = Expr.cell("v_value", ColumnIndex(1))
+  private def kCell: Expr[G, Any] = Expr.cell("k", ColumnIndex(0))
+  private def vCell: Expr[G, Any] = Expr.cell("v", ColumnIndex(1))
 
   private def assertUnsupported(expr: Expr[G, ?]): Unit =
     ExprInterpreter.evalAggregation(expr, materialized.columns) match {
@@ -41,9 +41,9 @@ class SparkOnlyAggSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     }
 
   "histogram_numeric" should "build a histogram on Spark and be unsupported in-memory" in {
-    assertUnsupported(Expr.histogramNumeric[G](Expr.cell[G, Double]("v_value", ColumnIndex(1)), Expr.const[G, Int](2)))
+    assertUnsupported(Expr.histogramNumeric[G](Expr.cell[G, Double]("v", ColumnIndex(1)), Expr.const[G, Int](2)))
     val (sparkCol, _) = ExprToColumn.convert(
-      Expr.histogramNumeric[G](Expr.cell[G, Double]("v_value", ColumnIndex(1)), Expr.const[G, Int](2))
+      Expr.histogramNumeric[G](Expr.cell[G, Double]("v", ColumnIndex(1)), Expr.const[G, Int](2))
     ) match {
       case Right(converted) => converted
       case other => fail(s"Spark conversion failed: $other")
@@ -59,11 +59,11 @@ class SparkOnlyAggSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     assertUnsupported(Expr.grouping[G](kCell))
     assertUnsupported(Expr.groupingId[G](kCell, vCell))
 
-    val grouped = base.rollup(col("k_value")).agg(grouping(col("k_value")).as("g"))
+    val grouped = base.rollup(col("k")).agg(grouping(col("k")).as("g"))
     val gValues = grouped.collect().map(row => row.get(1).asInstanceOf[Number].intValue()).toSeq
     gValues.sorted shouldBe Seq(0, 0, 1)
 
-    val withRollup = base.rollup(col("k_value")).agg(grouping_id(col("k_value")).as("gid"))
+    val withRollup = base.rollup(col("k")).agg(grouping_id(col("k")).as("gid"))
     val gidValues = withRollup.collect().map(row => row.get(1).asInstanceOf[Number].longValue()).toSeq
     gidValues.sorted shouldBe Seq(0L, 0L, 1L)
   }

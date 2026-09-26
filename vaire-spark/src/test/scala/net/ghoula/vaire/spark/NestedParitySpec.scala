@@ -51,9 +51,9 @@ class NestedParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         }
 
         val df = DataFrameBuilder.fromMaterialized(spark, md)
-        df.schema.fieldNames.toSeq shouldBe Seq("id_value", "xs_value", "tags_value")
-        df.schema("xs_value").dataType.simpleString shouldBe "array<int>"
-        df.schema("tags_value").dataType.simpleString shouldBe "map<string,int>"
+        df.schema.fieldNames.toSeq shouldBe Seq("id", "xs", "tags")
+        df.schema("xs").dataType.simpleString shouldBe "array<int>"
+        df.schema("tags").dataType.simpleString shouldBe "map<string,int>"
 
         val rows = df.collect()
         RowConverter.toMaterialized(rows, summon[Schema[Rec]]) match {
@@ -76,8 +76,8 @@ class NestedParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   it should "read TIME columns produced by Spark SQL" in {
     spark.conf.set("spark.sql.timeType.enabled", "true")
-    val df = spark.sql("SELECT make_time(10, 15, 30.123456) AS at_value")
-    df.schema("at_value").dataType.typeName shouldBe "time(6)"
+    val df = spark.sql("SELECT make_time(10, 15, 30.123456) AS at")
+    df.schema("at").dataType.typeName shouldBe "time(6)"
 
     val rows = df.collect()
     rows(0).get(0) shouldBe java.time.LocalTime.of(10, 15, 30, 123456000)
@@ -90,7 +90,7 @@ class NestedParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     MaterializedDataset.fromVector(points)(using Schema.structColumn[Point]) match {
       case Right(md) =>
         val df = DataFrameBuilder.fromMaterialized(spark, md)
-        df.schema.fields.head.dataType.simpleString shouldBe "struct<x_value:int,y_value:string>"
+        df.schema.fields.head.dataType.simpleString shouldBe "struct<x:int,y:string>"
 
         val rows = df.collect()
         rows(0).getStruct(0).getInt(0) shouldBe 1
@@ -106,8 +106,8 @@ class NestedParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   "Expr.Struct" should "produce identical results on both interpreters" in {
     val structExpr = Expr.struct[Entry, Point](
-      ("x_value", Expr.cell[Entry, Int]("score_value", ColumnIndex(1)), ColumnType.IntType),
-      ("y_value", Expr.cell[Entry, String]("label_value", ColumnIndex(2)), ColumnType.StringType)
+      ("x", Expr.cell[Entry, Int]("score", ColumnIndex(1)), ColumnType.IntType),
+      ("y", Expr.cell[Entry, String]("label", ColumnIndex(2)), ColumnType.StringType)
     )
     val structCt = structExpr.outputType.get
     val expected = Vector(Point(10, "a"), Point(20, "b"), Point(30, "c"))
@@ -129,10 +129,10 @@ class NestedParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   "Expr.GetField" should "produce identical results on both interpreters" in {
     val structExpr = Expr.struct[Entry, Point](
-      ("x_value", Expr.cell[Entry, Int]("score_value", ColumnIndex(1)), ColumnType.IntType),
-      ("y_value", Expr.cell[Entry, String]("label_value", ColumnIndex(2)), ColumnType.StringType)
+      ("x", Expr.cell[Entry, Int]("score", ColumnIndex(1)), ColumnType.IntType),
+      ("y", Expr.cell[Entry, String]("label", ColumnIndex(2)), ColumnType.StringType)
     )
-    val getFieldExpr: Expr[Entry, String] = structExpr.getField[String](ColumnIndex(1), "y_value")
+    val getFieldExpr: Expr[Entry, String] = structExpr.getField[String](ColumnIndex(1), "y")
     val expected = Vector(OnlyY("a"), OnlyY("b"), OnlyY("c"))
 
     val projected = rootOf(entries).selectAs[OnlyY](("y", getFieldExpr, ColumnType.StringType))

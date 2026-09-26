@@ -26,7 +26,7 @@ class MomentParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct(cast(5.0 as double)),
         struct(cast(4.0 as double)),
         struct(cast(5.0 as double))
-      )) AS (y_value)
+      )) AS (y)
     """)
 
   private lazy val materialized = {
@@ -34,7 +34,7 @@ class MomentParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Vals]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def yCell: Expr[Vals, Double] = Expr.cell("y_value", ColumnIndex(0))
+  private def yCell: Expr[Vals, Double] = Expr.cell("y", ColumnIndex(0))
 
   private def checkStats(expr: Expr[Vals, Option[Double]], anchor: Double): Unit = {
     val inMemory = ExprInterpreter.evalAggregation(expr, materialized.columns) match {
@@ -67,7 +67,7 @@ class MomentParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         SELECT inline(array(
           struct(cast(1.0 as double)), struct(cast(2.0 as double)), struct(cast(3.0 as double)),
           struct(cast(4.0 as double)), struct(cast(5.0 as double)), struct(cast(6.0 as double))
-        )) AS (y_value)
+        )) AS (y)
       """)
     val md = RowConverter.toMaterialized(symmetric.collect(), summon[Schema[Vals]]).fold(err => fail(s"$err"), identity)
     val inMemory = ExprInterpreter.evalAggregation(Expr.skewness[Vals](yCell), md.columns) match {

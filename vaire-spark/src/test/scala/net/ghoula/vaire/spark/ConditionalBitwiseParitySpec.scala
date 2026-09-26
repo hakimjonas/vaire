@@ -19,7 +19,7 @@ class ConditionalBitwiseParitySpec extends AnyFlatSpec with Matchers with SparkT
         struct(1, 1.5, 'b'),
         struct(2, 2.5, 'a'),
         struct(3, cast(null as double), 'c')
-      )) AS (id_value, score_value, label_value)
+      )) AS (id, score, label)
     """)
 
   private lazy val materialized = {
@@ -49,9 +49,9 @@ class ConditionalBitwiseParitySpec extends AnyFlatSpec with Matchers with SparkT
     sparkValues shouldBe expected
   }
 
-  private def idCell: Expr[M, Int] = Expr.cell("id_value", ColumnIndex(0))
-  private def scoreCell: Expr[M, Double] = Expr.cell("score_value", ColumnIndex(1))
-  private def labelCell: Expr[M, String] = Expr.cell("label_value", ColumnIndex(2))
+  private def idCell: Expr[M, Int] = Expr.cell("id", ColumnIndex(0))
+  private def scoreCell: Expr[M, Double] = Expr.cell("score", ColumnIndex(1))
+  private def labelCell: Expr[M, String] = Expr.cell("label", ColumnIndex(2))
 
   "greatest and least" should "pick row-wise extremes, skipping nulls" in {
     checkParity(
@@ -92,8 +92,8 @@ class ConditionalBitwiseParitySpec extends AnyFlatSpec with Matchers with SparkT
 
   "nanvl" should "replace NaN with the fallback on both backends" in {
     val nanBase =
-      spark.sql("SELECT my_nan AS v_value FROM VALUES (cast('nan' as double)), (cast(2.0 as double)) t(my_nan)")
-    val expr = Expr.nanvl[M](Expr.cell[M, Double]("v_value", ColumnIndex(0)), Expr.const[M, Double](0.0))
+      spark.sql("SELECT my_nan AS v FROM VALUES (cast('nan' as double)), (cast(2.0 as double)) t(my_nan)")
+    val expr = Expr.nanvl[M](Expr.cell[M, Double]("v", ColumnIndex(0)), Expr.const[M, Double](0.0))
     val (sparkCol, _) = ExprToColumn.convert(expr) match {
       case Right(converted) => converted
       case other => fail(s"Spark conversion failed: $other")

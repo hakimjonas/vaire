@@ -453,8 +453,8 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     val amountCol = Column.double(Array(10.0, 20.0, 30.0))
     val ds = Dataset.fromColumns(Vector(regionCol, amountCol), saleSchema).toOption.get
 
-    val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
-    val amountCell: Expr[Sale, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+    val regionCell: Expr[Sale, Any] = Expr.Cell("region", ColumnIndex(0))
+    val amountCell: Expr[Sale, Double] = Expr.Cell("amount", ColumnIndex(1))
     val keys = Vector(KeySpec[Sale, Any]("region", regionCell, ColumnType.StringType))
     val aggs = Vector(AggSpec("total", Expr.SumDouble(amountCell), ColumnType.DoubleType))
     val grouped = ds.groupByAgg[Result](keys, aggs)
@@ -534,14 +534,14 @@ class SparkInterpreterSpec extends AnyFlatSpec with Matchers with SparkTestBase 
     )
     val structType = StructType(
       Array(
-        StructField("region_value", SparkStringType, nullable = false),
-        StructField("amount_value", SparkDoubleType, nullable = false)
+        StructField("region", SparkStringType, nullable = false),
+        StructField("amount", SparkDoubleType, nullable = false)
       )
     )
     val nativeDf = spark.createDataFrame(rows, structType)
 
-    val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
-    val amountCell: Expr[Sale, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+    val regionCell: Expr[Sale, Any] = Expr.Cell("region", ColumnIndex(0))
+    val amountCell: Expr[Sale, Double] = Expr.Cell("amount", ColumnIndex(1))
     val keys = Vector(KeySpec[Sale, Any]("region", regionCell, ColumnType.StringType))
     val aggs = Vector(AggSpec("total", Expr.SumDouble(amountCell), ColumnType.DoubleType))
 

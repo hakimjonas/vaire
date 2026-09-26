@@ -25,11 +25,11 @@ class SparkOnlySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct(2, cast(2.5 as double)),
         struct(3, cast(3.5 as double)),
         struct(4, cast(10.5 as double))
-      )) AS (id_value, value_value)
+      )) AS (id, value)
     """)
 
-  private def valueCell: Expr[Event, Double] = Expr.cell("value_value", ColumnIndex(1))
-  private def idCell: Expr[Event, Long] = Expr.cell("id_value", ColumnIndex(0))
+  private def valueCell: Expr[Event, Double] = Expr.cell("value", ColumnIndex(1))
+  private def idCell: Expr[Event, Long] = Expr.cell("id", ColumnIndex(0))
 
   private def evalSpark[A](expr: Expr[Event, A]): (Vector[Any | Null], ColumnType) = {
     val (sparkCol, ct) = ExprToColumn.convert(expr) match {

@@ -20,7 +20,7 @@ class StringMathParitySpec extends AnyFlatSpec with Matchers with SparkTestBase 
         struct(5, 'hello world', cast(2.0 as double)),
         struct(10, 'scala-spark', cast(9.0 as double)),
         struct(-8, 'ABC def', cast(0.5 as double))
-      )) AS (id_value, txt_value, num_value)
+      )) AS (id, txt, num)
     """)
 
   private lazy val materialized = {
@@ -28,9 +28,9 @@ class StringMathParitySpec extends AnyFlatSpec with Matchers with SparkTestBase 
     RowConverter.toMaterialized(rows, summon[Schema[Row2]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def idCell: Expr[Row2, Int] = Expr.cell("id_value", ColumnIndex(0))
-  private def txtCell: Expr[Row2, String] = Expr.cell("txt_value", ColumnIndex(1))
-  private def numCell: Expr[Row2, Double] = Expr.cell("num_value", ColumnIndex(2))
+  private def idCell: Expr[Row2, Int] = Expr.cell("id", ColumnIndex(0))
+  private def txtCell: Expr[Row2, String] = Expr.cell("txt", ColumnIndex(1))
+  private def numCell: Expr[Row2, Double] = Expr.cell("num", ColumnIndex(2))
 
   private def evalBoth[A](
     expr: Expr[Row2, A],

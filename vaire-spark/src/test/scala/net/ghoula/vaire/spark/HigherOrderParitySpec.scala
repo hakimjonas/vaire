@@ -27,7 +27,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
         struct(array(4, 5), array(30, 40, 50), 20, map('x', 10)),
         struct(array(), array(60), 30, map()),
         struct(null, array(70), 40, null)
-      )) AS (xs_value, ys_value, c_value, m_value)
+      )) AS (xs, ys, c, m)
     """)
 
   private lazy val materialized = {
@@ -35,10 +35,10 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def xsCell: Expr[Doc, Seq[Int]] = Expr.cell("xs_value", ColumnIndex(0))
-  private def ysCell: Expr[Doc, Seq[Int]] = Expr.cell("ys_value", ColumnIndex(1))
-  private def cCell: Expr[Doc, Int] = Expr.cell("c_value", ColumnIndex(2))
-  private def mCell: Expr[Doc, Map[String, Int]] = Expr.cell("m_value", ColumnIndex(3))
+  private def xsCell: Expr[Doc, Seq[Int]] = Expr.cell("xs", ColumnIndex(0))
+  private def ysCell: Expr[Doc, Seq[Int]] = Expr.cell("ys", ColumnIndex(1))
+  private def cCell: Expr[Doc, Int] = Expr.cell("c", ColumnIndex(2))
+  private def mCell: Expr[Doc, Map[String, Int]] = Expr.cell("m", ColumnIndex(3))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],
@@ -244,7 +244,7 @@ class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
     )
   }
 
-  "transform_values" should "transform map values on both backends" in {
+  "transforms" should "transform map values on both backends" in {
     checkParity(
       mCell.transformValues((_, v) => v * Expr.const(10)),
       ColumnType.AnyType,

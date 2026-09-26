@@ -25,10 +25,10 @@ class E2eRevenueQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase w
   import E2eTestData.LineItem
 
   // Column indices for LineItem (16-field case class, each primitive → 1 column)
-  private val shipdate: Expr[LineItem, String] = Expr.Cell("l_shipdate_value", ColumnIndex(10))
-  private val discount: Expr[LineItem, Double] = Expr.Cell("l_discount_value", ColumnIndex(6))
-  private val quantity: Expr[LineItem, Double] = Expr.Cell("l_quantity_value", ColumnIndex(4))
-  private val extendedprice: Expr[LineItem, Double] = Expr.Cell("l_extendedprice_value", ColumnIndex(5))
+  private val shipdate: Expr[LineItem, String] = Expr.Cell("l_shipdate", ColumnIndex(10))
+  private val discount: Expr[LineItem, Double] = Expr.Cell("l_discount", ColumnIndex(6))
+  private val quantity: Expr[LineItem, Double] = Expr.Cell("l_quantity", ColumnIndex(4))
+  private val extendedprice: Expr[LineItem, Double] = Expr.Cell("l_extendedprice", ColumnIndex(5))
 
   "TPC-H Q6" should "produce identical results via vaire and native Spark" in {
     val items = E2eTestData.generateLineItems(100_000)

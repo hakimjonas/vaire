@@ -32,7 +32,7 @@ class JsonTupleParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct('{"a''b":"quoted"}'),
         struct('{"a.b''c":"literal"}'),
         struct('{"e":1e10,"g":1.0}')
-      )) AS (j_value)
+      )) AS (j)
     """)
 
   private lazy val materialized = {
@@ -40,7 +40,7 @@ class JsonTupleParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def jCell: Expr[Doc, String] = Expr.cell("j_value", ColumnIndex(0))
+  private def jCell: Expr[Doc, String] = Expr.cell("j", ColumnIndex(0))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],

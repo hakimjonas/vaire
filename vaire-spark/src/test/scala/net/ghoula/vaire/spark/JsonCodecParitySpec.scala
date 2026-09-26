@@ -46,7 +46,7 @@ class JsonCodecParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct('{"id":7,"items":[{"sku":"a","qty":2},{"sku":"b","qty":1}]}'),
         struct('{"id":8,"items":[]}'),
         struct(cast(null as string))
-      )) AS (j_value)
+      )) AS (j)
     """)
 
   private lazy val materialized = {
@@ -54,7 +54,7 @@ class JsonCodecParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def jCell: Expr[Doc, String] = Expr.cell("j_value", ColumnIndex(0))
+  private def jCell: Expr[Doc, String] = Expr.cell("j", ColumnIndex(0))
 
   private val schemaDdl = "STRUCT<id: BIGINT, items: ARRAY<STRUCT<sku: STRING, qty: INT>>>"
 

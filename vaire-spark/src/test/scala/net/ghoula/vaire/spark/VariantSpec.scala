@@ -20,7 +20,7 @@ class VariantSpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct('{"a":1,"b":{"c":[10,20]}}'),
         struct('null'),
         struct('"str"')
-      )) AS (j_value)
+      )) AS (j)
     """)
 
   private lazy val materialized = {
@@ -28,7 +28,7 @@ class VariantSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def jCell: Expr[Doc, String] = Expr.cell("j_value", ColumnIndex(0))
+  private def jCell: Expr[Doc, String] = Expr.cell("j", ColumnIndex(0))
 
   private def evalBoth[A](
     expr: Expr[Doc, A],
@@ -100,7 +100,7 @@ class VariantSpec extends AnyFlatSpec with Matchers with SparkTestBase {
   }
 
   it should "reject invalid JSON strings on both backends" in {
-    val invalid = spark.sql("""SELECT inline(array(struct('nope'), struct('{oops}'))) AS (j_value)""")
+    val invalid = spark.sql("""SELECT inline(array(struct('nope'), struct('{oops}'))) AS (j)""")
     val rows = invalid.collect()
     val md = RowConverter.toMaterialized(rows, summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
     val expr = Expr.isValidVariant[Doc](jCell)

@@ -16,10 +16,10 @@ class SparkGroupByAggSpec extends AnyFlatSpec with Matchers with SparkTestBase {
   case class RegionProductTotal(region: String, product: String, totalAmount: Double)
   given regionProductTotalSchema: Schema[RegionProductTotal] = Schema.derived
 
-  // Schema-derived names: region_value, product_value, amount_value, quantity_value
-  private val regionCell: Expr[Sale, Any] = Expr.Cell("region_value", ColumnIndex(0))
-  private val productCell: Expr[Sale, Any] = Expr.Cell("product_value", ColumnIndex(1))
-  private val amountCell: Expr[Sale, Double] = Expr.Cell("amount_value", ColumnIndex(2))
+  // Schema-derived names: region, product, amount, quantity
+  private val regionCell: Expr[Sale, Any] = Expr.Cell("region", ColumnIndex(0))
+  private val productCell: Expr[Sale, Any] = Expr.Cell("product", ColumnIndex(1))
+  private val amountCell: Expr[Sale, Double] = Expr.Cell("amount", ColumnIndex(2))
 
   private def makeSales: Dataset[Sale] = {
     val regionCol = Column.string(Array("East", "West", "East", "West", "East"))
@@ -79,7 +79,7 @@ class SparkGroupByAggSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     )
 
     val grouped = sales.groupByAgg[RegionTotal](keys, aggs)
-    // Note: the output schema has columns region_value, totalAmount_value, cnt_value
+    // Note: the output schema has columns region, totalAmount, cnt
     // But GroupByAgg output names are user-defined: "region", "totalAmount", "cnt"
     val having = grouped.filter(
       Expr.Gt(

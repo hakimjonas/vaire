@@ -125,10 +125,10 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   private def nativeBenchDf(n: Int, groups: Int): DataFrame = {
     val structType = StructType(
       Array(
-        StructField("dept_value", SparkStringType, nullable = false),
-        StructField("amount_value", SparkDoubleType, nullable = false),
-        StructField("quantity_value", IntegerType, nullable = false),
-        StructField("id_value", IntegerType, nullable = false)
+        StructField("dept", SparkStringType, nullable = false),
+        StructField("amount", SparkDoubleType, nullable = false),
+        StructField("quantity", IntegerType, nullable = false),
+        StructField("id", IntegerType, nullable = false)
       )
     )
     val rows = java.util.Arrays.asList(
@@ -358,8 +358,8 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // ---------------------------------------------------------------------------
 
   "GroupByAgg overhead" should "be measured for 500K rows with 1K groups" taggedAs Benchmark in {
-    val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
-    val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+    val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept", ColumnIndex(0))
+    val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount", ColumnIndex(1))
 
     val keys = Vector(KeySpec[BenchRecord, Any]("dept", deptCell, ColumnType.StringType))
     val aggs = Vector(
@@ -382,7 +382,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       val t0 = System.nanoTime()
       val df = nativeBenchDf(MultiN, NumGroups)
       val t1 = System.nanoTime()
-      val grouped = df.groupBy(F.col("dept_value")).agg(F.sum("amount_value").as("totalAmount"), F.count("*").as("cnt"))
+      val grouped = df.groupBy(F.col("dept")).agg(F.sum("amount").as("totalAmount"), F.count("*").as("cnt"))
       val t2 = System.nanoTime()
       val count = grouped.count()
       val t3 = System.nanoTime()
@@ -398,8 +398,8 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // ---------------------------------------------------------------------------
 
   "SortByExprs overhead" should "be measured for 500K rows with 2-column sort" taggedAs Benchmark in {
-    val quantityCell: Expr[BenchRecord, Int] = Expr.Cell("quantity_value", ColumnIndex(2))
-    val idCell: Expr[BenchRecord, Int] = Expr.Cell("id_value", ColumnIndex(3))
+    val quantityCell: Expr[BenchRecord, Int] = Expr.Cell("quantity", ColumnIndex(2))
+    val idCell: Expr[BenchRecord, Int] = Expr.Cell("id", ColumnIndex(3))
 
     val sortKeys = Vector(
       SortSpec(quantityCell, summon[Ordering[Int]], ColumnType.IntType, true),
@@ -421,7 +421,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       val t0 = System.nanoTime()
       val df = nativeBenchDf(MultiN, NumGroups)
       val t1 = System.nanoTime()
-      val sorted = df.sort(F.col("quantity_value").asc, F.col("id_value").desc)
+      val sorted = df.sort(F.col("quantity").asc, F.col("id").desc)
       val t2 = System.nanoTime()
       val count = sorted.count()
       val t3 = System.nanoTime()
@@ -437,8 +437,8 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
   // ---------------------------------------------------------------------------
 
   "WithWindow overhead" should "be measured for 200K rows with ROW_NUMBER" taggedAs Benchmark in {
-    val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept_value", ColumnIndex(0))
-    val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount_value", ColumnIndex(1))
+    val deptCell: Expr[BenchRecord, Any] = Expr.Cell("dept", ColumnIndex(0))
+    val amountCell: Expr[BenchRecord, Double] = Expr.Cell("amount", ColumnIndex(1))
 
     val windowSpec = WindowSpec[BenchRecord](
       partitionBy = Vector(KeySpec[BenchRecord, Any]("dept", deptCell, ColumnType.StringType)),
@@ -465,7 +465,7 @@ class SparkOverheadBench extends AnyFlatSpec with Matchers with SparkTestBase {
       val t1 = System.nanoTime()
       val windowed = df.withColumn(
         "rowNum",
-        F.row_number().over(Window.partitionBy("dept_value").orderBy(F.col("amount_value").desc))
+        F.row_number().over(Window.partitionBy("dept").orderBy(F.col("amount").desc))
       )
       val t2 = System.nanoTime()
       val count = windowed.count()

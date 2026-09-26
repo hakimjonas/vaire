@@ -74,8 +74,8 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       java.util.Arrays.asList(Array.tabulate(rows)(i => Row(s"group${r.nextInt(numGroups)}", r.nextInt(1000)))*)
     val structType = StructType(
       Array(
-        StructField("key_value", SparkStringType, nullable = false),
-        StructField("value_value", IntegerType, nullable = false)
+        StructField("key", SparkStringType, nullable = false),
+        StructField("value", IntegerType, nullable = false)
       )
     )
     val df = spark.createDataFrame(javaRows, structType).cache()
@@ -92,8 +92,8 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       java.util.Arrays.asList(Array.tabulate(rows)(i => Row(s"group${r.nextInt(numGroups)}", r.nextInt(1000)))*)
     val structType = StructType(
       Array(
-        StructField("key_value", SparkStringType, nullable = false),
-        StructField("value_value", IntegerType, nullable = false)
+        StructField("key", SparkStringType, nullable = false),
+        StructField("value", IntegerType, nullable = false)
       )
     )
     val df = spark.createDataFrame(javaRows, structType).cache()
@@ -190,15 +190,15 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     val runs = 5
 
     val filterResult = benchmarkOp("Filter", warmups, runs) {
-      val valCell = Expr.Cell[BenchRow, Int]("value_value", ColumnIndex(1))
+      val valCell = Expr.Cell[BenchRow, Int]("value", ColumnIndex(1))
       val filtered = dataset.filter(valCell > Expr.lit(500))
       sparkInterpreter.toDataFrame(filtered).toOption.get
     }
     results += filterResult
 
     val groupByResult = benchmarkOp("GroupBy", warmups, runs) {
-      val keyCell: Expr[BenchRow, Any] = Expr.Cell("key_value", ColumnIndex(0))
-      val valCell: Expr[BenchRow, Int] = Expr.Cell("value_value", ColumnIndex(1))
+      val keyCell: Expr[BenchRow, Any] = Expr.Cell("key", ColumnIndex(0))
+      val valCell: Expr[BenchRow, Int] = Expr.Cell("value", ColumnIndex(1))
       val aggKeys = Vector(KeySpec[BenchRow, Any]("key", keyCell, ColumnType.StringType))
       val aggs = Vector(AggSpec("total", Expr.Sum(valCell), ColumnType.LongType))
       val grouped = dataset.groupByAgg[(String, Long)](aggKeys, aggs)
@@ -207,7 +207,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     results += groupByResult
 
     val sortResult = benchmarkOp("Sort", warmups, runs) {
-      val valCell = Expr.Cell[BenchRow, Int]("value_value", ColumnIndex(1))
+      val valCell = Expr.Cell[BenchRow, Int]("value", ColumnIndex(1))
       val sorted = dataset.sortByExpr(valCell, ColumnType.IntType)(using Ordering[Int])
       sparkInterpreter.toDataFrame(sorted).toOption.get
     }
@@ -236,16 +236,16 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     val dataset2 = generateHalfData(halfSize, groups / 2, 99)
 
     val joinResult = benchmarkOp("Join", warmups, runs) {
-      val leftKey: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
-      val rightKey: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
+      val leftKey: Expr[BenchRow, String] = Expr.Cell("key", ColumnIndex(0))
+      val rightKey: Expr[BenchRow, String] = Expr.Cell("key", ColumnIndex(0))
       val joined = dataset1.joinOn(dataset2, leftKey, rightKey, ColumnType.StringType, ColumnType.StringType)
       sparkInterpreter.toDataFrame(joined).toOption.get
     }
     results += joinResult
 
     val groupByAggResult = benchmarkOp("GroupByAgg", warmups, runs) {
-      val keyCell: Expr[BenchRow, Any] = Expr.Cell("key_value", ColumnIndex(0))
-      val valCell: Expr[BenchRow, Int] = Expr.Cell("value_value", ColumnIndex(1))
+      val keyCell: Expr[BenchRow, Any] = Expr.Cell("key", ColumnIndex(0))
+      val valCell: Expr[BenchRow, Int] = Expr.Cell("value", ColumnIndex(1))
       val aggKeys = Vector(KeySpec[BenchRow, Any]("key", keyCell, ColumnType.StringType))
       val aggs = Vector(
         AggSpec("totalValue", Expr.Sum(valCell), ColumnType.LongType),
@@ -257,8 +257,8 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     results += groupByAggResult
 
     val sortByExprsResult = benchmarkOp("SortByExprs", warmups, runs) {
-      val valCell: Expr[BenchRow, Int] = Expr.Cell("value_value", ColumnIndex(1))
-      val keyCell: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
+      val valCell: Expr[BenchRow, Int] = Expr.Cell("value", ColumnIndex(1))
+      val keyCell: Expr[BenchRow, String] = Expr.Cell("key", ColumnIndex(0))
       val sortKeys = Vector(
         SortSpec(valCell, summon[Ordering[Int]], ColumnType.IntType, true),
         SortSpec(keyCell, summon[Ordering[String]], ColumnType.StringType, true)
@@ -286,13 +286,13 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
     val nativeResults = scala.collection.mutable.ArrayBuffer[ScaleResult]()
 
     nativeResults += benchmarkOp("Filter", warmups, runs) {
-      sourceDf.filter(F.col("value_value") > F.lit(500))
+      sourceDf.filter(F.col("value") > F.lit(500))
     }
     nativeResults += benchmarkOp("GroupBy", warmups, runs) {
-      sourceDf.groupBy("key_value").agg(F.sum("value_value").as("total"))
+      sourceDf.groupBy("key").agg(F.sum("value").as("total"))
     }
     nativeResults += benchmarkOp("Sort", warmups, runs) {
-      sourceDf.sort(F.col("value_value"))
+      sourceDf.sort(F.col("value"))
     }
     nativeResults += benchmarkOp("Limit", warmups, runs) {
       sourceDf.limit(rows / 2)
@@ -304,13 +304,13 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       sourceDf.distinct()
     }
     nativeResults += benchmarkOp("Join", warmups, runs) {
-      sourceDf1.alias("_l").join(sourceDf2.alias("_r"), F.col("_l.key_value") === F.col("_r.key_value"))
+      sourceDf1.alias("_l").join(sourceDf2.alias("_r"), F.col("_l.key") === F.col("_r.key"))
     }
     nativeResults += benchmarkOp("GroupByAgg", warmups, runs) {
-      sourceDf.groupBy("key_value").agg(F.sum("value_value").as("totalValue"), F.count("*").as("cnt"))
+      sourceDf.groupBy("key").agg(F.sum("value").as("totalValue"), F.count("*").as("cnt"))
     }
     nativeResults += benchmarkOp("SortByExprs", warmups, runs) {
-      sourceDf.sort(F.col("value_value").asc, F.col("key_value").asc)
+      sourceDf.sort(F.col("value").asc, F.col("key").asc)
     }
 
     val header = s"VAIRË SPARK — $scale rows, $groups groups (Spark ${org.apache.spark.SPARK_VERSION})"

@@ -559,8 +559,14 @@ object DatasetInterpreter extends Interpreter {
         }
       } else {
         val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
+        val matchesByRight = Array.fill(right.rowCount)(List.empty[Int])
         (0 until left.rowCount).foreach { li =>
           val _ = rightIndex.probe(leftKeyCol, li) { ri =>
+            matchesByRight(ri) = li :: matchesByRight(ri)
+          }
+        }
+        (0 until right.rowCount).foreach { ri =>
+          matchesByRight(ri).reverseIterator.foreach { li =>
             leftIdxBuf += li
             rightIdxBuf += ri
           }
@@ -590,33 +596,6 @@ object DatasetInterpreter extends Interpreter {
     }
 
     MaterializedDataset.fromVector(resultRows)(using schema)
-  }
-
-  private def probeJoinOnKeysReversed[P, S, R](
-    probeRows: Vector[P],
-    probeKeyCol: Column[?],
-    lookupKeyCol: Column[?],
-    lookupRows: Vector[S],
-    mkMatched: (S, P) => R,
-    mkUnmatched: S => R,
-    schema: Schema[R]
-  ): Either[ExecutionError, MaterializedDataset[R]] = {
-    val lookupIndex = KeyIndex.build(lookupKeyCol, lookupRows.length)
-    val matchedLookup = Array.fill(lookupRows.length)(false)
-    val matchedRows = Vector.newBuilder[R]
-
-    probeRows.zipWithIndex.foreach { case (pVal, pi) =>
-      val _ = lookupIndex.probe(probeKeyCol, pi) { si =>
-        matchedLookup(si) = true
-        matchedRows += mkMatched(lookupRows(si), pVal)
-      }
-    }
-
-    val unmatchedRows = lookupRows.zipWithIndex.collect {
-      case (sVal, si) if !matchedLookup(si) => mkUnmatched(sVal)
-    }
-
-    MaterializedDataset.fromVector(matchedRows.result() ++ unmatchedRows)(using schema)
   }
 
   private def evalKeys[A, B, K, R](
@@ -651,28 +630,16 @@ object DatasetInterpreter extends Interpreter {
       for {
         leftRows <- left.toVectorOrError
         rightRows <- right.toVectorOrError
-        result <-
-          if (left.rowCount <= right.rowCount)
-            probeJoinOnKeysReversed(
-              rightRows,
-              rkc,
-              lkc,
-              leftRows,
-              (a, b) => (a, Some(b)),
-              a => (a, None),
-              leftJoinSchema(left, right)
-            )
-          else
-            probeJoinOnKeys(
-              leftRows,
-              lkc,
-              rkc,
-              rightRows,
-              right.rowCount,
-              (a, b) => (a, Some(b)),
-              a => (a, None),
-              leftJoinSchema(left, right)
-            )
+        result <- probeJoinOnKeys(
+          leftRows,
+          lkc,
+          rkc,
+          rightRows,
+          right.rowCount,
+          (a, b) => (a, Some(b)),
+          a => (a, None),
+          leftJoinSchema(left, right)
+        )
       } yield result
     }
 
@@ -688,28 +655,16 @@ object DatasetInterpreter extends Interpreter {
       for {
         leftRows <- left.toVectorOrError
         rightRows <- right.toVectorOrError
-        result <-
-          if (right.rowCount <= left.rowCount)
-            probeJoinOnKeysReversed(
-              leftRows,
-              lkc,
-              rkc,
-              rightRows,
-              (b, a) => (Some(a), b),
-              b => (None, b),
-              rightJoinSchema(left, right)
-            )
-          else
-            probeJoinOnKeys(
-              rightRows,
-              rkc,
-              lkc,
-              leftRows,
-              left.rowCount,
-              (b, a) => (Some(a), b),
-              b => (None, b),
-              rightJoinSchema(left, right)
-            )
+        result <- probeJoinOnKeys(
+          rightRows,
+          rkc,
+          lkc,
+          leftRows,
+          left.rowCount,
+          (b, a) => (Some(a), b),
+          b => (None, b),
+          rightJoinSchema(left, right)
+        )
       } yield result
     }
 
@@ -728,41 +683,22 @@ object DatasetInterpreter extends Interpreter {
         result <- {
           given resultSchema: Schema[(Option[A], Option[B])] = fullJoinSchema(left, right)
 
-          val resultRows =
-            if (left.rowCount <= right.rowCount) {
-              val leftIndex = KeyIndex.build(leftKeyCol, left.rowCount)
-              val matchedLeft = Array.fill(left.rowCount)(false)
-              val rightSide = Vector.newBuilder[(Option[A], Option[B])]
-              rightRows.zipWithIndex.foreach { case (rightVal, ri) =>
-                val matched = leftIndex.probe(rightKeyCol, ri) { li =>
-                  matchedLeft(li) = true
-                  rightSide += ((Option(leftRows(li)), Option(rightVal)))
-                }
-                if (!matched) rightSide += ((Option.empty[A], Option(rightVal)))
-              }
-              val unmatchedLeft: Vector[(Option[A], Option[B])] = leftRows.zipWithIndex.collect {
-                case (leftVal, li) if !matchedLeft(li) => (Option(leftVal), Option.empty[B])
-              }
-              rightSide.result() ++ unmatchedLeft
-            } else {
-              val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
-              val matchedRight = scala.collection.mutable.HashSet.empty[Int]
-              val leftSide = Vector.newBuilder[(Option[A], Option[B])]
-              leftRows.zipWithIndex.foreach { case (leftVal, li) =>
-                val matched = rightIndex.probe(leftKeyCol, li) { ri =>
-                  matchedRight += ri
-                  leftSide += ((Option(leftVal), Option(rightRows(ri))))
-                }
-                if (!matched) leftSide += ((Option(leftVal), Option.empty[B]))
-              }
-              val unmatchedRight: Vector[(Option[A], Option[B])] = rightRows.zipWithIndex.collect {
-                case (rightVal, ri) if !matchedRight.contains(ri) =>
-                  (Option.empty[A], Option(rightVal))
-              }
-              leftSide.result() ++ unmatchedRight
+          val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
+          val matchedRight = scala.collection.mutable.HashSet.empty[Int]
+          val leftSide = Vector.newBuilder[(Option[A], Option[B])]
+          leftRows.zipWithIndex.foreach { case (leftVal, li) =>
+            val matched = rightIndex.probe(leftKeyCol, li) { ri =>
+              matchedRight += ri
+              leftSide += ((Option(leftVal), Option(rightRows(ri))))
             }
+            if (!matched) leftSide += ((Option(leftVal), Option.empty[B]))
+          }
+          val unmatchedRight: Vector[(Option[A], Option[B])] = rightRows.zipWithIndex.collect {
+            case (rightVal, ri) if !matchedRight.contains(ri) =>
+              (Option.empty[A], Option(rightVal))
+          }
 
-          MaterializedDataset.fromVector(resultRows)
+          MaterializedDataset.fromVector(leftSide.result() ++ unmatchedRight)
         }
       } yield result
     }

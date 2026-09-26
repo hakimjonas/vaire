@@ -3,6 +3,8 @@ package net.ghoula.vaire
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import scala.collection.immutable.BitSet
+
 import net.ghoula.vaire.prelude.*
 
 /** Locks the keyed-join semantics against the equivalent predicate join and against the index
@@ -57,6 +59,45 @@ class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
       rows(left.antiJoin(right, equal)).sorted
   }
 
+  private val optKey: Expr.Cell[Option[Int], Int] = Expr.Cell[Option[Int], Int]("value", ColumnIndex(0))
+
+  private def optIntDataset(values: Vector[Int], nulls: BitSet): Dataset[Option[Int]] =
+    Dataset.fromColumns(Vector(Column.int(values.toArray, nulls)), Schema.optionSchema[Int]).toOption.get
+
+  private def nullableValues(n: Int): (Vector[Int], BitSet) = {
+    val values = uniformValues(n)
+    val nulls = BitSet(values.indices.filter(_ => rng.nextInt(4) == 0)*)
+    (values, nulls)
+  }
+
+  private def nullIntolerant(a: Option[Int], b: Option[Int]): Boolean =
+    a.isDefined && b.isDefined && a == b
+
+  private def checkNullableJoins(
+    leftValues: Vector[Int],
+    leftNulls: BitSet,
+    rightValues: Vector[Int],
+    rightNulls: BitSet
+  ): Unit = {
+    val left = optIntDataset(leftValues, leftNulls)
+    val right = optIntDataset(rightValues, rightNulls)
+
+    rows(left.joinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
+      rows(left.join(right, nullIntolerant)).sorted
+
+    rows(left.leftJoinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
+      rows(left.leftJoin(right, nullIntolerant)).sorted
+
+    rows(left.rightJoinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
+      rows(left.rightJoin(right, nullIntolerant)).sorted
+
+    rows(left.fullJoinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
+      rows(left.fullJoin(right, nullIntolerant)).sorted
+
+    rows(left.antiJoinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
+      rows(left.antiJoin(right, nullIntolerant)).sorted
+  }
+
   private def checkInnerSymmetry(leftValues: Vector[Int], rightValues: Vector[Int]): Unit = {
     val left = intDataset(leftValues)
     val right = intDataset(rightValues)
@@ -90,5 +131,44 @@ class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
     checkInnerSymmetry(uniformValues(40), Vector(1))
     checkInnerSymmetry(Vector.empty, uniformValues(10))
     checkInnerSymmetry(uniformValues(10), Vector.empty)
+  }
+
+  "inner joinOn" should "emit the same row order whichever side is indexed" in {
+    // left (2) <= right (2): forward branch, index the left
+    val forward =
+      rows(intDataset(Vector(1, 2)).joinOn(intDataset(Vector(2, 1)), key, key, ColumnType.IntType, ColumnType.IntType))
+    // left (3) > right (2): reversed branch, index the right
+    val reversed = rows(
+      intDataset(Vector(1, 2, 3)).joinOn(intDataset(Vector(2, 1)), key, key, ColumnType.IntType, ColumnType.IntType)
+    )
+
+    forward shouldBe Vector((2, 2), (1, 1))
+    reversed shouldBe Vector((2, 2), (1, 1))
+  }
+
+  "antiJoinOn" should "keep the left order whichever side is indexed" in {
+    val left = Vector(3, 1, 2)
+    val forward =
+      rows(intDataset(left).antiJoinOn(intDataset(Vector(9, 8, 7)), key, key, ColumnType.IntType, ColumnType.IntType))
+    val reversed = rows(
+      intDataset(left).antiJoinOn(intDataset(Vector(9, 8, 7, 6)), key, key, ColumnType.IntType, ColumnType.IntType)
+    )
+
+    forward shouldBe left
+    reversed shouldBe left
+  }
+
+  "keyed joins with null keys" should "agree with a null-intolerant predicate join" in {
+    (0 until 60).foreach { _ =>
+      val (leftValues, leftNulls) = nullableValues(rng.nextInt(13))
+      val (rightValues, rightNulls) = nullableValues(rng.nextInt(13))
+      checkNullableJoins(leftValues, leftNulls, rightValues, rightNulls)
+    }
+  }
+
+  "keyed joins with null keys" should "agree across extreme size ratios" in {
+    val (rightValues, rightNulls) = nullableValues(40)
+    checkNullableJoins(Vector(0), BitSet(0), rightValues, rightNulls)
+    checkNullableJoins(rightValues, rightNulls, Vector(0), BitSet(0))
   }
 }

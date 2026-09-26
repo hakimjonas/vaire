@@ -103,7 +103,9 @@ stating precisely:
 
 - **Keyed joins** (`joinOn`, `leftJoinOn`, `rightJoinOn`, `fullJoinOn`, `antiJoinOn`, `semiJoinOn`)
   are hash-based and linear in the common case. The index is unboxed — dense keys use a
-  direct-address array, sparse keys an open-addressing table — and the smaller side is indexed.
+  direct-address array, sparse keys an open-addressing table. `joinOn` and the semi/anti joins
+  index the smaller side; the outer joins index the side opposite the one whose unmatched rows they
+  must emit.
 - **Predicate joins** (`join`, `leftJoin`, `rightJoin`, `fullJoin`, `antiJoin`) evaluate the
   condition on every pair of rows (O(n·m)) and are intended for small frames. Express large-frame
   joins as `*JoinOn` so the in-memory interpreter builds a key index and Spark pushes a native

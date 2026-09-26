@@ -95,6 +95,23 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
   `SparkPlanVsExecBench`) measure Vairë plan/execute overhead against native Spark
   per release; run them locally for current numbers
 
+## Performance
+
+In-memory execution is columnar: expressions evaluate whole columns at a time, so elementwise
+operations are linear in the row count with no per-row dispatch. The joins are the part worth
+stating precisely:
+
+- **Keyed joins** (`joinOn`, `leftJoinOn`, `rightJoinOn`, `fullJoinOn`, `antiJoinOn`, `semiJoinOn`)
+  are hash-based and linear in the common case. The index is unboxed — dense keys use a
+  direct-address array, sparse keys an open-addressing table — and the smaller side is indexed.
+- **Predicate joins** (`join`, `leftJoin`, `rightJoin`, `fullJoin`, `antiJoin`) evaluate the
+  condition on every pair of rows (O(n·m)) and are intended for small frames. Express large-frame
+  joins as `*JoinOn` so the in-memory interpreter builds a key index and Spark pushes a native
+  equi-join.
+- **In-memory execution is heap-bounded.** A column holds its rows in an `Array` and
+  `MaterializedDataset.rowCount` is an `Int`, so a single column is capped near 2^31 rows. Use the
+  Spark backend for data that does not fit the driver heap.
+
 ## Modules
 
 | Module            | Dependencies    | Purpose                                             |

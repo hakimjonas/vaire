@@ -51,7 +51,7 @@ Vairë is a **logically pure, execution-flexible dataset library** that treats d
 **Principle:** If it compiles, the plan is structurally valid. Runtime errors come from data quality, not type mistakes.
 
 **Cast Philosophy:**
-- Zero `asInstanceOf` in interpreters — all type safety comes from GADT refinement
+- Type safety comes from GADT refinement, not casts
 - Casts exist only at documented erasure boundaries — the quote/splice boundary of inline metaprogramming (a compiler limitation) and erased storage access in the interpreter (AnyColumn reads where type erasure makes pattern matching impossible)
 - No silent defaults, no unchecked casts, no type erasure workarounds
 

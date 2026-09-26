@@ -59,10 +59,10 @@ libraryDependencies ++= Seq(
 - `Dataset[T]` invariant GADT — pattern matching proves transformation types
 - `-Yexplicit-nulls` — compiler-enforced null safety
 - `-language:strictEquality` — no accidental equality comparisons
-- 13 `asInstanceOf` sites in the codebase, each documented and scalafix-suppressed: 8 at
-  inline-metaprogramming boundaries (ExprCompiler quote/splice, Schema Mirror
-  derivation) and 4 at erased storage-access boundaries in the interpreter (reading
-  typed values from `AnyColumn` where type erasure makes pattern matching impossible)
+- 14 `asInstanceOf` casts, each on a scalafix-suppressed line: 5 in `ExprCompiler`
+  quote/splice, 4 in `Schema` (Mirror derivation and the `Vector[Any]` encode/decode
+  boundary), and 5 at erased storage-access boundaries in the interpreter (reading typed
+  values from `AnyColumn`, where type erasure rules out pattern matching)
 - Zero `var`, zero `throw`, zero `return` in production code
 
 **Columnar Storage**
@@ -91,9 +91,10 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
 - GroupByAgg pushes to Spark groupBy + agg
 - Window functions push to Spark window specs
 - No UDFs — everything goes through Catalyst optimization
-- Benchmark suites (`SparkOverheadBench`, `SparkComparativeBench`,
-  `SparkPlanVsExecBench`) measure Vairë plan/execute overhead against native Spark
-  per release; run them locally for current numbers
+- Benchmark suites measure Vairë against native Spark per release: `SparkOverheadBench`,
+  `SparkComparativeBench`, and `SparkPlanVsExecBench` for plan/execute overhead, and
+  `JoinOperationsBench` for in-memory keyed-join time, allocation, and GC. Run them locally
+  for current numbers
 
 ## Performance
 

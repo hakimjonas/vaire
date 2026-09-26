@@ -254,6 +254,11 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
     val rightBig = intDs(Array.tabulate(bothN)(i => KeyBase + (i % (bothN * 4))))
     report("InnerJoinOn", bothN, bothN, leftBig.joinOn(rightBig, keyExpr, keyExpr, intType, intType))
 
+    // mirrored shapes: the same joins with the sides swapped
+    report("InnerJoinOn", largeN, smallN, large.joinOn(small, keyExpr, keyExpr, intType, intType))
+    report("SemiJoinOn", smallN, largeN, small.semiJoinOn(large, keyExpr, keyExpr, intType, intType))
+    report("SemiJoinOn", largeN, smallN, large.semiJoinOn(small, keyExpr, keyExpr, intType, intType))
+
     succeed
   }
 

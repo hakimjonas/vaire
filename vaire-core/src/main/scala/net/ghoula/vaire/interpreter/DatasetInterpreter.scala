@@ -409,11 +409,14 @@ object DatasetInterpreter extends Interpreter {
       leftRows <- left.toVectorOrError
       rightRows <- right.toVectorOrError
       result <- {
-        val resultRows = for {
-          leftVal <- leftRows
-          rightVal <- rightRows
-          if condition(leftVal, rightVal)
-        } yield (leftVal, rightVal)
+        val resultRows: Vector[(A, B)] =
+          if (leftRows.isEmpty || rightRows.isEmpty) Vector.empty
+          else
+            for {
+              leftVal <- leftRows
+              rightVal <- rightRows
+              if condition(leftVal, rightVal)
+            } yield (leftVal, rightVal)
         MaterializedDataset.fromVector(resultRows)
       }
     } yield result
@@ -456,11 +459,14 @@ object DatasetInterpreter extends Interpreter {
       primaryRows <- primary.toVectorOrError
       secondaryRows <- secondary.toVectorOrError
       result <- {
-        val resultRows = primaryRows.flatMap { pVal =>
-          val found = secondaryRows.filter(sVal => matches(pVal, sVal))
-          if (found.isEmpty) Vector(mkUnmatched(pVal))
-          else found.map(sVal => mkMatched(pVal, sVal))
-        }
+        val resultRows =
+          if (secondaryRows.isEmpty) primaryRows.map(mkUnmatched)
+          else
+            primaryRows.flatMap { pVal =>
+              val found = secondaryRows.filter(sVal => matches(pVal, sVal))
+              if (found.isEmpty) Vector(mkUnmatched(pVal))
+              else found.map(sVal => mkMatched(pVal, sVal))
+            }
         MaterializedDataset.fromVector(resultRows)(using schema)
       }
     } yield result
@@ -508,9 +514,13 @@ object DatasetInterpreter extends Interpreter {
       leftRows <- left.toVectorOrError
       rightRows <- right.toVectorOrError
       result <- {
-        val resultRows = leftRows.filter { leftVal =>
-          !rightRows.exists(rightVal => condition(leftVal, rightVal))
-        }
+        val resultRows =
+          if (leftRows.isEmpty) Vector.empty[A]
+          else if (rightRows.isEmpty) leftRows
+          else
+            leftRows.filter { leftVal =>
+              !rightRows.exists(rightVal => condition(leftVal, rightVal))
+            }
         MaterializedDataset.fromVector(resultRows)(using left.schema)
       }
     } yield result
@@ -602,13 +612,13 @@ object DatasetInterpreter extends Interpreter {
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(A, Option[B])]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (lkc, rkc) =>
       for {
-        probeRows <- left.toVectorOrError
-        lookupRows <- right.toVectorOrError
+        leftRows <- left.toVectorOrError
+        rightRows <- right.toVectorOrError
         result <- probeJoinOnKeys(
-          probeRows,
+          leftRows,
           lkc,
           rkc,
-          lookupRows,
+          rightRows,
           right.rowCount,
           (a, b) => (a, Some(b)),
           a => (a, None),
@@ -627,13 +637,13 @@ object DatasetInterpreter extends Interpreter {
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(Option[A], B)]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (lkc, rkc) =>
       for {
-        probeRows <- right.toVectorOrError
-        lookupRows <- left.toVectorOrError
+        leftRows <- left.toVectorOrError
+        rightRows <- right.toVectorOrError
         result <- probeJoinOnKeys(
-          probeRows,
+          rightRows,
           rkc,
           lkc,
-          lookupRows,
+          leftRows,
           left.rowCount,
           (b, a) => (Some(a), b),
           b => (None, b),
@@ -655,9 +665,10 @@ object DatasetInterpreter extends Interpreter {
         leftRows <- left.toVectorOrError
         rightRows <- right.toVectorOrError
         result <- {
+          given resultSchema: Schema[(Option[A], Option[B])] = fullJoinSchema(left, right)
+
           val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
           val matchedRight = scala.collection.mutable.HashSet.empty[Int]
-
           val leftSide = Vector.newBuilder[(Option[A], Option[B])]
           leftRows.zipWithIndex.foreach { case (leftVal, li) =>
             val matched = rightIndex.probe(leftKeyCol, li) { ri =>
@@ -666,17 +677,12 @@ object DatasetInterpreter extends Interpreter {
             }
             if (!matched) leftSide += ((Option(leftVal), Option.empty[B]))
           }
-          val leftSideResults = leftSide.result()
-
           val unmatchedRight: Vector[(Option[A], Option[B])] = rightRows.zipWithIndex.collect {
             case (rightVal, ri) if !matchedRight.contains(ri) =>
               (Option.empty[A], Option(rightVal))
           }
 
-          val resultRows = leftSideResults ++ unmatchedRight
-
-          given resultSchema: Schema[(Option[A], Option[B])] = fullJoinSchema(left, right)
-          MaterializedDataset.fromVector(resultRows)
+          MaterializedDataset.fromVector(leftSide.result() ++ unmatchedRight)
         }
       } yield result
     }

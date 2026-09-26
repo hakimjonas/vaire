@@ -15,7 +15,7 @@ import net.ghoula.vaire.prelude.*
   * Same operations, same scales, same deterministic seed (42/99). Run separately from dwh-core's
   * benchmark, compare wall clock times.
   *
-  * Spark 4.1.1 | Scala 3.8.2 | Vairë columnar Dataset -> SparkInterpreter
+  * Spark 4.x | Scala 3 | Vairë columnar Dataset -> SparkInterpreter
   */
 class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -37,6 +37,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
   }
 
   private def writeToFile(line: String): Unit = {
+    java.nio.file.Files.createDirectories(outputFile.getParent)
     java.nio.file.Files.write(
       outputFile,
       (line + "\n").getBytes,
@@ -312,7 +313,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       sourceDf.sort(F.col("value_value").asc, F.col("key_value").asc)
     }
 
-    val header = s"VAIRË SPARK — $scale rows, $groups groups (Spark 4.1.1)"
+    val header = s"VAIRË SPARK — $scale rows, $groups groups (Spark ${org.apache.spark.SPARK_VERSION})"
     val colHeader =
       f"${"Operation"}%-14s ${"Median"}%10s ${"Plan"}%10s ${"Exec"}%10s ${"Total"}%10s ${"PeakHeap"}%10s ${"GC"}%6s"
     val separator = "-" * 90
@@ -320,7 +321,7 @@ class SparkComparativeBench extends AnyFlatSpec with Matchers with SparkTestBase
       f"${r.operation}%-14s ${r.medianMs}%7.2f ms ${r.planAllocMB}%7.1f MB ${r.execAllocMB}%7.1f MB ${r.totalAllocMB}%7.1f MB ${r.peakHeapMB}%7.0f MB ${r.gcCollections}%6d"
     }
 
-    val nativeHeader = s"NATIVE SPARK CONTROL — $scale rows, $groups groups (Spark 4.1.1)"
+    val nativeHeader = s"NATIVE SPARK CONTROL — $scale rows, $groups groups (Spark ${org.apache.spark.SPARK_VERSION})"
     val nativeLines = nativeResults.map { r =>
       f"${r.operation}%-14s ${r.medianMs}%7.2f ms ${r.planAllocMB}%7.1f MB ${r.execAllocMB}%7.1f MB ${r.totalAllocMB}%7.1f MB ${r.peakHeapMB}%7.0f MB ${r.gcCollections}%6d"
     }

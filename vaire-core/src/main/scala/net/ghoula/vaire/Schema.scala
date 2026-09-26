@@ -57,7 +57,20 @@ object Schema {
     typeName: String
   )(dec: PartialFunction[Any, T])(values: Vector[Any]): Either[DecodeError, T] =
     if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
-    else dec.lift(values.head).toRight(DecodeError.TypeMismatch(typeName, values.head.getClass.getSimpleName))
+    else
+      Option(values.head) match {
+        case None => Left(DecodeError.NullValue(0))
+        case Some(value) => dec.lift(value).toRight(DecodeError.TypeMismatch(typeName, value.getClass.getSimpleName))
+      }
+
+  /** A decode error for a value that did not match its target type: `NullValue` when the value is
+    * null, else `TypeMismatch` with the runtime type name. Avoids dereferencing a null value while
+    * building the error.
+    */
+  private def mismatchOrNull(typeName: String, value: Any, columnIndex: Int = 0): DecodeError =
+    Option(value).fold[DecodeError](DecodeError.NullValue(columnIndex))(v =>
+      DecodeError.TypeMismatch(typeName, v.getClass.getSimpleName)
+    )
 
   given intSchema: Schema[Int] with {
     def columnCount: Int = 1
@@ -194,7 +207,7 @@ object Schema {
         case l: Long => Right(types.Decimal.ofUnscaled(l))
         case bd: java.math.BigDecimal =>
           types.Decimal.fromBigDecimal(bd).toRight(DecodeError.TypeMismatch("Decimal", bd.toString))
-        case other => Left(DecodeError.TypeMismatch("Decimal", other.getClass.getSimpleName))
+        case other => Left(mismatchOrNull("Decimal", other))
       }
 
   given decimalSchema: Schema[types.Decimal] with {
@@ -237,7 +250,7 @@ object Schema {
             s.foldLeft[Either[DecodeError, Vector[A]]](Right(Vector.empty)) { (acc, e) =>
               acc.flatMap(vs => elemSchema.decode(Vector(e)).map(vs :+ _)).map(_.toSeq)
             }.map(_.toSeq)
-          case other => Left(DecodeError.TypeMismatch("Seq", other.getClass.getSimpleName))
+          case other => Left(mismatchOrNull("Seq", other))
         }
   }
 
@@ -260,7 +273,7 @@ object Schema {
                 v <- valueSchema.decode(Vector(entry._2))
               } yield entries :+ ((k, v))
             }.map(_.toMap)
-          case other => Left(DecodeError.TypeMismatch("Map", other.getClass.getSimpleName))
+          case other => Left(mismatchOrNull("Map", other))
         }
   }
 
@@ -273,6 +286,9 @@ object Schema {
 
     def columnTypes: Vector[ColumnType] =
       schemaA.columnTypes ++ schemaB.columnTypes
+
+    override def nestedSchemas: Vector[Option[Schema[?]]] =
+      schemaA.nestedSchemas ++ schemaB.nestedSchemas
 
     def encode(value: (A, B)): Vector[Any] =
       schemaA.encode(value._1) ++ schemaB.encode(value._2)
@@ -302,34 +318,41 @@ object Schema {
     */
   inline given derivedTupleSchema[T <: Tuple](using mirror: Mirror.ProductOf[T]): Schema[T] = Schema.derived
 
-  /** Schema for Option[A] - nullable columns with presence bit */
+  /** Schema for Option[A] as a single nullable column.
+    *
+    * `None` is a null in the column. When `A` is a single column (a primitive, struct, array, or
+    * map) the column is that column; when `A` flattens to several columns (a tuple or a derived
+    * case class) it is wrapped in a struct column, so `Option[A]` is always one nullable column.
+    * This mirrors Spark's nullable field: one column, nullable, null meaning absent.
+    */
   given optionSchema[A](using inner: Schema[A]): Schema[Option[A]] with {
-    def columnCount: Int = inner.columnCount + 1
+    private val innerType: ColumnType =
+      if (inner.columnCount == 1) inner.columnTypes.head
+      else ColumnType.StructType(inner.columnNames.zip(inner.columnTypes))
 
-    def columnNames: Vector[String] =
-      Vector("_isDefined") ++ inner.columnNames.map("_value_" + _)
+    def columnCount: Int = 1
 
-    def columnTypes: Vector[ColumnType] =
-      Vector(ColumnType.BooleanType) ++ inner.columnTypes
+    def columnNames: Vector[String] = Vector("value")
+
+    def columnTypes: Vector[ColumnType] = Vector(ColumnType.OptionType(innerType))
+
+    override def nestedSchemas: Vector[Option[Schema[?]]] =
+      Vector(if (inner.columnCount == 1) None else Some(inner))
 
     def encode(value: Option[A]): Vector[Any] = value match {
-      case Some(a) => Vector(true) ++ inner.encode(a)
-      case None => Vector(false) ++ Vector.fill(inner.columnCount)(null) // scalafix:ok DisableSyntax.null
+      case Some(a) => Vector(if (inner.columnCount == 1) inner.encode(a).head else a)
+      case None => Vector(null) // scalafix:ok DisableSyntax.null
     }
 
-    def decode(values: Vector[Any]): Either[DecodeError, Option[A]] = {
-      val expectedCount = columnCount
-      if (values.length != expectedCount) {
-        Left(DecodeError.WrongArity(expectedCount, values.length))
-      } else {
-        values.head match {
-          case b: Boolean =>
-            if (b) inner.decode(values.tail).map(Some(_))
-            else Right(None)
-          case other => Left(DecodeError.TypeMismatch("Boolean", other.getClass.getSimpleName))
+    def decode(values: Vector[Any]): Either[DecodeError, Option[A]] =
+      if (values.length != 1) Left(DecodeError.WrongArity(1, values.length))
+      else
+        Option(values.head) match {
+          case None => Right(None)
+          case Some(value) =>
+            if (inner.columnCount == 1) inner.decode(Vector(value)).map(Some(_))
+            else Right(Some(value.asInstanceOf[A])) // scalafix:ok DisableSyntax.asInstanceOf
         }
-      }
-    }
   }
 
   /** Automatic schema derivation for case classes using Scala 3 Mirror.
@@ -376,7 +399,11 @@ object Schema {
         def decode(values: Vector[Any]): Either[DecodeError, T] = values match {
           case Vector(p: Product) => Right($m.fromProduct(p))
           case Vector(v) =>
-            Left(DecodeError.TypeMismatch(${ Expr(typeName): Expr[String] }, v.getClass.getSimpleName))
+            Left(
+              Option(v).fold[DecodeError](DecodeError.NullValue(0))(x =>
+                DecodeError.TypeMismatch(${ Expr(typeName): Expr[String] }, x.getClass.getSimpleName)
+              )
+            )
           case other => Left(DecodeError.WrongArity(1, other.length))
         }
       }
@@ -513,6 +540,10 @@ object Schema {
       '{ $acc ++ $schema.columnTypes }
     }
 
+    val nestedSchemasExpr = schemas.foldLeft[Expr[Vector[Option[Schema[?]]]]]('{ Vector.empty }) { (acc, schema) =>
+      '{ $acc ++ $schema.nestedSchemas }
+    }
+
     def generateEncode[E <: Tuple: Type](
       valueExpr: Expr[T],
       index: Int,
@@ -551,6 +582,7 @@ object Schema {
         def columnCount: Int = $columnCountExpr
         def columnNames: Vector[String] = $columnNamesExpr
         def columnTypes: Vector[ColumnType] = $columnTypesExpr
+        override def nestedSchemas: Vector[Option[Schema[?]]] = $nestedSchemasExpr
 
         def encode(value: T): Vector[Any] = ${
           generateEncode[Elems]('value, 0, fieldLabels, schemas)

@@ -38,7 +38,7 @@ class JsonCodecParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
   given net.ghoula.sarati.codec.Encoder[Order, net.ghoula.sarati.ast.json.JsonValue] =
     net.ghoula.sarati.codec.Encoder.derived
 
-  case class Doc(j: String)
+  case class Doc(j: Option[String])
   given Schema[Doc] = Schema.derived
 
   private lazy val base: DataFrame = spark.sql("""

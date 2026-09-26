@@ -13,6 +13,7 @@ import org.apache.spark.sql.types.{
   LongType => SparkLongType,
   ShortType => SparkShortType,
   StringType => SparkStringType,
+  StructType => SparkStructType,
   TimestampNTZType => SparkTimestampNTZType,
   TimestampType => SparkTimestampType,
   YearMonthIntervalType => SparkYearMonthIntervalType
@@ -141,5 +142,18 @@ class SchemaConverterSpec extends AnyFlatSpec with Matchers {
     struct.fields.length shouldBe 2
     struct.fields(0).dataType shouldBe SparkIntegerType
     struct.fields(1).dataType shouldBe SparkStringType
+  }
+
+  "toSparkType" should "map nested struct field nullability through OptionType" in {
+    val vaire = ColumnType.StructType(
+      Vector("a" -> ColumnType.IntType, "b" -> ColumnType.OptionType(ColumnType.StringType))
+    )
+    SchemaConverter.toSparkType(vaire) match {
+      case st: SparkStructType =>
+        st.fields(0).nullable shouldBe false
+        st.fields(1).nullable shouldBe true
+        SchemaConverter.fromSparkType(st) shouldBe vaire
+      case other => fail(s"expected StructType, got $other")
+    }
   }
 }

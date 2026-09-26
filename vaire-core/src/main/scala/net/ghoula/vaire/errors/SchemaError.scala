@@ -17,6 +17,11 @@ enum SchemaError {
   /** A column's length does not match the other columns'. */
   case ColumnLengthMismatch(columnIndex: Int, expected: Int, actual: Int)
 
+  /** A non-optional column holds null rows. Nullability is part of the schema type (`Option[T]`),
+    * so a null in a non-optional field is a schema violation.
+    */
+  case NullInNonNullableColumn(columnIndex: Int, columnName: String)
+
   /** A schema field name is not a valid column name. */
   case InvalidColumnName(name: String)
 

@@ -108,7 +108,7 @@ BitSet null tracking — SQL NULL as metadata, not values. All evaluation is col
 -Werror -Wunused:all -language:strictEquality -Yexplicit-nulls -no-indent
 ```
 
-Scala 3.8.4 on JDK 25 (core) / JDK 21 (Spark module).
+Scala 3.9.0 on JDK 25 (core) / JDK 21 (Spark module).
 
 ## Expression Coverage
 

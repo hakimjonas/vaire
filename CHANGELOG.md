@@ -14,6 +14,53 @@ release tag (`v1.0.0-alpha`) is cut manually.
   to Maven Central under `net.ghoula` (Central Portal staging, sbt-pgp signing), with the
   same SHA-pinned CI / auto-tag / release workflows the other Arda libraries run; the
   Forgejo workflow remnants (`.forgejo/`) are removed. `rumil` moves to 1.0.0-alpha.5.
+- **Keyed-join index, null model, and Spark source validation** — the keyed-join index is
+  now unboxed, and the null model, keyed-join semantics, and Spark source contract now match
+  Spark 4.2. Several changes are breaking; see below.
+
+### Breaking changes
+
+- **Keyed joins require matching key types.** `leftKeyType` and `rightKeyType` must be equal;
+  a mismatch fails with `ExecutionError.TypeMismatch` instead of silently returning no rows.
+  The prior index matched keys across primitive types by boxed numeric equality (including
+  `Long`/`Timestamp`/`Time` and `Int`/`Decimal`), and its fast path was order-dependent
+  (`Long ⋈ Time` returned no rows while `Time ⋈ Long` matched). Cast one side to widen
+  (`Int` to `Long`).
+- **Null keys never match.** Spark 4.2 runs ANSI mode by default and `EqualTo` is
+  null-intolerant; the in-memory keyed joins now follow. A null that previously joined to a
+  null now matches nothing and appears as an unmatched row in outer joins.
+- **`Option[A]` is a single nullable column.** `Schema.optionSchema` no longer stores a
+  presence `Boolean` plus the inner columns; it stores one column where `None` is a null,
+  wrapped in a struct column when `A` flattens to several columns (a tuple or a derived case
+  class). Join outputs (`(A, Option[B])`), `Schema.derived` for `Option` fields, and the Spark
+  schema (one nullable field instead of two) all change layout. Code that assumed the presence
+  column, or persisted data in the old layout, must be migrated.
+- **Non-optional fields are null-free.** `Dataset.fromColumns` rejects a null in a
+  non-optional field with `SchemaError.NullInNonNullableColumn`; a `Dataset[Int]` built from a
+  nullable column must become `Dataset[Option[Int]]`.
+- **Spark source schemas must agree on nullability.** Reading a DataFrame whose field is
+  nullable into a non-optional Vairë field fails at execution
+  (`ExecutionError.InvalidPlan`); declare the field `Option`, or make the Spark field
+  non-nullable. `Dataset.narrow[U]` asserts non-null against the data when the source is
+  nullable by declaration.
+- **Decoding a null into a non-optional target is a typed error.** `DecodeError.NullValue`
+  surfaces as `ExecutionError.DecodeFailed`, and `MaterializedDataset.toVectorOrError` is the
+  safe accessor. `RowConverter.fromRowUnsafe` is removed; `toVectorUnsafe` remains and throws
+  on a decode failure instead of returning a null.
+- **The declared `ColumnType` is validated against the resolved column.** Keyed joins,
+  `groupByAgg` keys, `sortByExpr`, `sortByExprs`, and window partition/order now fail with
+  `ExecutionError.TypeMismatch` when the declared type disagrees with the column, in both
+  backends. A wrong `ColumnType` is no longer ignored.
+- **New enum cases.** `ExecutionError.DecodeFailed` and `SchemaError.NullInNonNullableColumn`
+  are added; exhaustive matches on these enums need updating.
+
+### Additions
+
+- **`Dataset.narrow[U]`** reinterprets the schema, asserting that fields `U` declares
+  non-optional hold no nulls, in both backends.
+- **Unboxed keyed-join index** — the per-join `HashMap[Any, Vector[Int]]` is replaced by an
+  open-addressing index that reads primitive columns unboxed. The uniform-key regression is
+  gone; see `docs/join-optimization-plan.md`, Phase 1b.
 
 ## 0.0.20
 

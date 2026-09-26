@@ -385,6 +385,10 @@ object Dataset {
       *   Join predicate evaluated on pairs of rows
       * @return
       *   Dataset of tuples (T, U) for matching rows
+      * @note
+      *   The condition is evaluated on every pair of rows (O(n·m)); intended for small frames. For
+      *   large frames use [[joinOn]], which builds a key index in-memory and pushes a native
+      *   equi-join to Spark.
       */
     inline def join[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(T, U)] = {
       InnerJoin(ds, other, condition)
@@ -398,6 +402,10 @@ object Dataset {
       *   Join predicate evaluated on pairs of rows
       * @return
       *   Dataset of tuples (T, Option[U]) where U is None for unmatched left rows
+      * @note
+      *   The condition is evaluated on every pair of rows (O(n·m)); intended for small frames. For
+      *   large frames use [[leftJoinOn]], which builds a key index in-memory and pushes a native
+      *   equi-join to Spark.
       */
     inline def leftJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(T, Option[U])] = {
       LeftJoin(ds, other, condition)
@@ -411,6 +419,10 @@ object Dataset {
       *   Join predicate evaluated on pairs of rows
       * @return
       *   Dataset of tuples (Option[T], U) where T is None for unmatched right rows
+      * @note
+      *   The condition is evaluated on every pair of rows (O(n·m)); intended for small frames. For
+      *   large frames use [[rightJoinOn]], which builds a key index in-memory and pushes a native
+      *   equi-join to Spark.
       */
     inline def rightJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(Option[T], U)] = {
       RightJoin(ds, other, condition)
@@ -424,6 +436,10 @@ object Dataset {
       *   Join predicate evaluated on pairs of rows
       * @return
       *   Dataset of tuples (Option[T], Option[U]) where either side may be None for unmatched rows
+      * @note
+      *   The condition is evaluated on every pair of rows (O(n·m)); intended for small frames. For
+      *   large frames use [[fullJoinOn]], which builds a key index in-memory and pushes a native
+      *   equi-join to Spark.
       */
     inline def fullJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[(Option[T], Option[U])] = {
       FullJoin(ds, other, condition)
@@ -437,6 +453,10 @@ object Dataset {
       *   Join predicate evaluated on pairs of rows
       * @return
       *   Dataset of T rows from left that have no matching right rows
+      * @note
+      *   The condition is evaluated on every pair of rows (O(n·m)); intended for small frames. For
+      *   large frames use [[antiJoinOn]], which builds a key index in-memory and pushes a native
+      *   anti-join to Spark.
       */
     inline def antiJoin[U](other: Dataset[U], condition: (T, U) => Boolean): Dataset[T] = {
       LeftAntiJoin(ds, other, condition)

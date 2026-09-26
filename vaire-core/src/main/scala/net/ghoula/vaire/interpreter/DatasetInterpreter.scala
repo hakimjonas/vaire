@@ -409,11 +409,14 @@ object DatasetInterpreter extends Interpreter {
       leftRows <- left.toVectorOrError
       rightRows <- right.toVectorOrError
       result <- {
-        val resultRows = for {
-          leftVal <- leftRows
-          rightVal <- rightRows
-          if condition(leftVal, rightVal)
-        } yield (leftVal, rightVal)
+        val resultRows: Vector[(A, B)] =
+          if (leftRows.isEmpty || rightRows.isEmpty) Vector.empty
+          else
+            for {
+              leftVal <- leftRows
+              rightVal <- rightRows
+              if condition(leftVal, rightVal)
+            } yield (leftVal, rightVal)
         MaterializedDataset.fromVector(resultRows)
       }
     } yield result
@@ -456,11 +459,14 @@ object DatasetInterpreter extends Interpreter {
       primaryRows <- primary.toVectorOrError
       secondaryRows <- secondary.toVectorOrError
       result <- {
-        val resultRows = primaryRows.flatMap { pVal =>
-          val found = secondaryRows.filter(sVal => matches(pVal, sVal))
-          if (found.isEmpty) Vector(mkUnmatched(pVal))
-          else found.map(sVal => mkMatched(pVal, sVal))
-        }
+        val resultRows =
+          if (secondaryRows.isEmpty) primaryRows.map(mkUnmatched)
+          else
+            primaryRows.flatMap { pVal =>
+              val found = secondaryRows.filter(sVal => matches(pVal, sVal))
+              if (found.isEmpty) Vector(mkUnmatched(pVal))
+              else found.map(sVal => mkMatched(pVal, sVal))
+            }
         MaterializedDataset.fromVector(resultRows)(using schema)
       }
     } yield result
@@ -508,9 +514,13 @@ object DatasetInterpreter extends Interpreter {
       leftRows <- left.toVectorOrError
       rightRows <- right.toVectorOrError
       result <- {
-        val resultRows = leftRows.filter { leftVal =>
-          !rightRows.exists(rightVal => condition(leftVal, rightVal))
-        }
+        val resultRows =
+          if (leftRows.isEmpty) Vector.empty[A]
+          else if (rightRows.isEmpty) leftRows
+          else
+            leftRows.filter { leftVal =>
+              !rightRows.exists(rightVal => condition(leftVal, rightVal))
+            }
         MaterializedDataset.fromVector(resultRows)(using left.schema)
       }
     } yield result

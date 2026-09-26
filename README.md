@@ -1,44 +1,24 @@
 # Vairë
 
-A type-safe columnar dataset library for Scala 3 with Spark integration.
+A type-safe columnar dataset library for Scala 3, with one plan that runs on an in-memory
+columnar engine or Apache Spark.
 
-> *Named after Vairë the Weaver, who weaves all things that have been in Time into her storied webs — columns into the record.*
+> *Named after Vairë the Weaver, who weaves all things that have been in Time into her storied
+> webs — columns into the record.*
 
 ## What is Vairë?
 
-Vairë is a columnar data processing library where the type system proves correctness at compile time. Datasets are immutable descriptions of computation — pure Scala 3 enums interpreted by pluggable backends (in-memory columnar or Apache Spark).
+Vairë describes data processing as an immutable plan. A `Dataset[T]` is a typed tree of
+transformations, and you decide how to run it: the in-memory columnar interpreter for tests, small
+data, and per-row error handling, or the Spark backend, which translates the same plan to native
+Catalyst expressions with no UDFs and no RDDs.
 
-```scala
-import net.ghoula.vaire.prelude.*
+The type parameter is checked at compile time. A `Dataset[Trade]` filtered and grouped into a
+`Dataset[SymbolTotal]` is a compile error if the types do not line up, so a mistyped transformation
+fails at build time rather than on a cluster. `-Yexplicit-nulls` and `-language:strictEquality` are
+on for the whole codebase.
 
-case class Trade(symbol: String, price: Double, quantity: Int)
-given Schema[Trade] = Schema.derived
-case class SymbolTotal(symbol: String, total: Double)
-given Schema[SymbolTotal] = Schema.derived
-
-val columns = Vector(
-  Column.string(Array("ACME", "GLOB")),
-  Column.double(Array(120.5, 85.0)),
-  Column.int(Array(10, 40))
-)
-
-val trades: Dataset[Trade] = Dataset.fromColumns(columns, summon[Schema[Trade]]).toOption.get
-
-val result = trades
-  .filter(Expr.Cell[Trade, Double]("price", ColumnIndex(1)) > Expr.const(100.0))
-  .groupByAgg[SymbolTotal](
-    keys = Vector(KeySpec("symbol", Expr.Cell("symbol", ColumnIndex(0)), ColumnType.StringType)),
-    aggs = Vector(agg.sumDouble[Trade](_.price).as("total"))
-  )
-
-result.collect match
-  case Right(rows) => println(rows) // Vector(SymbolTotal(ACME,120.5))
-  case Left(err)   => println(err)
-```
-
-The same Dataset plan executes on the in-memory columnar interpreter or pushes to Apache Spark via native Catalyst expressions — no UDFs, no RDDs, no serialization overhead.
-
-## Installation
+## Quick start
 
 Vairë is published to Maven Central:
 
@@ -49,11 +29,103 @@ libraryDependencies ++= Seq(
 )
 ```
 
-`vaire-spark` pulls in Spark SQL 4.2.0 (`Provided` scope in the build; declare your own Spark dependency to match your cluster).
+`vaire-spark` pulls in Spark SQL 4.2.0 (`Provided` scope in the build; declare your own Spark
+dependency to match your cluster).
 
-## Key Properties
+Build a dataset from columns, transform it, and collect the result:
 
-**Type Safety**
+```scala
+import net.ghoula.vaire.prelude.*
+
+case class Trade(symbol: String, price: Double, quantity: Int)
+given Schema[Trade] = Schema.derived
+
+case class SymbolTotal(symbol: String, total: Double)
+given Schema[SymbolTotal] = Schema.derived
+
+val trades: Dataset[Trade] = Dataset
+  .fromColumns(
+    Vector(
+      Column.string(Array("ACME", "GLOB", "ACME")),
+      Column.double(Array(120.5, 85.0, 99.9)),
+      Column.int(Array(10, 40, 5))
+    ),
+    summon[Schema[Trade]]
+  )
+  .toOption.get
+
+val totals = trades
+  .where(_.quantity > 5)
+  .groupByAgg[SymbolTotal](
+    keys = Vector(KeySpec("symbol", Expr.Cell[Trade, String]("symbol", ColumnIndex(0)), ColumnType.StringType)),
+    aggs = Vector(agg.sumDouble[Trade](_.price).as("total"))
+  )
+
+totals.collect match
+  case Right(rows) => println(rows) // Vector(SymbolTotal(ACME, 120.5), SymbolTotal(GLOB, 85.0))
+  case Left(err)   => println(err)
+```
+
+`collect` runs the in-memory interpreter. `where` and the other lambda helpers compile to typed
+`Expr` values at compile time, so there is no reflection and no per-row dispatch at run time.
+
+## Common operations
+
+Filter and transform with lambdas, which compile to typed `Expr`:
+
+```scala
+trades.where(_.price > 100.0)
+trades.withFields(t => t.copy(quantity = t.quantity * 2))
+trades.sortByColumn(_.price)
+```
+
+Project to a subset of fields by matching names between the two case classes:
+
+```scala
+case class SymbolPrice(symbol: String, price: Double)
+given Schema[SymbolPrice] = Schema.derived
+
+trades.project[SymbolPrice]
+```
+
+Join with a key expression, so the in-memory engine builds a hash index and Spark pushes an
+equi-join:
+
+```scala
+val prices: Dataset[SymbolPrice] = ???
+val tradeKey: Expr[Trade, String] = Expr.Cell("symbol", ColumnIndex(0))
+val priceKey: Expr[SymbolPrice, String] = Expr.Cell("symbol", ColumnIndex(0))
+
+trades.joinOn(prices, tradeKey, priceKey, ColumnType.StringType, ColumnType.StringType)
+```
+
+The predicate joins (`join`, `leftJoin`, `rightJoin`, `fullJoin`, `antiJoin`) take an arbitrary
+`(T, U) => Boolean` and compare every pair of rows. They are for small frames; use the `*JoinOn`
+family for anything large.
+
+## Running on Spark
+
+Read a DataFrame into a `Dataset`, run the same plan, and write the result back:
+
+```scala
+import net.ghoula.vaire.spark.{SparkDatasets, SparkInterpreter}
+
+val interpreter = SparkInterpreter(spark)
+
+val df = spark.read.parquet("/data/trades")
+val trades = SparkDatasets.fromDataFrame(df, summon[Schema[Trade]])
+
+val filtered = trades.where(_.price > 100.0)
+val out = interpreter.toDataFrame(filtered).toOption.get
+out.write.parquet("/data/filtered")
+```
+
+`collect(using interpreter)` runs the plan on Spark and returns the rows, and
+`SparkInterpreter.toDataFrame` returns the DataFrame for the plan. Every `Expr` case maps to a
+native Spark SQL function, so Catalyst optimizes the whole plan.
+
+## Type safety
+
 - `Column[+A]` GADT — 20 typed columnar storage variants with compile-time guarantees
 - `Expr[Row, A]` GADT — 349 expression cases, all type-checked
 - `Dataset[T]` invariant GADT — pattern matching proves transformation types
@@ -64,37 +136,6 @@ libraryDependencies ++= Seq(
   boundary), and 5 at erased storage-access boundaries in the interpreter (reading typed
   values from `AnyColumn`, where type erasure rules out pattern matching)
 - Zero `var`, zero `throw`, zero `return` in production code
-
-**Columnar Storage**
-
-All Spark 4.2 types covered with typed, unboxed storage:
-
-| Category        | Types                                                             | Storage                                                |
-|-----------------|-------------------------------------------------------------------|--------------------------------------------------------|
-| Primitive       | Int, Long, Double, Float, Short, Byte                             | `Array[T]` (unboxed)                                   |
-| String          | String, Char(n), Varchar(n)                                       | `Array[String\|Null]`                                  |
-| Boolean         | Boolean                                                           | `Array[Boolean]`                                       |
-| Temporal        | Date, Timestamp, TimestampNTZ, Time, YearMonthInterval, DayTimeInterval | Opaque types over `Array[Int/Long]`              |
-| Binary          | Binary                                                            | Flat Arrow-style layout (`Array[Byte]` + offset array) |
-| Decimal         | Decimal(p, s) where p <= 18                                       | Unscaled `Array[Long]` + precision/scale metadata      |
-| Nested          | Array, Map, Struct                                                | Typed child columns + offset arrays (unboxed elements) |
-| Semi-structured | Variant                                                           | `AnyColumn` (Spark VariantVal round-trip)              |
-
-BitSet null tracking — SQL NULL as metadata, not values. All evaluation is columnar — no per-row dispatch. `Array.tabulate` and `foldLeft` throughout.
-
-**Spark Integration**
-- Every Expr case maps to a native Spark SQL function, with documented exceptions: the
-  try-xpath variants are in-memory-only (Spark's Column model cannot catch per-row
-  evaluation failures), and a handful of generator-style expressions (`explode`,
-  `variant_explode`) require Dataset-level handling in the in-memory interpreter
-- Expression-based joins push to Spark equi-joins
-- GroupByAgg pushes to Spark groupBy + agg
-- Window functions push to Spark window specs
-- No UDFs — everything goes through Catalyst optimization
-- Benchmark suites measure Vairë against native Spark per release: `SparkOverheadBench`,
-  `SparkComparativeBench`, and `SparkPlanVsExecBench` for plan/execute overhead, and
-  `JoinOperationsBench` for in-memory keyed-join time, allocation, and GC. Run them locally
-  for current numbers
 
 ## Performance
 
@@ -114,6 +155,29 @@ stating precisely:
   `MaterializedDataset.rowCount` is an `Int`, so a single column is capped near 2^31 rows. Use the
   Spark backend for data that does not fit the driver heap.
 
+## Design and internals
+
+The library separates the description of a computation from its execution. `Dataset[T]`,
+`Expr[Row, A]`, and `Column[+A]` are sealed Scala 3 enums; building a plan performs no computation,
+and an `Interpreter` executes it. The in-memory interpreter evaluates `Expr` with `evalColumn`, the
+single columnar evaluation path, and the Spark backend translates the same `Expr` tree to Catalyst
+`Column`s.
+
+All Spark 4.2 types are covered with typed, unboxed storage:
+
+| Category        | Types                                                             | Storage                                                |
+|-----------------|-------------------------------------------------------------------|--------------------------------------------------------|
+| Primitive       | Int, Long, Double, Float, Short, Byte                             | `Array[T]` (unboxed)                                   |
+| String          | String, Char(n), Varchar(n)                                       | `Array[String\|Null]`                                  |
+| Boolean         | Boolean                                                           | `Array[Boolean]`                                       |
+| Temporal        | Date, Timestamp, TimestampNTZ, Time, YearMonthInterval, DayTimeInterval | Opaque types over `Array[Int/Long]`              |
+| Binary          | Binary                                                            | Flat Arrow-style layout (`Array[Byte]` + offset array) |
+| Decimal         | Decimal(p, s) where p <= 18                                       | Unscaled `Array[Long]` + precision/scale metadata      |
+| Nested          | Array, Map, Struct                                                | Typed child columns + offset arrays (unboxed elements) |
+| Semi-structured | Variant                                                           | `AnyColumn` (Spark VariantVal round-trip)              |
+
+BitSet null tracking — SQL NULL as metadata, not values. `Array.tabulate` and `foldLeft` throughout.
+
 ## Modules
 
 | Module            | Dependencies    | Purpose                                             |
@@ -121,15 +185,7 @@ stating precisely:
 | `vaire-core`  | Rumil, Sarati   | Dataset/Expr/Column GADT, interpreters, Schema      |
 | `vaire-spark` | Spark SQL 4.2.0 | Spark backend, ExprToColumn translation, benchmarks |
 
-## Compiler Settings
-
-```
--Werror -Wunused:all -language:strictEquality -Yexplicit-nulls -no-indent
-```
-
-Scala 3.9.0 on JDK 25 (core) / JDK 21 (Spark module).
-
-## Expression Coverage
+## Expression reference
 
 349 Expr cases covering Spark SQL's function surface:
 
@@ -151,6 +207,10 @@ Scala 3.9.0 on JDK 25 (core) / JDK 21 (Spark module).
 | Datasketches  | TupleSketchAgg, SketchEstimate, KllSketchAgg (Spark-only)                                     |
 | Casting       | CastToLong, CastToDouble, CastToString                                                        |
 
+Documented exceptions: the try-xpath variants are in-memory-only (Spark's Column model cannot catch
+per-row evaluation failures), and a few generator-style expressions (`explode`, `variant_explode`)
+need Dataset-level handling in the in-memory interpreter.
+
 ## Build
 
 ```bash
@@ -159,9 +219,11 @@ sbt core/testFull    # full core suite
 sbt spark/testFull   # full Spark suite (includes Spark round-trip parity)
 ```
 
-`sbt 2.0` runs `test` incrementally and caches results; use `testFull` for a full run. CI runs these suites with `FAST_TESTS=1` (excluding the `Slow`-tagged stress suites); see [docs/ci.md](docs/ci.md).
+`sbt 2.0` runs `test` incrementally and caches results; use `testFull` for a full run. CI runs these
+suites with `FAST_TESTS=1` (excluding the `Slow`-tagged stress suites); see [docs/ci.md](docs/ci.md).
 
-Public API carries enforced scaladoc coverage: every public member needs a `/** */` doc, and the `check` gate ratchets coverage so it can only improve (`sbt docCoverage` / `sbt docCoverageSnapshot`).
+Public API carries enforced scaladoc coverage: every public member needs a `/** */` doc, and the
+`check` gate ratchets coverage so it can only improve (`sbt docCoverage` / `sbt docCoverageSnapshot`).
 
 ## Dependencies and the Arda Ecosystem
 

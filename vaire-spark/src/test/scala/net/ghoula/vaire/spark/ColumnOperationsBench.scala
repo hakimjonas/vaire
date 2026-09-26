@@ -168,8 +168,8 @@ class ColumnOperationsBench extends AnyFlatSpec with Matchers {
     val valCol = Column.int(Array.tabulate(rows)(i => rng.nextInt(10000)))
     val ds = Dataset.fromColumns(Vector(keyCol, valCol), row2Schema).toOption.get
 
-    val keyCell: Expr[Row2, String] = Expr.Cell("key_value", ColumnIndex(0))
-    val valCell: Expr[Row2, Int] = Expr.Cell("value_value", ColumnIndex(1))
+    val keyCell: Expr[Row2, String] = Expr.Cell("key", ColumnIndex(0))
+    val valCell: Expr[Row2, Int] = Expr.Cell("value", ColumnIndex(1))
 
     def timeOp(label: String, f: => Either[?, ?]): Double = {
       val times = (0 until Warmup + Measured).map { _ =>

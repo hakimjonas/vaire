@@ -53,6 +53,12 @@ publishes that tag to Maven Central. Stable releases are cut manually.
   backends. A wrong `ColumnType` is no longer ignored.
 - **New enum cases.** `ExecutionError.DecodeFailed` and `SchemaError.NullInNonNullableColumn`
   are added; exhaustive matches on these enums need updating.
+- **Derived schemas name columns after the field.** `Schema.derived` names a field that
+  flattens to one column `<field>` instead of `<field>_value`; a field that flattens to
+  several columns keeps `<field>_<inner>`. `Trade(symbol, price, quantity)` now produces
+  `symbol`, `price`, `quantity`, and an `Option`, `structColumn`, or other single-column field
+  is named after the field. Spark DataFrame column names, `show` headers, and join output
+  names follow.
 
 ### Additions
 

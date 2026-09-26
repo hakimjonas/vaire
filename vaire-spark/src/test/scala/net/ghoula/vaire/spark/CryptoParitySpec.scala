@@ -25,13 +25,13 @@ class CryptoParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
         struct(''),
         struct('The quick brown fox jumps over the lazy dog'),
         struct(cast(null as string))
-      )) AS (s_value)
+      )) AS (s)
     """)
 
   private lazy val materialized =
     RowConverter.toMaterialized(base.collect(), summon[Schema[Doc]]).fold(err => fail(s"$err"), identity)
 
-  private def cell: Expr[Doc, String] = Expr.cell("s_value", ColumnIndex(0))
+  private def cell: Expr[Doc, String] = Expr.cell("s", ColumnIndex(0))
 
   private def checkParity[A](expr: Expr[Doc, A], columnType: ColumnType): Unit = {
     val inMemory = ExprInterpreter.evalColumn(expr, materialized.columns, columnType) match {

@@ -18,7 +18,7 @@ class SumDistinctParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
       SELECT inline(array(
         struct(cast(1 as bigint)), struct(cast(2 as bigint)),
         struct(cast(2 as bigint)), struct(cast(3 as bigint))
-      )) AS (n_value)
+      )) AS (n)
     """)
 
   private lazy val materialized = {
@@ -27,7 +27,7 @@ class SumDistinctParitySpec extends AnyFlatSpec with Matchers with SparkTestBase
   }
 
   "sum_distinct" should "sum unique values on both backends" in {
-    val expr = Expr.sumDistinct[N](Expr.cell[N, Long]("n_value", ColumnIndex(0)))
+    val expr = Expr.sumDistinct[N](Expr.cell[N, Long]("n", ColumnIndex(0)))
     ExprInterpreter.evalAggregation(expr, materialized.columns) shouldBe Right(Some(6L))
     base
       .agg(ExprToColumn.convert(expr) match {

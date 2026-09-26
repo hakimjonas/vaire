@@ -10,9 +10,9 @@ class SparkSortByExprsSpec extends AnyFlatSpec with Matchers with SparkTestBase 
   case class Record(name: String, age: Int, score: Double)
   given Schema[Record] = Schema.derived
 
-  // Schema-derived names: name_value, age_value, score_value
-  private val ageCell: Expr[Record, Int] = Expr.Cell("age_value", ColumnIndex(1))
-  private val scoreCell: Expr[Record, Double] = Expr.Cell("score_value", ColumnIndex(2))
+  // Schema-derived names: name, age, score
+  private val ageCell: Expr[Record, Int] = Expr.Cell("age", ColumnIndex(1))
+  private val scoreCell: Expr[Record, Double] = Expr.Cell("score", ColumnIndex(2))
 
   private def makeRecords: Dataset[Record] = {
     val nameCol = Column.string(Array("Alice", "Bob", "Charlie", "Dave", "Eve"))

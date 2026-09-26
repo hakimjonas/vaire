@@ -156,7 +156,7 @@ class NestedColumnSpec extends AnyFlatSpec with Matchers {
     val col = Column.struct[Point](Vector(xCol, yCol), summon[Schema[Point]])
 
     col.columnType shouldBe ColumnType.StructType(
-      Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType))
+      Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType))
     )
     col.length shouldBe 2
     col.getValue(0) shouldBe Point(1, "a")
@@ -183,12 +183,12 @@ class NestedColumnSpec extends AnyFlatSpec with Matchers {
     val result = Column.structFromValues[Point](
       Vector(Point(1, "a"), Point(2, "b")),
       summon[Schema[Point]],
-      Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType))
+      Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType))
     )
     result match {
       case Right(col) =>
         col.columnType shouldBe ColumnType.StructType(
-          Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType))
+          Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType))
         )
         col.getValue(0) shouldBe Point(1, "a")
         col.getValue(1) shouldBe Point(2, "b")
@@ -205,7 +205,7 @@ class NestedColumnSpec extends AnyFlatSpec with Matchers {
         .structFromValues[Point](
           xs.toVector,
           summon[Schema[Point]],
-          Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType))
+          Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType))
         )
         .toOption
         .get

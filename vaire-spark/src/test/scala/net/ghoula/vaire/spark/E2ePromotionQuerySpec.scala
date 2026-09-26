@@ -47,16 +47,16 @@ class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase
     // Use joinOn for distributed equi-join: lineitem.l_partkey = part.p_partkey
     // After join, the schema is (LineItem, Part) — a tuple2 with prefixed columns.
     //
-    // For a tuple2 schema: left fields get "_1_fieldName_value", right get "_2_fieldName_value"
-    // Left (LineItem): _1_l_orderkey_value(0) .. _1_l_comment_value(15)   (16 columns)
-    // Right (Part): _2_p_partkey_value(16) .. _2_p_comment_value(24)      (9 columns)
+    // For a tuple2 schema: left fields get "_1_fieldName", right get "_2_fieldName"
+    // Left (LineItem): _1_l_orderkey(0) .. _1_l_comment(15)   (16 columns)
+    // Right (Part): _2_p_partkey(16) .. _2_p_comment(24)      (9 columns)
     given Schema[(LineItem, Part)] = Schema.tuple2Schema[LineItem, Part]
 
     val liDs = E2eTestData.lineItemDataset(items)
     val partDs = E2eTestData.partDataset(parts)
 
-    val liPartkey: Expr[LineItem, Long] = Expr.Cell("l_partkey_value", ColumnIndex(1))
-    val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey_value", ColumnIndex(0))
+    val liPartkey: Expr[LineItem, Long] = Expr.Cell("l_partkey", ColumnIndex(1))
+    val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey", ColumnIndex(0))
 
     // Join
     val joined = liDs.joinOn(
@@ -69,16 +69,16 @@ class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase
 
     // After join, column indices shift. The Spark DataFrame has the left columns
     // followed by the right columns (using their original names without prefix):
-    // Left (LineItem): indices 0-15, named l_orderkey_value, l_partkey_value, ...
-    // Right (Part): indices 16-24, named p_partkey_value, p_name_value, ...
+    // Left (LineItem): indices 0-15, named l_orderkey, l_partkey, ...
+    // Right (Part): indices 16-24, named p_partkey, p_name, ...
     //
     // Part fields: p_partkey(16), p_name(17), p_mfgr(18), p_brand(19), p_type(20),
     //              p_size(21), p_container(22), p_retailprice(23), p_comment(24)
     type LP = (LineItem, Part)
-    val jShipdate: Expr[LP, String] = Expr.Cell("l_shipdate_value", ColumnIndex(10))
-    val jExtPrice: Expr[LP, Double] = Expr.Cell("l_extendedprice_value", ColumnIndex(5))
-    val jDiscount: Expr[LP, Double] = Expr.Cell("l_discount_value", ColumnIndex(6))
-    val jPType: Expr[LP, String] = Expr.Cell("p_type_value", ColumnIndex(20))
+    val jShipdate: Expr[LP, String] = Expr.Cell("l_shipdate", ColumnIndex(10))
+    val jExtPrice: Expr[LP, Double] = Expr.Cell("l_extendedprice", ColumnIndex(5))
+    val jDiscount: Expr[LP, Double] = Expr.Cell("l_discount", ColumnIndex(6))
+    val jPType: Expr[LP, String] = Expr.Cell("p_type", ColumnIndex(20))
 
     // Filter by date
     val datePred =
@@ -238,8 +238,8 @@ class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase
     val liDs = E2eTestData.lineItemDataset(items)
     val partDs = E2eTestData.partDataset(parts)
 
-    val liPartkey: Expr[LineItem, Long] = Expr.Cell("l_partkey_value", ColumnIndex(1))
-    val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey_value", ColumnIndex(0))
+    val liPartkey: Expr[LineItem, Long] = Expr.Cell("l_partkey", ColumnIndex(1))
+    val pPartkey: Expr[Part, Long] = Expr.Cell("p_partkey", ColumnIndex(0))
 
     val joined = liDs.joinOn(
       partDs,
@@ -250,7 +250,7 @@ class E2ePromotionQuerySpec extends AnyFlatSpec with Matchers with SparkTestBase
     )
 
     type LP = (LineItem, Part)
-    val jPType: Expr[LP, String] = Expr.Cell("p_type_value", ColumnIndex(20))
+    val jPType: Expr[LP, String] = Expr.Cell("p_type", ColumnIndex(20))
 
     // Filter to PROMO types via distributed Expr.Like
     val promoFilter = jPType.like("PROMO%")

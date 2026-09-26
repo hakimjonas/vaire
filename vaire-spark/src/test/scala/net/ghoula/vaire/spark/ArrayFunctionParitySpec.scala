@@ -19,7 +19,7 @@ class ArrayFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBa
         struct(1, array(1, 2, 3), array('a', 'b')),
         struct(2, array(4), array('c', null, 'd')),
         struct(3, array(), array())
-      )) AS (id_value, xs_value, labels_value)
+      )) AS (id, xs, labels)
     """)
 
   private lazy val materialized = {
@@ -27,8 +27,8 @@ class ArrayFunctionParitySpec extends AnyFlatSpec with Matchers with SparkTestBa
     RowConverter.toMaterialized(rows, summon[Schema[Rec]]).fold(err => fail(s"$err"), identity)
   }
 
-  private def xsCell: Expr[Rec, Seq[Int]] = Expr.cell("xs_value", ColumnIndex(1))
-  private def labelsCell: Expr[Rec, Seq[String]] = Expr.cell("labels_value", ColumnIndex(2))
+  private def xsCell: Expr[Rec, Seq[Int]] = Expr.cell("xs", ColumnIndex(1))
+  private def labelsCell: Expr[Rec, Seq[String]] = Expr.cell("labels", ColumnIndex(2))
 
   private def checkParity[A](expr: Expr[Rec, A], columnType: ColumnType, expected: Vector[Any | Null]): Unit = {
     val inMemory = ExprInterpreter.evalColumn(expr, materialized.columns, columnType) match {

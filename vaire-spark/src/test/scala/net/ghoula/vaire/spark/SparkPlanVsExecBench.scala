@@ -60,8 +60,8 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
     )
     val structType = StructType(
       Array(
-        StructField("key_value", SparkStringType, nullable = false),
-        StructField("value_value", IntegerType, nullable = false)
+        StructField("key", SparkStringType, nullable = false),
+        StructField("value", IntegerType, nullable = false)
       )
     )
     val df = spark.createDataFrame(javaRows, structType).cache()
@@ -120,9 +120,9 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
   }
 
   "Plan vs Exec" should "show overhead amortizes with scale" taggedAs Benchmark in {
-    val valCell = Expr.Cell[BenchRow, Int]("value_value", ColumnIndex(1))
-    val keyCell: Expr[BenchRow, Any] = Expr.Cell("key_value", ColumnIndex(0))
-    val keyStrCell: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
+    val valCell = Expr.Cell[BenchRow, Int]("value", ColumnIndex(1))
+    val keyCell: Expr[BenchRow, Any] = Expr.Cell("key", ColumnIndex(0))
+    val keyStrCell: Expr[BenchRow, String] = Expr.Cell("key", ColumnIndex(0))
 
     Scales.foreach { scale =>
       printHeader(scale)
@@ -135,7 +135,7 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
         sparkInterpreter.toDataFrame(filtered).toOption.get
       }
       val filterNat = measure(Warmup, Measured) {
-        df.filter(F.col("value_value") > F.lit(500))
+        df.filter(F.col("value") > F.lit(500))
       }
       printRow("Filter", median(filterSb), median(filterNat))
 
@@ -144,7 +144,7 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
         sparkInterpreter.toDataFrame(sorted).toOption.get
       }
       val sortNat = measure(Warmup, Measured) {
-        df.sort(F.col("value_value"))
+        df.sort(F.col("value"))
       }
       printRow("Sort", median(sortSb), median(sortNat))
 
@@ -166,7 +166,7 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
         sparkInterpreter.toDataFrame(grouped).toOption.get
       }
       val groupNat = measure(Warmup, Measured) {
-        df.groupBy("key_value").agg(F.sum("value_value").as("totalValue"), F.count("*").as("cnt"))
+        df.groupBy("key").agg(F.sum("value").as("totalValue"), F.count("*").as("cnt"))
       }
       printRow("GroupByAgg", median(groupSb), median(groupNat))
 
@@ -178,20 +178,20 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
         sparkInterpreter.toDataFrame(ds.sortByExprs(sortKeys)).toOption.get
       }
       val sortExprsNat = measure(Warmup, Measured) {
-        df.sort(F.col("value_value").asc, F.col("key_value").desc)
+        df.sort(F.col("value").asc, F.col("key").desc)
       }
       printRow("SortByExprs", median(sortExprsSb), median(sortExprsNat))
 
       val ds2 = SparkDatasets.fromDataFrame(cachedDf(scale, NumGroups), benchRowSchema)
-      val leftKey: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
-      val rightKey: Expr[BenchRow, String] = Expr.Cell("key_value", ColumnIndex(0))
+      val leftKey: Expr[BenchRow, String] = Expr.Cell("key", ColumnIndex(0))
+      val rightKey: Expr[BenchRow, String] = Expr.Cell("key", ColumnIndex(0))
       val joinSb = measure(Warmup, Measured) {
         val joined = ds.joinOn(ds2, leftKey, rightKey, ColumnType.StringType, ColumnType.StringType)
         sparkInterpreter.toDataFrame(joined).toOption.get
       }
       val df2 = cachedDf(scale, NumGroups)
       val joinNat = measure(Warmup, Measured) {
-        df.alias("_l").join(df2.alias("_r"), F.col("_l.key_value") === F.col("_r.key_value"))
+        df.alias("_l").join(df2.alias("_r"), F.col("_l.key") === F.col("_r.key"))
       }
       printRow("JoinOn", median(joinSb), median(joinNat))
 

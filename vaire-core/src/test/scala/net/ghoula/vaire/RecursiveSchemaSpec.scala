@@ -77,7 +77,7 @@ class RecursiveSchemaSpec extends AnyFlatSpec with Matchers {
     val schema = Schema.structColumn[Point]
     schema.columnCount shouldBe 1
     schema.columnTypes shouldBe Vector(
-      ColumnType.StructType(Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType)))
+      ColumnType.StructType(Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType)))
     )
     schema.nestedSchemas shouldBe Vector(Some(summon[Schema[Point]]))
 
@@ -98,7 +98,7 @@ class RecursiveSchemaSpec extends AnyFlatSpec with Matchers {
           case other => fail(s"Expected StructColumn, got: ${other.getClass.getSimpleName}")
         }
         md.columns.head.columnType shouldBe
-          ColumnType.StructType(Vector(("x_value", ColumnType.IntType), ("y_value", ColumnType.StringType)))
+          ColumnType.StructType(Vector(("x", ColumnType.IntType), ("y", ColumnType.StringType)))
         md.toVectorUnsafe shouldBe points
       case other => fail(s"Expected materialized dataset, got: $other")
     }

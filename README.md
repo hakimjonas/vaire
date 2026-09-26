@@ -44,8 +44,8 @@ Vairë is published to Maven Central:
 
 ```scala
 libraryDependencies ++= Seq(
-  "net.ghoula" %% "vaire-core" % "1.0.0-alpha",
-  "net.ghoula" %% "vaire-spark" % "1.0.0-alpha" // Spark backend (optional)
+  "net.ghoula" %% "vaire-core" % "1.1.0-alpha",
+  "net.ghoula" %% "vaire-spark" % "1.1.0-alpha" // Spark backend (optional)
 )
 ```
 

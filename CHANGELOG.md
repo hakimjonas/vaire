@@ -2,18 +2,12 @@
 
 All notable changes to Vairë. Releases follow a scheduled train: a weekly run tags
 everything merged to `main` since the last tag as the next alpha, and `release.yml`
-publishes that tag to Maven Central. Stable releases are cut manually.
+publishes that tag to Maven Central. Minor and stable releases are cut manually.
 
 ## Unreleased
 
-- **License** — moved from GPL-3.0-or-later to LGPL-3.0-or-later across the LICENSE file,
-  build metadata, and documentation, matching the rest of the Arda stack. LGPL keeps the
-  copyleft protection of the source while permitting applications to link and use the
-  library without license obligations on application code.
-- **GitHub release pipeline** — publishing moves from the Forgejo/Codeberg Maven registry
-  to Maven Central under `net.ghoula` (Central Portal staging, sbt-pgp signing), with the
-  same SHA-pinned CI / auto-tag / release workflows the other Arda libraries run; the
-  Forgejo workflow remnants (`.forgejo/`) are removed. `rumil` moves to 1.0.0-alpha.5.
+## 1.1.0-alpha (2026-09-26)
+
 - **Keyed-join index, null model, and Spark source validation** — the keyed-join index is
   now unboxed, and the null model, keyed-join semantics, and Spark source contract now match
   Spark 4.2. Several changes are breaking; see below.
@@ -74,6 +68,17 @@ publishes that tag to Maven Central. Stable releases are cut manually.
   matched row, but different under the condition, was left out of the unmatched output. The
   other predicate joins short-circuit empty inputs. `KeyedJoinEquivalenceSpec` and
   `JoinOpsSpec` pin the keyed-join and full-join semantics.
+
+## 1.0.0-alpha (2026-09-07)
+
+- **License** — moved from GPL-3.0-or-later to LGPL-3.0-or-later across the LICENSE file,
+  build metadata, and documentation, matching the rest of the Arda stack. LGPL keeps the
+  copyleft protection of the source while permitting applications to link and use the
+  library without license obligations on application code.
+- **GitHub release pipeline** — publishing moves from the Forgejo/Codeberg Maven registry
+  to Maven Central under `net.ghoula` (Central Portal staging, sbt-pgp signing), with the
+  same SHA-pinned CI / auto-tag / release workflows the other Arda libraries run; the
+  Forgejo workflow remnants (`.forgejo/`) are removed. `rumil` moves to 1.0.0-alpha.5.
 
 ## 0.0.20
 

@@ -104,7 +104,7 @@ class SparkPlanVsExecBench extends AnyFlatSpec with Matchers with SparkTestBase 
       case s => s"${s / 1_000}K"
     }
     info(f"\n${"=" * 85}")
-    info(f"$label rows, $NumGroups groups (Spark 4.1.1)")
+    info(f"$label rows, $NumGroups groups (Spark ${org.apache.spark.SPARK_VERSION})")
     info(f"${"=" * 85}")
     info(
       f"${"Operation"}%-16s  ${"Plan(SB)"}%10s ${"Plan(Nat)"}%10s ${"Exec(SB)"}%10s ${"Exec(Nat)"}%10s ${"Overhead"}%10s"

@@ -262,6 +262,10 @@ Add a note to the README (or the operator scaladoc) that predicate joins are int
 
 **Phase 2 acceptance:** Phase 0 benchmarks show predicate-join times at the working sizes either flat or improved; `FullJoin`'s memory stays bounded (no giant intermediate `pairs` — check with a size the old code would over-allocate on). Specs green.
 
+#### Phase 2 delivered (September 2026)
+
+`JoinOps.fullJoin` records match indices per left row (a boolean right-index set) instead of materializing the n·m `pairs` vector and two sets of row values, and emits matched, then unmatched-left, then unmatched-right in the original order and duplicate semantics. `outerJoinDatasets` short-circuits an empty secondary to one `mkUnmatched` per primary row, and `innerJoinDatasets`/`leftAntiJoinDatasets` short-circuit empty inputs. The predicate-join scaladocs now state the O(n·m) cost and point at `*JoinOn`.
+
 ---
 
 ## Phase 3 — Correctness guard and direction of the build index
@@ -286,6 +290,10 @@ This locks correctness while Phase 1 changes indexing internals.
 Update the README's performance claims to state exactly what holds: columnar elementwise ops are linear; *keyed* joins are hash-based and near-linear (O(n·log n) under skew from the boxed bucket append, O(n) in the common case); predicate joins are O(n·m) and intended for small inputs; in-memory execution is bounded by heap. (The "no input size limit" phrasing should also be corrected elsewhere — in-memory is heap-bounded and `MaterializedDataset.rowCount`/column `length` are `Int`, capping rows per column near 2^31.)
 
 **Phase 3 acceptance:** a `PropertySpec` that passes both before and after Phase 1, plus README claims that no longer overstate linearity.
+
+#### Phase 3 delivered (September 2026)
+
+The keyed joins index the smaller side. `InnerJoinOn` and the semi/anti filter joins choose the direction from the row counts; `LeftJoinOn`/`RightJoinOn`/`FullJoinOn` gain a reversed probe path (index the preserved side, track matched rows) so they can index the smaller input too. `KeyedJoinEquivalenceSpec` (seeded) asserts every keyed join equals the equivalent `==` predicate join on uniform and skewed keys and that an inner join is symmetric across extreme size ratios, exercising both directions. The README gains a `## Performance` section stating the actual costs: linear elementwise operations, hash-based keyed joins, O(n·m) predicate joins for small frames, and a heap-bounded in-memory engine capped near 2^31 rows per column.
 
 ---
 

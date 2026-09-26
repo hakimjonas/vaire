@@ -7,17 +7,11 @@ import scala.collection.immutable.BitSet
 
 import net.ghoula.vaire.prelude.*
 
-/** Locks the keyed-join semantics against the equivalent predicate join and against the index
-  * direction.
+/** Locks the keyed-join semantics against the equivalent predicate join.
   *
-  * The keyed joins choose which side to index from the row counts (Phase 3a), so the same logical
-  * join can run with the left or the right side indexed. These checks assert that:
-  *
-  *   - every keyed join agrees with the equivalent `==` predicate join as a multiset, and
-  *   - an inner join is symmetric: joining `left` to `right` and `right` to `left` yields the same
-  *     pairs, even though the two calls index opposite sides.
-  *
-  * Datasets are generated from a seeded RNG so the checks are deterministic.
+  * These checks assert that every keyed join agrees with the equivalent `==` predicate join as a
+  * multiset, with and without null keys, and that the inner and anti joins emit rows in a stable
+  * order. Datasets are generated from a seeded RNG so the checks are deterministic.
   */
 class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
 
@@ -57,6 +51,11 @@ class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
 
     rows(left.antiJoinOn(right, key, key, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
       rows(left.antiJoin(right, equal)).sorted
+
+    val leftRows = rows(left)
+    val rightRows = rows(right)
+    rows(left.semiJoinOn(right, key, key, ColumnType.IntType, ColumnType.IntType)) shouldBe
+      leftRows.filter(rightRows.contains)
   }
 
   private val optKey: Expr.Cell[Option[Int], Int] = Expr.Cell[Option[Int], Int]("value", ColumnIndex(0))
@@ -96,6 +95,11 @@ class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
 
     rows(left.antiJoinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)).sorted shouldBe
       rows(left.antiJoin(right, nullIntolerant)).sorted
+
+    val leftRows = rows(left)
+    val rightRows = rows(right)
+    rows(left.semiJoinOn(right, optKey, optKey, ColumnType.IntType, ColumnType.IntType)) shouldBe
+      leftRows.filter(l => l.isDefined && rightRows.exists(r => r.isDefined && r == l))
   }
 
   private def checkInnerSymmetry(leftValues: Vector[Int], rightValues: Vector[Int]): Unit = {
@@ -120,7 +124,7 @@ class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
     }
   }
 
-  "inner joinOn" should "be symmetric when the index direction flips" in {
+  "inner joinOn" should "be symmetric under swapping its inputs" in {
     (0 until 60).foreach { _ =>
       checkInnerSymmetry(uniformValues(rng.nextInt(13)), uniformValues(rng.nextInt(13)))
     }
@@ -133,29 +137,22 @@ class KeyedJoinEquivalenceSpec extends AnyFlatSpec with Matchers {
     checkInnerSymmetry(uniformValues(10), Vector.empty)
   }
 
-  "inner joinOn" should "emit the same row order whichever side is indexed" in {
-    // left (2) <= right (2): forward branch, index the left
-    val forward =
-      rows(intDataset(Vector(1, 2)).joinOn(intDataset(Vector(2, 1)), key, key, ColumnType.IntType, ColumnType.IntType))
-    // left (3) > right (2): reversed branch, index the right
-    val reversed = rows(
-      intDataset(Vector(1, 2, 3)).joinOn(intDataset(Vector(2, 1)), key, key, ColumnType.IntType, ColumnType.IntType)
-    )
+  "inner joinOn" should "emit rows grouped by the right row, in order" in {
+    val result =
+      rows(
+        intDataset(Vector(1, 2, 3)).joinOn(intDataset(Vector(2, 1)), key, key, ColumnType.IntType, ColumnType.IntType)
+      )
 
-    forward shouldBe Vector((2, 2), (1, 1))
-    reversed shouldBe Vector((2, 2), (1, 1))
+    result shouldBe Vector((2, 2), (1, 1))
   }
 
-  "antiJoinOn" should "keep the left order whichever side is indexed" in {
-    val left = Vector(3, 1, 2)
-    val forward =
-      rows(intDataset(left).antiJoinOn(intDataset(Vector(9, 8, 7)), key, key, ColumnType.IntType, ColumnType.IntType))
-    val reversed = rows(
-      intDataset(left).antiJoinOn(intDataset(Vector(9, 8, 7, 6)), key, key, ColumnType.IntType, ColumnType.IntType)
+  "antiJoinOn" should "keep the left order" in {
+    val result = rows(
+      intDataset(Vector(3, 1, 2))
+        .antiJoinOn(intDataset(Vector(9, 8, 7)), key, key, ColumnType.IntType, ColumnType.IntType)
     )
 
-    forward shouldBe left
-    reversed shouldBe left
+    result shouldBe Vector(3, 1, 2)
   }
 
   "keyed joins with null keys" should "agree with a null-intolerant predicate join" in {

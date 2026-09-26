@@ -546,30 +546,14 @@ object DatasetInterpreter extends Interpreter {
     rightKeyType: ColumnType
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[(A, B)]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
+      val leftIndex = KeyIndex.build(leftKeyCol, left.rowCount)
       val leftIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
       val rightIdxBuf = scala.collection.mutable.ArrayBuffer.empty[Int]
 
-      if (left.rowCount <= right.rowCount) {
-        val leftIndex = KeyIndex.build(leftKeyCol, left.rowCount)
-        (0 until right.rowCount).foreach { ri =>
-          val _ = leftIndex.probe(rightKeyCol, ri) { li =>
-            leftIdxBuf += li
-            rightIdxBuf += ri
-          }
-        }
-      } else {
-        val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
-        val matchesByRight = Array.fill(right.rowCount)(List.empty[Int])
-        (0 until left.rowCount).foreach { li =>
-          val _ = rightIndex.probe(leftKeyCol, li) { ri =>
-            matchesByRight(ri) = li :: matchesByRight(ri)
-          }
-        }
-        (0 until right.rowCount).foreach { ri =>
-          matchesByRight(ri).reverseIterator.foreach { li =>
-            leftIdxBuf += li
-            rightIdxBuf += ri
-          }
+      (0 until right.rowCount).foreach { ri =>
+        val _ = leftIndex.probe(rightKeyCol, ri) { li =>
+          leftIdxBuf += li
+          rightIdxBuf += ri
         }
       }
 
@@ -713,20 +697,11 @@ object DatasetInterpreter extends Interpreter {
     include: Boolean
   )(using errors: RowErrors): Either[ExecutionError, MaterializedDataset[A]] =
     evalKeys(left, right, leftKey, rightKey, leftKeyType, rightKeyType) { (leftKeyCol, rightKeyCol) =>
-      val indices =
-        if (right.rowCount <= left.rowCount) {
-          val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
-          (0 until left.rowCount).filter { li =>
-            rightIndex.probe(leftKeyCol, li)(_ => ()) == include
-          }.toArray
-        } else {
-          val leftIndex = KeyIndex.build(leftKeyCol, left.rowCount)
-          val matchedLeft = Array.fill(left.rowCount)(false)
-          (0 until right.rowCount).foreach { ri =>
-            val _ = leftIndex.probe(rightKeyCol, ri) { li => matchedLeft(li) = true }
-          }
-          (0 until left.rowCount).filter(li => matchedLeft(li) == include).toArray
-        }
+      val rightIndex = KeyIndex.build(rightKeyCol, right.rowCount)
+
+      val indices = (0 until left.rowCount).filter { li =>
+        rightIndex.probe(leftKeyCol, li)(_ => ()) == include
+      }.toArray
 
       Right(reindexBy(left, indices))
     }

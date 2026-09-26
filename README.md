@@ -102,10 +102,9 @@ operations are linear in the row count with no per-row dispatch. The joins are t
 stating precisely:
 
 - **Keyed joins** (`joinOn`, `leftJoinOn`, `rightJoinOn`, `fullJoinOn`, `antiJoinOn`, `semiJoinOn`)
-  are hash-based and linear in the common case. The index is unboxed — dense keys use a
-  direct-address array, sparse keys an open-addressing table. `joinOn` and the semi/anti joins
-  index the smaller side; the outer joins index the side opposite the one whose unmatched rows they
-  must emit.
+  are hash-based: the index build and probe are linear in the input rows, and the output size is the
+  remaining term. The index is unboxed — dense keys use a direct-address array, sparse keys an
+  open-addressing table.
 - **Predicate joins** (`join`, `leftJoin`, `rightJoin`, `fullJoin`, `antiJoin`) evaluate the
   condition on every pair of rows (O(n·m)) and are intended for small frames. Express large-frame
   joins as `*JoinOn` so the in-memory interpreter builds a key index and Spark pushes a native

@@ -34,6 +34,13 @@ class SparkJoinBench extends AnyFlatSpec with Matchers with SparkTestBase {
     case "few" => Array.tabulate(n)(i => i % (math.sqrt(n.toDouble).toInt.max(1)))
     case "uniform" => Array.tabulate(n)(i => KeyBase + i)
     case "sparse" => Array.tabulate(n)(i => KeyBase + i * 37)
+    case "clustered" =>
+      val clusters = 8
+      val stride = 2 * (n / clusters)
+      Array.tabulate(n)(i => KeyBase + (i % clusters) * stride + (i / clusters))
+    case "random" =>
+      val rng = new scala.util.Random(0x5eedL)
+      Array.fill(n)(KeyBase + rng.nextInt(800_000_000 - KeyBase))
   }
 
   private def probeSide(n: Int): Array[Int] = Array.tabulate(n)(i => ProbeBase + i)
@@ -62,7 +69,7 @@ class SparkJoinBench extends AnyFlatSpec with Matchers with SparkTestBase {
     info(f"${"n"}%-9s ${"regime"}%-9s ${"median ms"}%10s")
     info("-" * 72)
 
-    Vector("hot", "few", "uniform", "sparse").foreach { regime =>
+    Vector("hot", "few", "uniform", "clustered", "sparse", "random").foreach { regime =>
       skewSizes.foreach { n =>
         val left = intDs(indexSide(regime, n))
         val right = intDs(probeSide(n))

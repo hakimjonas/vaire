@@ -49,11 +49,50 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
   private val ProbeBase = 900_000_000
   private val HotKey = 424_242
 
+  /** Index-side key generators.
+    *
+    * `hot`/`few`/`uniform` are dense (the common id/date/enum shape); `clustered` is dense with
+    * gaps; `random` is wide and sparse (hashed ids spread over 800M); `sparse` is a regular stride
+    * that crosses the dense/hash fill threshold (25%).
+    */
   private def indexSide(regime: String, n: Int): Array[Int] = regime match {
-    case "hot" => Array.fill(n)(HotKey) // one distinct key, n rows — the contended build
+    case "hot" => Array.fill(n)(HotKey) // one distinct key, n rows
     case "few" => Array.tabulate(n)(i => i % (math.sqrt(n.toDouble).toInt.max(1))) // k ≈ √n
-    case "uniform" => Array.tabulate(n)(i => KeyBase + i)
-    case "sparse" => Array.tabulate(n)(i => KeyBase + i * 37) // k ≈ n, no duplicates
+    case "uniform" => Array.tabulate(n)(i => KeyBase + i) // dense, k ≈ n
+    case "sparse" => Array.tabulate(n)(i => KeyBase + i * 37) // regular gaps, k ≈ n
+    case "clustered" =>
+      val clusters = 8
+      val stride = 2 * (n / clusters)
+      Array.tabulate(n)(i => KeyBase + (i % clusters) * stride + (i / clusters))
+    case "random" =>
+      val rng = new scala.util.Random(0x5eedL)
+      Array.fill(n)(KeyBase + rng.nextInt(800_000_000 - KeyBase))
+    case other => sys.error(s"unknown regime $other")
+  }
+
+  /** Distinct-key count per regime (by construction). */
+  private def distinctOf(regime: String, n: Int): Int = regime match {
+    case "hot" => 1
+    case "few" => math.min(n, math.sqrt(n.toDouble).toInt.max(1))
+    case "uniform" | "sparse" | "clustered" | "random" => n
+    case other => sys.error(s"unknown regime $other")
+  }
+
+  /** Distinct-key fill percentage and the slot layout the index will choose for a key set (dense if
+    * the span is within 4× the row count, i.e. row fill ≥ 25%).
+    */
+  private def density(values: Array[Int], distinct: Int): (Double, String) = {
+    var lo = values(0)
+    var hi = values(0)
+    var i = 1
+    while (i < values.length) {
+      val v = values(i)
+      if (v < lo) lo = v
+      if (v > hi) hi = v
+      i += 1
+    }
+    val span = hi.toLong - lo.toLong + 1
+    (100.0 * distinct / span, if (span <= 4L * values.length) "dense" else "hash")
   }
 
   // Disjoint from every index side above, so matched output stays ~0.
@@ -117,24 +156,46 @@ class JoinOperationsBench extends AnyFlatSpec with Matchers {
   // ---------------------------------------------------------------------------
 
   "Keyed joins" should "show index-build scaling under skew on the indexed side" taggedAs Benchmark in {
-    info(f"\n${"=" * 78}")
+    info(f"\n${"=" * 90}")
     info("InnerJoinOn — index built on LEFT; RIGHT probe disjoint (output ~0)")
-    info(f"${"=" * 78}")
+    info(f"${"=" * 90}")
     info(
-      f"${"n"}%-8s ${"regime"}%-8s ${"rows-in"}%-12s ${"median ms"}%10s ${"alloc MB"}%10s ${"gc ms"}%8s ${"vs prev"}%8s"
+      f"${"n"}%-8s ${"regime"}%-10s ${"fill"}%6s ${"layout"}%-6s ${"median ms"}%10s ${"alloc MB"}%10s ${"gc ms"}%8s ${"vs prev"}%8s"
     )
-    info("-" * 78)
+    info("-" * 90)
 
-    Vector("hot", "few", "uniform", "sparse").foreach { regime =>
+    Vector("hot", "few", "uniform", "clustered", "sparse", "random").foreach { regime =>
       var prev: Option[Double] = None
       skewSizes.foreach { n =>
-        val left = intDs(indexSide(regime, n))
+        val index = indexSide(regime, n)
+        val left = intDs(index)
         val right = intDs(probeSide(n))
+        val (fill, layout) = density(index, distinctOf(regime, n))
         val m = bench(runKeyed(left.joinOn(right, keyExpr, keyExpr, intType, intType)))
         val ratio = prev.fold("—")(p => f"${m.ms / p}%6.2fx")
-        info(f"$n%-8d $regime%-8s ${2 * n}%-12d ${m.ms}%9.1f ${m.allocMb}%9.1f ${m.gcMs}%7.1f  $ratio")
+        info(f"$n%-8d $regime%-10s $fill%5.1f%% $layout%-6s ${m.ms}%9.1f ${m.allocMb}%9.1f ${m.gcMs}%7.1f  $ratio")
         prev = Some(m.ms)
       }
+    }
+
+    succeed
+  }
+
+  "Keyed joins" should "locate the dense/hash fill crossover" taggedAs Benchmark in {
+    val n = 1_000_000
+    info(f"\n${"=" * 90}")
+    info(s"InnerJoinOn n=$n — fill sweep (dense below ~25% fill, hash above)")
+    info(f"${"=" * 90}")
+    info(f"${"stride"}%-8s ${"fill"}%6s ${"layout"}%-6s ${"median ms"}%10s ${"alloc MB"}%10s ${"gc ms"}%8s")
+    info("-" * 90)
+
+    Vector(2, 3, 4, 5, 8, 16, 100).foreach { stride =>
+      val index = Array.tabulate(n)(i => KeyBase + i * stride)
+      val left = intDs(index)
+      val right = intDs(probeSide(n))
+      val (fill, layout) = density(index, n)
+      val m = bench(runKeyed(left.joinOn(right, keyExpr, keyExpr, intType, intType)))
+      info(f"$stride%-8d $fill%5.1f%% $layout%-6s ${m.ms}%9.1f ${m.allocMb}%9.1f ${m.gcMs}%7.1f")
     }
 
     succeed

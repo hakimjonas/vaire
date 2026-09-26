@@ -208,26 +208,28 @@ The open-addressing table was sized to the row count (`2 × rowCount`, load ≤ 
 
 Phase 1e replaces the fixed table with two slot layouts chosen from the key range measured in a first pass:
 
-- Dense keys (`max - min + 1` within 4× the distinct count and under 2^26) use a direct-address `Array[Int]` indexed by `key - min`: one array access, no hashing, no collisions, and the array is exactly the key range. This is the common join-key shape (ids, dates, enums) and the uniform sweep.
+- Dense keys (`max - min + 1` within 4× the row count and under 2^26) use a direct-address `Array[Int]` indexed by `key - min`: one array access, no hashing, no collisions, and the array is exactly the key range. This is the common join-key shape (ids, dates, enums) and the uniform sweep.
 - Sparse keys keep the open-addressing table as a fallback.
 
 Both map a key to the head of the flat `next` chain, so nothing per-key is allocated and the ascending order is preserved. The structure is immutable after construction and contains no `var` (the min/max pass is tail-recursive, satisfying `SourcePolicySpec`).
 
-Same-window A/B on one machine (feature vs boxed `main`, median ms, 5 warmup + 10 measured), with a `sparse` regime (`key = base + 37·i`, forcing the fallback):
+Same-window A/B on one machine (feature vs boxed `main`, median ms, 5 warmup + 10 measured), across dense (`hot`, `few`, `uniform`), gapped (`clustered`, 53% fill), regular-sparse (`sparse`, 2.7% fill), and wide-random (`random`, ≤1.3% fill) regimes:
 
-| n | hot | few | uniform | sparse |
-| --- | --- | --- | --- | --- |
-| 100k | 1.6 / 6.7 | 1.1 / 3.2 | 1.2 / 3.1 | 4.1 / 3.7 |
-| 200k | 3.1 / 13.6 | 2.1 / 6.2 | 2.4 / 9.2 | 6.6 / 14.8 |
-| 400k | 6.1 / 9.4 | 4.2 / 12.5 | 4.9 / 21.0 | 14.7 / 41.3 |
-| 1M | 15.3 / 23.5 | 10.7 / 31.3 | 12.9 / 53.2 | 52.2 / 131.5 |
-| 2M | 26.7 / 47.5 | 21.1 / 51.9 | 25.1 / 102.1 | 170.4 / 301.2 |
-| 5M | 84.0 / 124.1 | 52.1 / 130.9 | 64.3 / 246.7 | 524.2 / 758.9 |
-| 10M | 139.2 / 273.6 | 103.6 / 270.7 | 124.1 / 483.6 | 1093.2 / 1568.2 |
+| n | hot | few | uniform | clustered | sparse | random |
+| --- | --- | --- | --- | --- | --- | --- |
+| 100k | 1.6 / 6.9 | 1.1 / 3.2 | 1.2 / 2.9 | 1.4 / 3.2 | 3.1 / 4.0 | 4.2 / 7.9 |
+| 200k | 3.1 / 12.9 | 2.1 / 6.1 | 2.4 / 8.0 | 2.9 / 8.0 | 6.4 / 13.0 | 8.9 / 21.2 |
+| 400k | 6.2 / 9.5 | 4.2 / 12.4 | 5.4 / 18.3 | 6.0 / 28.3 | 15.0 / 47.8 | 17.9 / 59.1 |
+| 1M | 15.5 / 23.0 | 11.1 / 30.7 | 12.6 / 53.7 | 14.5 / 86.7 | 52.8 / 137.1 | 55.1 / 173.6 |
+| 2M | 22.6 / 49.6 | 21.8 / 55.8 | 25.1 / 103.8 | 29.1 / 194.1 | 178.7 / 304.2 | 183.3 / 386.0 |
+| 5M | 85.6 / 133.7 | 51.9 / 131.1 | 93.5 / 252.1 | 73.8 / 318.4 | 522.9 / 767.6 | 556.2 / 1015.9 |
+| 10M | 133.6 / 260.5 | 104.1 / 268.0 | 121.9 / 486.9 | 146.7 / 673.5 | 1091.9 / 1549.4 | 1211.2 / 2210.2 |
 
-Allocation (median MB per run) is ~7-10× lower for dense keys (360 vs 2508-3670 at 10M) and ~3-4× lower for sparse, and the 10M GC time drops from 26-193 ms on `main` to 0. The Spark backend is native Catalyst and unchanged.
+The branch is faster at every size and regime, including the two that take the hash fallback (sparse 1.4×, random 1.8× at 10M). Allocation (median MB per run) is ~7-10× lower for dense keys (360-435 vs 2508-3670 at 10M), ~5.8× for clustered, ~3.3× for sparse/random; the 10M GC time drops from 60-110 ms on `main` to 0.
 
-The earlier same-window numbers (fixed table, 5 warmup + 10 measured): hot 2.5 vs 6.7 / 4.9 vs 13.6 / 10.2 vs 15.2 at 100k/200k/400k, uniform 3.2 vs 3.1 / 8.7 vs 9.1 / 15.2 vs 21.0.
+Fill crossover at n=1M (dense chosen at ≥25% fill, hash below), median ms feature/main: stride 2 (50%) 14.6/66.9, stride 3 (33%) 17.4/82.2, stride 4 (25%) 19.5/134.6, stride 5 (20%) 55.9/110.1, stride 8 (12.5%) 70.5/277.3, stride 16 (6.3%) 87.8/509.8, stride 100 (1%) 55.9/365.7. The threshold sits where dense is still ~3× faster, so the choice is not on the wrong side.
+
+The Spark backend is native Catalyst and unchanged.
 
 ---
 

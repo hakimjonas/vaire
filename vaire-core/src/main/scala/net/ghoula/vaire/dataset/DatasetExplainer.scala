@@ -124,6 +124,9 @@ object DatasetExplainer {
 
       case Dataset.WithPolicy(parent, policy) =>
         s"WithErrorPolicy[$policy]\n${explain(parent, indent + 1)}"
+
+      case Dataset.Narrow(parent, _) =>
+        s"Narrow\n${explain(parent, indent + 1)}"
     }
     s"$prefix$node"
   }

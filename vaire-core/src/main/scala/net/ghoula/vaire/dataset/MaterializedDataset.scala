@@ -3,6 +3,7 @@ package net.ghoula.vaire.dataset
 import net.ghoula.vaire.Schema
 import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.errors.{DecodeError, ExecutionError}
+import net.ghoula.vaire.internal.TypeChecks
 
 /** Result of executing a Dataset plan.
   *
@@ -39,10 +40,22 @@ final case class MaterializedDataset[T](
     }.toVector
   }
 
+  /** Get all rows, returning the first decode error as an `ExecutionError`.
+    *
+    * This is the safe accessor for data that may hold nulls: a null in a non-optional field yields
+    * `DecodeError.NullValue` rather than a crash.
+    */
+  def toVectorOrError: Either[ExecutionError, Vector[T]] =
+    toVector.foldRight[Either[ExecutionError, Vector[T]]](Right(Vector.empty)) {
+      case (Right(value), Right(acc)) => Right(value +: acc)
+      case (Left(err), _) => Left(ExecutionError.DecodeFailed(err))
+      case (_, left) => left
+    }
+
   /** Get all rows, throwing on decode errors.
     *
-    * This is the unsafe version. Prefer `toVector` which returns Either. This method exists for
-    * convenience when you know decoding cannot fail.
+    * This is the unsafe version. Prefer `toVectorOrError` which returns Either. This method exists
+    * for convenience when you know decoding cannot fail.
     */
   def toVectorUnsafe: Vector[T] = {
     toVector.map {
@@ -61,7 +74,7 @@ final case class MaterializedDataset[T](
 
   /** Map over decoded rows. */
   def map[U](f: T => U)(using schemaU: Schema[U]): Either[ExecutionError, MaterializedDataset[U]] =
-    MaterializedDataset.fromVector(toVectorUnsafe.map(f))
+    toVectorOrError.flatMap(rows => MaterializedDataset.fromVector(rows.map(f)))
 
   /** Show first n rows for debugging. */
   def show(n: Int = 20): String = {
@@ -101,7 +114,7 @@ object MaterializedDataset {
         (acc, colIdx) =>
           acc.flatMap { cols =>
             val colValues = encodedRows.map(_(colIdx))
-            schema.columnTypes(colIdx) match {
+            TypeChecks.underlying(schema.columnTypes(colIdx)) match {
               case ColumnType.StructType(fields) =>
                 schema.nestedSchemas.lift(colIdx).flatten match {
                   case Some(nested) =>
@@ -113,8 +126,8 @@ object MaterializedDataset {
                       )
                     )
                 }
-              case ct =>
-                Column.fromValues(colValues, ct).map(cols :+ _)
+              case _ =>
+                Column.fromValues(colValues, schema.columnTypes(colIdx)).map(cols :+ _)
             }
           }
       }

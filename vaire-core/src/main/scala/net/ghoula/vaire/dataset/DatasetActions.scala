@@ -19,7 +19,7 @@ object DatasetActions {
       * Materializes the entire dataset. Use with caution on large datasets.
       */
     def collect(using interpreter: Interpreter = DatasetInterpreter): Either[ExecutionError, Vector[T]] = {
-      interpreter.execute(dataset).map(_.toVectorUnsafe)
+      interpreter.execute(dataset).flatMap(_.toVectorOrError)
     }
 
     /** Count the number of elements.

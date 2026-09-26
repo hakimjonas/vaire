@@ -18,7 +18,7 @@ import net.ghoula.vaire.prelude.*
   */
 class HigherOrderParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  case class Doc(xs: Seq[Int], ys: Seq[Int], c: Int, m: Map[String, Int])
+  case class Doc(xs: Option[Seq[Int]], ys: Seq[Int], c: Int, m: Option[Map[String, Int]])
   given Schema[Doc] = Schema.derived
 
   private lazy val base: DataFrame = spark.sql("""

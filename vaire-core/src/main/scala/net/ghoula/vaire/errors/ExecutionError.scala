@@ -28,6 +28,9 @@ enum ExecutionError {
   /** A row-level data error with a log-safe message (no input data). */
   case InvalidValue(message: String)
 
+  /** A row could not be decoded from columnar storage, with the underlying decode error. */
+  case DecodeFailed(error: DecodeError)
+
   /** A structural pre-condition of the plan was violated. */
   case PreconditionViolation(message: String)
 }

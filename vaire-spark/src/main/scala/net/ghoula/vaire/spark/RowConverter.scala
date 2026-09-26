@@ -31,14 +31,6 @@ object RowConverter {
     schema.decode(values)
   }
 
-  /** Decode a Spark Row, throwing on failure. For use in mapPartitions. */
-  def fromRowUnsafe[T](row: Row, schema: Schema[T]): T = {
-    fromRow(row, schema) match {
-      case Right(value) => value
-      case Left(err) => sys.error(s"Row decode failed: $err")
-    }
-  }
-
   /** Convert Vairë-encoded values to the representation Spark expects at Row boundaries, recursing
     * into struct/array/map layouts.
     */
@@ -80,6 +72,7 @@ object RowConverter {
             case m: Map[?, ?] => m.map { case (mk, mv) => (toSparkValue(mk, kt), toSparkValue(mv, vt)) }
             case other => other
           }
+        case ColumnType.OptionType(inner) => toSparkValue(v, inner)
         case _ => v
       }
 
@@ -118,6 +111,7 @@ object RowConverter {
               m.map { case (mk, mv) => (fromSparkValue(mk, kt), fromSparkValue(mv, vt)) }
             case other => other
           }
+        case ColumnType.OptionType(inner) => fromSparkValue(v, inner)
         case _ => v
       }
 
@@ -140,8 +134,31 @@ object RowConverter {
           extractColumn(rows, colIdx, pair._1, rowCount, schema.nestedSchemas.lift(colIdx).flatten).map(cols :+ _)
         }
       }
-      columnsOrError.map(columns => MaterializedDataset(columns, schema))
+      columnsOrError.flatMap { columns =>
+        validateNullability(columns, schema).map(_ => MaterializedDataset(columns, schema))
+      }
     }
+  }
+
+  /** A null in a non-optional field is a schema violation: the boundary check should have caught
+    * it, but a source that declares a field non-nullable can still yield nulls.
+    */
+  private def validateNullability[T](
+    columns: Vector[Column[?]],
+    schema: Schema[T]
+  ): Either[ExecutionError, Unit] =
+    columns
+      .zip(schema.columnTypes)
+      .zipWithIndex
+      .collectFirst {
+        case ((col, ct), idx) if !isOptional(ct) && col.nullSet.nonEmpty =>
+          ExecutionError.DecodeFailed(DecodeError.NullValue(idx))
+      }
+      .toLeft(())
+
+  private def isOptional(ct: ColumnType): Boolean = ct match {
+    case ColumnType.OptionType(_) => true
+    case _ => false
   }
 
   private def timestampFromRows(
@@ -306,7 +323,9 @@ object RowConverter {
             )
         }
 
-      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) =>
+      case ColumnType.OptionType(inner) =>
+        extractColumn(rows, colIdx, inner, rowCount, nestedSchema)
+      case ColumnType.VariantType | ColumnType.AnyType =>
         Right(
           Column.any(
             Array.tabulate(rowCount)(i =>

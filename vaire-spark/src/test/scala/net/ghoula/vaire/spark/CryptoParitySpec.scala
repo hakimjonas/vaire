@@ -16,7 +16,7 @@ import net.ghoula.vaire.prelude.*
   */
 class CryptoParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  case class Doc(s: String)
+  case class Doc(s: Option[String])
   given Schema[Doc] = Schema.derived
 
   private lazy val base: DataFrame = spark.sql("""

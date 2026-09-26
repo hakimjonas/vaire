@@ -17,11 +17,17 @@ import net.ghoula.vaire.prelude.*
   */
 class SparkKeyedJoinParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  private def intDs(values: Array[Int], nulls: BitSet = BitSet.empty): Dataset[Int] =
-    Dataset.fromColumns(Vector(Column.int(values, nulls)), Schema.intSchema).toOption.get
+  private def intDs(values: Array[Int]): Dataset[Int] =
+    Dataset.fromColumns(Vector(Column.int(values)), Schema.intSchema).toOption.get
+
+  private def optIntDs(values: Array[Int], nulls: BitSet): Dataset[Option[Int]] =
+    Dataset.fromColumns(Vector(Column.int(values, nulls)), Schema.optionSchema[Int]).toOption.get
 
   private def intKey: Expr.Cell[Int, Int] =
     Expr.Cell[Int, Int]("value", ColumnIndex(0))
+
+  private def optIntKey: Expr.Cell[Option[Int], Int] =
+    Expr.Cell[Option[Int], Int]("value", ColumnIndex(0))
 
   "keyed joins" should "agree between in-memory and Spark" in {
     val left = intDs(Array(1, 2, 2, 3))
@@ -36,15 +42,15 @@ class SparkKeyedJoinParitySpec extends AnyFlatSpec with Matchers with SparkTestB
   }
 
   "keyed joins with null keys" should "agree between in-memory and Spark" in {
-    val left = intDs(Array(7, 9), BitSet(0)) // [null, 9]
-    val right = intDs(Array(9, 11), BitSet(1)) // [9, null]
+    val left = optIntDs(Array(7, 9), BitSet(0)) // [null, 9]
+    val right = optIntDs(Array(9, 11), BitSet(1)) // [9, null]
 
-    val plan = left.joinOn(right, intKey, intKey, ColumnType.IntType, ColumnType.IntType)
+    val plan = left.joinOn(right, optIntKey, optIntKey, ColumnType.IntType, ColumnType.IntType)
 
     val inMemory = DatasetInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
     val sparkResult = sparkInterpreter.execute(plan).map(_.toVectorUnsafe.sorted)
 
-    inMemory.shouldBe(Right(Vector((9, 9))))
+    inMemory.shouldBe(Right(Vector((Some(9), Some(9)))))
     sparkResult.shouldBe(inMemory)
   }
 

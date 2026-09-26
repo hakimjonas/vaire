@@ -7,7 +7,7 @@ import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.dataset.{Dataset, InMemorySource, MaterializedDataset}
 import net.ghoula.vaire.errors.ExecutionError
 import net.ghoula.vaire.expr.Expr
-import net.ghoula.vaire.internal.{JoinOps, KeyedJoin}
+import net.ghoula.vaire.internal.{JoinOps, KeyedJoin, TypeChecks}
 import net.ghoula.vaire.interpreter.{CollectedDataset, ExprInterpreter, Interpreter}
 import net.ghoula.vaire.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
@@ -50,7 +50,12 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case root: Dataset.Root[T] =>
         root.source match {
           case SparkSource(df) =>
-            Right(SparkPlan(df, root.schema))
+            SchemaConverter.validateSchema(root.schema, df.schema) match {
+              case Some(message) =>
+                Left(ExecutionError.InvalidPlan(s"SparkSource schema mismatch: $message"))
+              case None =>
+                Right(SparkPlan(df, root.schema))
+            }
           case InMemorySource(columns) =>
             val df = DataFrameBuilder.fromColumns(spark, columns, root.schema)
             Right(SparkPlan(df, root.schema))
@@ -73,13 +78,13 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         }
 
       case m: Dataset.Map[?, T] =>
-        buildPlan(m.parent).map(parent => collectAndTransform(parent, _.map(m.func), m.schema))
+        buildPlan(m.parent).flatMap(parent => collectAndTransform(parent, _.map(m.func), m.schema))
 
       case fm: Dataset.FlatMap[?, T] =>
-        buildPlan(fm.parent).map(parent => collectAndTransform(parent, _.flatMap(fm.func), fm.schema))
+        buildPlan(fm.parent).flatMap(parent => collectAndTransform(parent, _.flatMap(fm.func), fm.schema))
 
       case sel: Dataset.Select[?, T] =>
-        buildPlan(sel.parent).map(parent => collectAndTransform(parent, _.map(sel.projection), sel.schema))
+        buildPlan(sel.parent).flatMap(parent => collectAndTransform(parent, _.map(sel.projection), sel.schema))
 
       case selectExprs: Dataset.SelectExprs[_, T] =>
         buildPlan(selectExprs.parent).flatMap { parent =>
@@ -103,22 +108,24 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
       case exc: Dataset.Except[T] => applySetOperation(exc.left, exc.right, _.except(_))
 
       case srt: Dataset.Sort[T] =>
-        buildPlan(srt.parent).map { parent =>
+        buildPlan(srt.parent).flatMap { parent =>
           applySortViaCollect(parent, srt.ordering)
         }
 
       case srtBy: Dataset.SortBy[T, _] =>
-        buildPlan(srtBy.parent).map { parent =>
+        buildPlan(srtBy.parent).flatMap { parent =>
           applySortByViaCollect(parent, srtBy.key, srtBy.ordering)
         }
 
       case srtExpr: Dataset.SortByExpr[T, _] =>
-        buildPlan(srtExpr.parent).map { parent =>
-          ExprToColumn.convert(srtExpr.keyExpr) match {
-            case Right((sparkCol, _)) =>
-              SparkPlan(parent.df.sort(sparkCol), parent.schema)
-            case Left(_) =>
-              applySortByExprViaCollect(parent, srtExpr.keyExpr, srtExpr.keyType)
+        buildPlan(srtExpr.parent).flatMap { parent =>
+          checkResolvedType(parent, srtExpr.keyExpr, srtExpr.keyType, "sortByExpr").flatMap { _ =>
+            ExprToColumn.convert(srtExpr.keyExpr) match {
+              case Right((sparkCol, _)) =>
+                Right(SparkPlan(parent.df.sort(sparkCol), parent.schema))
+              case Left(_) =>
+                applySortByExprViaCollect(parent, srtExpr.keyExpr, srtExpr.keyType)
+            }
           }
         }
 
@@ -131,10 +138,10 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         }
 
       case zipIdx: Dataset.ZipWithIndex[?] =>
-        buildPlan(zipIdx.parent).map(applyZipWithIndex)
+        buildPlan(zipIdx.parent).flatMap(applyZipWithIndex)
 
       case zipId: Dataset.ZipWithUniqueId[?] =>
-        buildPlan(zipId.parent).map(applyZipWithUniqueId)
+        buildPlan(zipId.parent).flatMap(applyZipWithUniqueId)
 
       case persist: Dataset.Persist[T] =>
         buildPlan(persist.parent).map { parent =>
@@ -255,12 +262,44 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
           applyGlobalAggregate(parent, agg.aggSpecs, agg.resultSchema)
         }
 
+      case nar: Dataset.Narrow[_, T] =>
+        buildPlan(nar.parent).flatMap(parent => narrowSchema(parent, nar.schema))
+
       case _: Dataset.WithPolicy[T] =>
         Left(
           ExecutionError.UnsupportedOperation(
             "withErrorPolicy scopes are an in-memory interpreter feature; per-row error policies are unrepresentable on Spark (see docs/error-policy-design.md §5.3)"
           )
         )
+    }
+  }
+
+  /** Reinterpret a schema over the same Spark columns, asserting that non-optional fields hold no
+    * nulls. The check runs a Spark job that stops at the first null.
+    */
+  private def narrowSchema[T, U](
+    parent: SparkPlan[T],
+    schema: Schema[U]
+  ): Either[ExecutionError, SparkPlan[U]] = {
+    val layoutMatches =
+      parent.schema.columnCount == schema.columnCount &&
+        parent.schema.columnNames == schema.columnNames &&
+        parent.schema.columnTypes.zip(schema.columnTypes).forall { case (from, to) =>
+          TypeChecks.underlying(from) == TypeChecks.underlying(to)
+        }
+    if (!layoutMatches)
+      Left(ExecutionError.InvalidPlan("narrow: the new schema layout differs from the parent's"))
+    else {
+      val nonOptional = schema.columnNames.zip(schema.columnTypes).collect {
+        case (name, ct) if !TypeChecks.isOptional(ct) => name
+      }
+      val hasNulls = nonOptional
+        .map(name => org.apache.spark.sql.functions.col(name).isNull)
+        .reduceOption(_ || _)
+        .exists(cond => parent.df.filter(cond).limit(1).count() > 0)
+      if (hasNulls)
+        Left(ExecutionError.InvalidPlan("narrow: a column declared non-optional contains nulls"))
+      else Right(SparkPlan(parent.df, schema))
     }
   }
 
@@ -278,18 +317,26 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     leftDs: Dataset[A],
     rightDs: Dataset[B],
     condition: (A, B) => Boolean,
-    joinFunc: (SparkPlan[A], SparkPlan[B], (A, B) => Boolean) => SparkPlan[R]
+    joinFunc: (SparkPlan[A], SparkPlan[B], (A, B) => Boolean) => Either[ExecutionError, SparkPlan[R]]
   ): Either[ExecutionError, SparkPlan[R]] =
     for {
       left <- buildPlan(leftDs)
       right <- buildPlan(rightDs)
-    } yield joinFunc(left, right, condition)
+      result <- joinFunc(left, right, condition)
+    } yield result
 
   private def wrapAsSparkPlan[T](values: Vector[T], schema: Schema[T]): SparkPlan[T] =
     SparkPlan(createDataFrame(values, schema), schema)
 
-  private def collectValues[T](plan: SparkPlan[T]): Vector[T] = {
-    plan.df.collect().iterator.map(r => RowConverter.fromRowUnsafe(r, plan.schema)).toVector
+  private def collectValues[T](plan: SparkPlan[T]): Either[ExecutionError, Vector[T]] = {
+    val rows = plan.df.collect()
+    rows.iterator
+      .map(r => RowConverter.fromRow(r, plan.schema))
+      .foldRight[Either[ExecutionError, Vector[T]]](Right(Vector.empty)) {
+        case (Right(value), Right(acc)) => Right(value +: acc)
+        case (Left(err), _) => Left(ExecutionError.DecodeFailed(err))
+        case (_, left) => left
+      }
   }
 
   private def applyFilterViaMap[T](
@@ -300,13 +347,18 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     RowConverter.toMaterialized(rows, parent.schema).flatMap { materialized =>
       ExprInterpreter.evalColumn(predicate, materialized.columns, ColumnType.BooleanType).flatMap {
         case Column.BooleanColumn(data, _) =>
-          val filtered = data.indices
+          data.indices
             .filter(data(_))
-            .map { i =>
-              RowConverter.fromRowUnsafe(rows(i), parent.schema)
+            .foldRight[Either[ExecutionError, Vector[T]]](Right(Vector.empty)) { (i, acc) =>
+              for {
+                values <- acc
+                value <- RowConverter.fromRow(rows(i), parent.schema) match {
+                  case Right(v) => Right(v)
+                  case Left(err) => Left(ExecutionError.DecodeFailed(err))
+                }
+              } yield value +: values
             }
-            .toVector
-          Right(SparkPlan(createDataFrame(filtered, parent.schema), parent.schema))
+            .map(filtered => SparkPlan(createDataFrame(filtered, parent.schema), parent.schema))
         case other =>
           Left(ExecutionError.TypeMismatch("BooleanColumn", other.columnType.toString, "filter fallback"))
       }
@@ -317,65 +369,74 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     parent: SparkPlan[A],
     transform: Vector[A] => Vector[B],
     schema: Schema[B]
-  ): SparkPlan[B] = wrapAsSparkPlan(transform(collectValues(parent)), schema)
+  ): Either[ExecutionError, SparkPlan[B]] =
+    collectValues(parent).map(values => wrapAsSparkPlan(transform(values), schema))
 
-  private def applySortViaCollect[T](parent: SparkPlan[T], ord: Ordering[T]): SparkPlan[T] =
-    wrapAsSparkPlan(collectValues(parent).sorted(using ord), parent.schema)
+  private def applySortViaCollect[T](parent: SparkPlan[T], ord: Ordering[T]): Either[ExecutionError, SparkPlan[T]] =
+    collectValues(parent).map(values => wrapAsSparkPlan(values.sorted(using ord), parent.schema))
 
-  private def applySortByViaCollect[T, K](parent: SparkPlan[T], key: T => K, ord: Ordering[K]): SparkPlan[T] =
-    wrapAsSparkPlan(collectValues(parent).sortBy(key)(using ord), parent.schema)
+  private def applySortByViaCollect[T, K](
+    parent: SparkPlan[T],
+    key: T => K,
+    ord: Ordering[K]
+  ): Either[ExecutionError, SparkPlan[T]] =
+    collectValues(parent).map(values => wrapAsSparkPlan(values.sortBy(key)(using ord), parent.schema))
 
   private def applySortByExprViaCollect[T](
     parent: SparkPlan[T],
     keyExpr: Expr[T, ?],
     keyType: ColumnType
-  ): SparkPlan[T] = {
-    val values = collectValues(parent)
-    MaterializedDataset.fromVector(values)(using parent.schema) match {
-      case Right(materialized) =>
-        ExprInterpreter.evalColumn(keyExpr, materialized.columns, keyType) match {
-          case Right(keyCol) =>
-            val decoded = materialized.toVectorUnsafe
-            val indices = Column.sortIndicesByColumn(keyCol, materialized.rowCount)
-            val sorted = indices.iterator.map(decoded).toVector
-            SparkPlan(createDataFrame(sorted, parent.schema), parent.schema)
-          case Left(_) =>
-            parent
+  ): Either[ExecutionError, SparkPlan[T]] =
+    collectValues(parent).flatMap { values =>
+      MaterializedDataset.fromVector(values)(using parent.schema).flatMap { materialized =>
+        ExprInterpreter.evalColumn(keyExpr, materialized.columns, keyType).flatMap { keyCol =>
+          TypeChecks.resolvedColumnType(keyCol, keyType, "sortByExpr").flatMap { _ =>
+            materialized.toVectorOrError.map { decoded =>
+              val indices = Column.sortIndicesByColumn(keyCol, materialized.rowCount)
+              val sorted = indices.iterator.map(decoded).toVector
+              SparkPlan(createDataFrame(sorted, parent.schema), parent.schema)
+            }
+          }
         }
-      case Left(_) => parent
+      }
     }
-  }
 
   private def applyInnerJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[(A, B)] = {
-    val (leftValues, rightValues) = (collectValues(left), collectValues(right))
-    val resultRows = for {
-      l <- leftValues
-      r <- rightValues
-      if condition(l, r)
-    } yield (l, r)
-    wrapAsSparkPlan(resultRows, Schema.tuple2Schema[A, B](using left.schema, right.schema))
-  }
+  ): Either[ExecutionError, SparkPlan[(A, B)]] =
+    for {
+      leftValues <- collectValues(left)
+      rightValues <- collectValues(right)
+    } yield {
+      val resultRows = for {
+        l <- leftValues
+        r <- rightValues
+        if condition(l, r)
+      } yield (l, r)
+      wrapAsSparkPlan(resultRows, Schema.tuple2Schema[A, B](using left.schema, right.schema))
+    }
 
   private def applyJoinViaFlatMap[A, B, R](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean,
     schema: Schema[R]
-  )(f: (A, Vector[B]) => Vector[R]): SparkPlan[R] = {
-    val (leftValues, rightValues) = (collectValues(left), collectValues(right))
-    val resultRows = leftValues.flatMap(l => f(l, rightValues.filter(r => condition(l, r))))
-    wrapAsSparkPlan(resultRows, schema)
-  }
+  )(f: (A, Vector[B]) => Vector[R]): Either[ExecutionError, SparkPlan[R]] =
+    for {
+      leftValues <- collectValues(left)
+      rightValues <- collectValues(right)
+    } yield {
+      val resultRows = leftValues.flatMap(l => f(l, rightValues.filter(r => condition(l, r))))
+      wrapAsSparkPlan(resultRows, schema)
+    }
 
   private def applyLeftJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[(A, Option[B])] =
+  ): Either[ExecutionError, SparkPlan[(A, Option[B])]] =
     applyJoinViaFlatMap(
       left,
       right,
@@ -389,7 +450,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[(Option[A], B)] =
+  ): Either[ExecutionError, SparkPlan[(Option[A], B)]] =
     applyJoinViaFlatMap(
       right,
       left,
@@ -403,24 +464,31 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[(Option[A], Option[B])] = {
-    val resultRows = JoinOps.fullJoin(collectValues(left), collectValues(right), condition)
-    val resultSchema = Schema.tuple2Schema[Option[A], Option[B]](using
-      Schema.optionSchema[A](using left.schema),
-      Schema.optionSchema[B](using right.schema)
-    )
-    wrapAsSparkPlan(resultRows, resultSchema)
-  }
+  ): Either[ExecutionError, SparkPlan[(Option[A], Option[B])]] =
+    for {
+      leftValues <- collectValues(left)
+      rightValues <- collectValues(right)
+    } yield {
+      val resultRows = JoinOps.fullJoin(leftValues, rightValues, condition)
+      val resultSchema = Schema.tuple2Schema[Option[A], Option[B]](using
+        Schema.optionSchema[A](using left.schema),
+        Schema.optionSchema[B](using right.schema)
+      )
+      wrapAsSparkPlan(resultRows, resultSchema)
+    }
 
   private def applyLeftAntiJoin[A, B](
     left: SparkPlan[A],
     right: SparkPlan[B],
     condition: (A, B) => Boolean
-  ): SparkPlan[A] = {
-    val (leftValues, rightValues) = (collectValues(left), collectValues(right))
-    val resultRows = leftValues.filter(l => !rightValues.exists(r => condition(l, r)))
-    wrapAsSparkPlan(resultRows, left.schema)
-  }
+  ): Either[ExecutionError, SparkPlan[A]] =
+    for {
+      leftValues <- collectValues(left)
+      rightValues <- collectValues(right)
+    } yield {
+      val resultRows = leftValues.filter(l => !rightValues.exists(r => condition(l, r)))
+      wrapAsSparkPlan(resultRows, left.schema)
+    }
 
   private def joinOnExprBase[A, B](
     leftDs: Dataset[A],
@@ -437,8 +505,8 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
         for {
           left <- buildPlan(leftDs)
           right <- buildPlan(rightDs)
-          _ <- checkKeyColumn(left, leftKey, leftKeyType, "left")
-          _ <- checkKeyColumn(right, rightKey, rightKeyType, "right")
+          _ <- checkResolvedType(left, leftKey, leftKeyType, "keyed join left")
+          _ <- checkResolvedType(right, rightKey, rightKeyType, "keyed join right")
         } yield {
           val leftColName = getColName(leftKey)
           val rightColName = getColName(rightKey)
@@ -499,54 +567,60 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     case _ => "_expr"
   }
 
-  /** Check the declared key type against the key column's type in the built plan.
+  /** Check a declared key/element type against the expression's column in the built plan.
     *
-    * Only `Cell` and `Named` keys resolve to a plan column, which is the surface the Spark keyed
-    * join supports (`getColName` returns a placeholder name for anything else, which fails at
-    * analysis). Non-column keys are left to Spark's own resolution.
+    * Only `Cell` and `Named` expressions resolve to a plan column; other expressions are converted
+    * by `ExprToColumn`/`convertExprToSparkCol`, and Spark's own resolution applies. Non-column
+    * expressions are left unchecked, matching the surface the Spark backend resolves directly.
     */
-  private def checkKeyColumn[T](
+  private def checkResolvedType[T](
     plan: SparkPlan[T],
-    key: Expr[T, ?],
+    expr: Expr[T, ?],
     declared: ColumnType,
-    side: String
+    context: String
   ): Either[ExecutionError, Unit] =
-    key match {
+    expr match {
       case cell: Expr.Cell[_, _] =>
         plan.schema.columnTypes.lift(cell.index.toInt) match {
-          case Some(actual) => KeyedJoin.checkColumnType(actual, declared, side)
+          case Some(actual) => TypeChecks.resolvedType(actual, declared, context)
           case None => Right(())
         }
-      case named: Expr.Named[_, _] => checkKeyColumn(plan, named.expr, declared, side)
+      case named: Expr.Named[_, _] => checkResolvedType(plan, named.expr, declared, context)
       case _ => Right(())
     }
 
-  private def applyZipWithIndex[A](parent: SparkPlan[A]): SparkPlan[(A, Long)] =
-    wrapAsSparkPlan(
-      collectValues(parent).zipWithIndex.map { case (v, i) => (v, i.toLong) },
-      Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
-    )
+  private def allChecks(checks: Vector[Either[ExecutionError, Unit]]): Either[ExecutionError, Unit] =
+    checks.foldLeft[Either[ExecutionError, Unit]](Right(()))((acc, check) => acc.flatMap(_ => check))
 
-  private def applyZipWithUniqueId[A](parent: SparkPlan[A]): SparkPlan[(A, Long)] = {
+  private def applyZipWithIndex[A](parent: SparkPlan[A]): Either[ExecutionError, SparkPlan[(A, Long)]] =
+    collectValues(parent).map { values =>
+      wrapAsSparkPlan(
+        values.zipWithIndex.map { case (v, i) => (v, i.toLong) },
+        Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
+      )
+    }
+
+  private def applyZipWithUniqueId[A](parent: SparkPlan[A]): Either[ExecutionError, SparkPlan[(A, Long)]] = {
     import org.apache.spark.sql.functions.monotonically_increasing_id
     val tupleSchema = Schema.tuple2Schema[A, Long](using parent.schema, Schema.longSchema)
     val colCount = parent.schema.columnNames.length
     val uidColName = s"_vaire_${java.util.UUID.randomUUID().nn.toString.replace("-", "")}"
     val uidDf = parent.df.withColumn(uidColName, monotonically_increasing_id())
-    val values = uidDf
+    uidDf
       .collect()
       .iterator
       .map { row =>
-        val original = RowConverter.fromRowUnsafe(
-          org.apache.spark.sql.Row.fromSeq((0 until colCount).map(row.get)),
-          parent.schema
-        )
-        val uid = row.getLong(colCount)
-        (original, uid)
+        RowConverter.fromRow(org.apache.spark.sql.Row.fromSeq((0 until colCount).map(row.get)), parent.schema) match {
+          case Right(original) => Right((original, row.getLong(colCount)))
+          case Left(err) => Left(ExecutionError.DecodeFailed(err))
+        }
       }
-      .toVector
-    val df = createDataFrame(values, tupleSchema)
-    SparkPlan(df, tupleSchema)
+      .foldRight[Either[ExecutionError, Vector[(A, Long)]]](Right(Vector.empty)) {
+        case (Right(value), Right(acc)) => Right(value +: acc)
+        case (Left(err), _) => Left(err)
+        case (_, left) => left
+      }
+      .map(values => SparkPlan(createDataFrame(values, tupleSchema), tupleSchema))
   }
 
   private def convertExprs(
@@ -604,6 +678,7 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     schema: Schema[T]
   ): Either[ExecutionError, SparkPlan[T]] = {
     for {
+      _ <- allChecks(keySpecs.map(spec => checkResolvedType(parent, spec.expr, spec.columnType, "groupByAgg key")))
       keyCols <- convertNamedExprsToSparkCols(keySpecs.map(s => (s.expr, s.name)), "Key expr conversion failed")
       aggCols <- convertNamedExprsToSparkCols(aggSpecs.map(s => (s.expr, s.name)), "Agg expr conversion failed")
     } yield {
@@ -641,8 +716,10 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     parent: SparkPlan[T],
     sortKeys: Vector[SortSpec[T]]
   ): Either[ExecutionError, SparkPlan[T]] =
-    convertSortSpecsToSparkCols(sortKeys, "Sort expr conversion failed")
-      .map(sparkSortCols => SparkPlan(parent.df.sort(sparkSortCols*), parent.schema))
+    for {
+      _ <- allChecks(sortKeys.map(spec => checkResolvedType(parent, spec.expr, spec.columnType, "sortByExprs")))
+      sparkSortCols <- convertSortSpecsToSparkCols(sortKeys, "Sort expr conversion failed")
+    } yield SparkPlan(parent.df.sort(sparkSortCols*), parent.schema)
 
   private def applyWithWindow[In, T](
     parent: SparkPlan[In],
@@ -653,6 +730,12 @@ class SparkInterpreter(spark: SparkSession) extends Interpreter {
     import org.apache.spark.sql.expressions.Window
 
     for {
+      _ <- allChecks(
+        windowSpec.partitionBy.map(spec => checkResolvedType(parent, spec.expr, spec.columnType, "window partitionBy"))
+      )
+      _ <- allChecks(
+        windowSpec.orderBy.map(spec => checkResolvedType(parent, spec.expr, spec.columnType, "window orderBy"))
+      )
       partCols <- convertToSparkCols(windowSpec.partitionBy.map(_.expr), "Window partition expr conversion failed")
       orderSparkCols <- convertSortSpecsToSparkCols(windowSpec.orderBy, "Window order expr conversion failed")
       resultDf <- {

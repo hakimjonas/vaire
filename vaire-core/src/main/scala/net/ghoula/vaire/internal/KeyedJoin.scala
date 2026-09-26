@@ -25,7 +25,7 @@ private[vaire] object KeyedJoin {
 
   /** `None` when the two key types match, else the error to surface. */
   def validateKeyTypes(left: ColumnType, right: ColumnType): Option[ExecutionError] =
-    if (left == right) None
+    if (TypeChecks.underlying(left) == TypeChecks.underlying(right)) None
     else
       Some(
         ExecutionError.TypeMismatch(
@@ -33,18 +33,6 @@ private[vaire] object KeyedJoin {
           actual = right.toString,
           context =
             "keyed join: left and right key columns must have the same ColumnType (cast one side explicitly to widen)"
-        )
-      )
-
-  /** `Right(())` when the resolved key column has the declared type, else the error to surface. */
-  def checkColumnType(actual: ColumnType, declared: ColumnType, side: String): Either[ExecutionError, Unit] =
-    if (actual == declared) Right(())
-    else
-      Left(
-        ExecutionError.TypeMismatch(
-          expected = declared.toString,
-          actual = actual.toString,
-          context = s"keyed join: $side key expression resolves to a different ColumnType than declared"
         )
       )
 }

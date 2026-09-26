@@ -4,6 +4,7 @@ import net.ghoula.vaire.Schema
 import net.ghoula.vaire.column.{Column, ColumnType}
 import net.ghoula.vaire.errors.{NonEmptyList, SchemaError}
 import net.ghoula.vaire.expr.Expr
+import net.ghoula.vaire.internal.TypeChecks
 import net.ghoula.vaire.interpreter.ErrorPolicy
 import net.ghoula.vaire.params.{AggSpec, KeySpec, SortSpec, WindowExprSpec, WindowSpec}
 
@@ -195,6 +196,11 @@ enum Dataset[T] {
 
   /** Error-policy scope over the plan built so far; see docs/error-policy-design.md. */
   case WithPolicy[T](parent: Dataset[T], policy: ErrorPolicy) extends Dataset[T]
+
+  /** Reinterprets the parent's schema, asserting that fields the new schema declares non-optional
+    * hold no nulls. Fails if any does.
+    */
+  case Narrow[T, U](parent: Dataset[T], schema: Schema[U]) extends Dataset[U]
 }
 
 /** Smart constructor with validation and the transformation DSL. */
@@ -212,7 +218,8 @@ object Dataset {
     val validations = List(
       validateColumnCount(cols, schema),
       validateColumnTypes(cols, schema),
-      validateColumnLengths(cols)
+      validateColumnLengths(cols),
+      validateNullability(cols, schema)
     )
 
     val errors = validations.collect { case Left(e) => e }.flatten
@@ -555,6 +562,14 @@ object Dataset {
     inline def withErrorPolicy(policy: ErrorPolicy): Dataset[T] = {
       WithPolicy(ds, policy)
     }
+
+    /** Reinterpret the schema, asserting that fields the new schema declares non-optional hold no
+      * nulls. Fails when a null is present. Use it to narrow `Option` fields once the data is known
+      * to be non-null.
+      */
+    inline def narrow[U](using schema: Schema[U]): Dataset[U] = {
+      Narrow(ds, schema)
+    }
   }
 
   private def validateColumnCount[T](
@@ -573,7 +588,7 @@ object Dataset {
     schema: Schema[T]
   ): Either[List[SchemaError], Unit] = {
     val mismatches = cols.zip(schema.columnTypes).zipWithIndex.collect {
-      case ((col, expectedType), idx) if col.columnType != expectedType =>
+      case ((col, expectedType), idx) if col.columnType != TypeChecks.underlying(expectedType) =>
         SchemaError.ColumnTypeMismatch(idx, expectedType, col.columnType)
     }
 
@@ -582,6 +597,31 @@ object Dataset {
     } else {
       Left(mismatches.toList)
     }
+  }
+
+  /** A non-optional column must not hold nulls. Nullability is part of the schema type: a nullable
+    * field is `Option[T]` (column type `OptionType(inner)`), and a null in a non-optional field is
+    * a schema violation, not a value the row decoder can represent.
+    */
+  private def validateNullability[T](
+    cols: Vector[Column[?]],
+    schema: Schema[T]
+  ): Either[List[SchemaError], Unit] = {
+    val violations = cols.zip(schema.columnTypes).zipWithIndex.collect {
+      case ((col, ct), idx) if !isOptional(ct) && col.nullSet.nonEmpty =>
+        SchemaError.NullInNonNullableColumn(idx, schema.columnNames.lift(idx).getOrElse(idx.toString))
+    }
+
+    if (violations.isEmpty) {
+      Right(())
+    } else {
+      Left(violations.toList)
+    }
+  }
+
+  private def isOptional(ct: ColumnType): Boolean = ct match {
+    case ColumnType.OptionType(_) => true
+    case _ => false
   }
 
   private def validateColumnLengths(

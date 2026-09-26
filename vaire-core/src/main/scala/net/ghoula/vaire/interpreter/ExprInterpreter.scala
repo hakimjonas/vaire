@@ -46,6 +46,19 @@ object ExprInterpreter {
       case None => null // scalafix:ok DisableSyntax.null
     }
 
+  /** The `Option` value at a row of an `Option`-typed expression column.
+    *
+    * Covers both representations: a row-level optional column stores nulls, while a higher-order
+    * lambda binding (`zip_with` padding, `map_zip_with` missing keys) stores boxed `Some`/`None`.
+    */
+  private def optionAt(col: Column[?], row: Int): Option[Any] =
+    if (col.isNull(RowIndex(row))) None
+    else
+      col.getValue(row) match {
+        case o: Option[?] => o
+        case other => Some(other)
+      }
+
   /** Evaluate under the `Collect` error policy: per-row data failures null-mark their row and are
     * recorded (bounded by the policy's `maxErrors`, with a by-kind summary) instead of aborting the
     * column. Structural errors fail under every policy. The default policy collects up to 100
@@ -733,36 +746,20 @@ object ExprInterpreter {
         case isDefined: Expr.IsDefined[Row, _] =>
           val innerType = inferExprColumnType(isDefined.expr, columns)
           evalColumn(isDefined.expr, columns, innerType).map { col =>
-            Column.boolean(Array.tabulate(rowCount) { i =>
-              col.getValue(i) match {
-                case Some(_) => true
-                case _ => false
-              }
-            })
+            Column.boolean(Array.tabulate(rowCount)(i => optionAt(col, i).isDefined))
           }
 
         case getOrElse: Expr.GetOrElse[Row, _] =>
           val innerType = inferExprColumnType(getOrElse.expr, columns)
           evalColumn(getOrElse.expr, columns, innerType).flatMap { col =>
-            val out = Array.tabulate[Any](rowCount) { i =>
-              col.getValue(i) match {
-                case Some(value) => value
-                case _ => getOrElse.default
-              }
-            }
+            val out = Array.tabulate[Any](rowCount)(i => optionAt(col, i).getOrElse(getOrElse.default))
             Column.fromValues(out.toVector, columnType)
           }
 
         case opt2iter: Expr.Option2Iterable[Row, _] =>
           val innerType = inferExprColumnType(opt2iter.expr, columns)
           evalColumn(opt2iter.expr, columns, innerType).map { col =>
-            Column.any(Array.tabulate[Any](rowCount) { i =>
-              col.getValue(i) match {
-                case Some(value) => List(value)
-                case opt: Option[?] if opt.isEmpty => List.empty
-                case other => List(other)
-              }
-            })
+            Column.any(Array.tabulate[Any](rowCount)(i => optionAt(col, i).toList))
           }
 
         case sq: Expr.Sqrt[Row] =>
@@ -4708,12 +4705,14 @@ object ExprInterpreter {
     evalColumn(body, rowColumns, ColumnType.AnyType)(using scope2).map(_.getValue(0))
   }
 
-  /** An Option-boxed column of the given flat values, used as a lambda binding whose binder is
-    * typed `Option[A]` (zip_with padding, map_zip_with missing keys). Option-typed columns store
-    * `Some`/`None` boxes so option combinators (`getOrElse`, `isDefined`) see them.
+  /** A nullable column of the given flat values, used as a lambda binding whose binder is typed
+    * `Option[A]` (zip_with padding, map_zip_with missing keys). A null is `None`; `optionAt` reads
+    * it the same way it reads a row-level optional column.
     */
-  private def optionElementColumn(flatElems: Vector[Any | Null]): Column[?] =
-    Column.any(Array.tabulate[Any](flatElems.length)(i => Option(flatElems(i)): Any))
+  private def optionElementColumn(flatElems: Vector[Any | Null]): Column[?] = {
+    val nullIndices = flatElems.zipWithIndex.collect { case (e, i) if Option(e).isEmpty => i }.to(BitSet)
+    Column.any(flatElems.toArray, BitSet.empty ++ nullIndices)
+  }
 
   /** A typed column of the given flat element values, used as a lambda binding.
     *

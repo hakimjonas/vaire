@@ -687,7 +687,7 @@ object Column {
       MapColumn(Column.empty(key), Column.empty(value), Array(0), BitSet.empty)
     case ColumnType.VariantType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
     case ColumnType.AnyType => AnyColumn(Array.empty[Any | Null], BitSet.empty)
-    case ColumnType.OptionType(_) => AnyColumn(Array.empty[Any | Null], BitSet.empty)
+    case ColumnType.OptionType(inner) => empty(inner)
   }
 
   private def emptyStructSchemaOf[X](fields: Vector[(String, ColumnType)]): Schema[X] = new Schema[X] {
@@ -868,7 +868,9 @@ object Column {
             "StructType columns require a nested schema; use Column.structFromValues"
           )
         )
-      case ColumnType.VariantType | ColumnType.AnyType | ColumnType.OptionType(_) =>
+      case ColumnType.OptionType(inner) =>
+        fromValues(values, inner)
+      case ColumnType.VariantType | ColumnType.AnyType =>
         Right(AnyColumn(values.toArray, nullIndices))
     }
   }

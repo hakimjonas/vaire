@@ -35,17 +35,74 @@ object SchemaConverter {
 
   /** Convert a Vairë Schema[T] to a Spark StructType.
     *
-    * Every field is marked nullable. Vairë tracks nulls per column in a `BitSet`, independently of
-    * whether the schema type is wrapped in `OptionType`, so a non-optional column can still hold
-    * null rows. Marking those fields non-nullable made `createDataFrame` replace the nulls with
-    * type defaults (0, empty string, ...), which diverged from the in-memory interpreter. Spark's
-    * default nullability is `true`, and `fromSparkType` ignores nullability, so nothing is lost.
+    * An optional field (`OptionType(inner)`) becomes `inner` with `nullable = true`; a non-optional
+    * field becomes `nullable = false`. Nullability is part of the Vairë schema, and `fromColumns`
+    * guarantees a non-optional field holds no nulls, so the flag round-trips through Spark.
     */
-  def toStructType[T](schema: Schema[T]): SparkStructType = {
-    val fields = schema.columnNames.zip(schema.columnTypes).map { case (name, ct) =>
-      StructField(name, toSparkType(ct), nullable = true)
+  def toStructType[T](schema: Schema[T]): SparkStructType =
+    SparkStructType(schema.columnNames.zip(schema.columnTypes).map { case (name, ct) => sparkField(name, ct) }.toArray)
+
+  /** A Spark field for a named Vairë type: `OptionType(inner)` is nullable, anything else is not.
+    */
+  private def sparkField(name: String, ct: ColumnType): StructField = ct match {
+    case ColumnType.OptionType(inner) => StructField(name, toSparkType(inner), nullable = true)
+    case _ => StructField(name, toSparkType(ct), nullable = false)
+  }
+
+  /** Validate a Vairë schema against a Spark `StructType`.
+    *
+    * Field types must match, and nullability must agree: a non-optional Vairë field requires a
+    * non-nullable Spark field, and a nullable Spark field requires an `Option` Vairë field. Structs
+    * recurse. Returns the first mismatch, or `None` when the schema is consistent.
+    */
+  def validateSchema(schema: Schema[?], structType: SparkStructType): Option[String] =
+    validateFields(schema.columnNames.zip(schema.columnTypes), structType.fields.toVector)
+
+  private def validateFields(
+    vaire: Vector[(String, ColumnType)],
+    spark: Vector[StructField]
+  ): Option[String] =
+    if (vaire.length != spark.length)
+      Some(s"field count differs: Vairë has ${vaire.length}, Spark has ${spark.length}")
+    else
+      vaire.zip(spark).collectFirst {
+        case ((name, vt), sf) if validateField(vt, sf).isDefined =>
+          s"$name: ${validateField(vt, sf).get}"
+      }
+
+  private def validateField(vt: ColumnType, sf: StructField): Option[String] = {
+    val (inner, optional) = vt match {
+      case ColumnType.OptionType(in) => (in, true)
+      case other => (other, false)
     }
-    SparkStructType(fields.toArray)
+    if (!optional && sf.nullable)
+      Some(
+        "non-optional Vairë field maps to a nullable Spark column; declare it Option or make the Spark column non-nullable"
+      )
+    else validateType(inner, sf.dataType)
+  }
+
+  private def validateType(vt: ColumnType, dt: SparkDataType): Option[String] = vt match {
+    case ColumnType.OptionType(inner) => validateType(inner, dt)
+    case ColumnType.StructType(fields) =>
+      dt match {
+        case st: SparkStructType => validateFields(fields, st.fields.toVector)
+        case other => Some(s"expected a struct, found ${other.catalogString}")
+      }
+    case ColumnType.ArrayType(elem) =>
+      dt match {
+        case at: SparkArrayType => validateType(elem, at.elementType)
+        case other => Some(s"expected an array, found ${other.catalogString}")
+      }
+    case ColumnType.MapType(key, value) =>
+      dt match {
+        case mt: SparkMapType => validateType(key, mt.keyType).orElse(validateType(value, mt.valueType))
+        case other => Some(s"expected a map, found ${other.catalogString}")
+      }
+    case _ =>
+      val expected = toSparkType(vt)
+      if (expected == dt) None
+      else Some(s"expected ${expected.catalogString}, found ${dt.catalogString}")
   }
 
   /** Convert a Vairë ColumnType to a Spark DataType. */
@@ -69,7 +126,7 @@ object SchemaConverter {
     case ColumnType.CharType(n) => SparkCharType(n)
     case ColumnType.VarcharType(n) => SparkVarcharType(n)
     case ColumnType.StructType(fields) =>
-      SparkStructType(fields.map { case (name, ft) => StructField(name, toSparkType(ft), nullable = true) }.toArray)
+      SparkStructType(fields.map { case (name, ft) => sparkField(name, ft) }.toArray)
     case ColumnType.VariantType => SparkVariantType
     case ColumnType.OptionType(inner) => toSparkType(inner)
     case ColumnType.ArrayType(elem) => SparkArrayType(toSparkType(elem), containsNull = true)
@@ -99,9 +156,14 @@ object SchemaConverter {
     case vt: SparkVarcharType => ColumnType.VarcharType(vt.length)
     case SparkVariantType => ColumnType.VariantType
     case st: SparkStructType =>
-      ColumnType.StructType(st.fields.map(f => (f.name, fromSparkType(f.dataType))).toVector)
+      ColumnType.StructType(st.fields.map(f => (f.name, fromSparkField(f))).toVector)
     case at: SparkArrayType => ColumnType.ArrayType(fromSparkType(at.elementType))
     case mt: SparkMapType => ColumnType.MapType(fromSparkType(mt.keyType), fromSparkType(mt.valueType))
     case _ => ColumnType.AnyType
   }
+
+  /** A Vairë type for a Spark struct field: a nullable field becomes `OptionType(inner)`. */
+  private def fromSparkField(f: StructField): ColumnType =
+    if (f.nullable) ColumnType.OptionType(fromSparkType(f.dataType))
+    else fromSparkType(f.dataType)
 }

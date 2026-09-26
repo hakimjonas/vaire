@@ -183,13 +183,24 @@ The follow-up is scoped to `KeyIndex.PrimitiveIndex`; join semantics are unchang
 The initial fast path gated cross-type probes on `ColumnType` and matched null keys to null keys. Both disagreed with Spark 4.2, and the gate was order-dependent: it lived only in `PrimitiveIndex`, so `Long ⋈ Time` returned no rows while `Time ⋈ Long` matched. Phase 1c aligns the keyed-join key contract with Spark 4.2:
 
 - Key types must match. `KeyedJoin.validateKeyTypes` runs once at the keyed-join boundary, called by both `DatasetInterpreter.evalKeys` and `SparkInterpreter.joinOnExprBase`; a mismatch fails with `ExecutionError.TypeMismatch` instead of silently returning no rows. This matches Spark rejecting incompatible key types and keeps the two backends in agreement. Widening (`Int` vs `Long`) now requires an explicit cast so both sides share a type.
-- The declared type is checked against the resolved column. `KeyedJoin.checkColumnType` compares the evaluated key column's `ColumnType` (core) or the key column's type in the built plan (Spark) against the declared type, so a caller cannot label a `Long` column as `Int`. This is what stops the equality check from being defeated by a lie on both sides.
+- The declared type is checked against the resolved column. `TypeChecks.resolvedType` compares the evaluated key column's `ColumnType` (core) or the key column's type in the built plan (Spark) against the declared type, so a caller cannot label a `Long` column as `Int`. This is what stops the equality check from being defeated by a lie on both sides.
 - Null keys never match. Spark 4.2 runs ANSI mode by default and `EqualTo` is null-intolerant, so the in-memory index no longer indexes null rows or matches null probes. This replaces the earlier null-matches-null behavior and rewrites `JoinOnNullKeysSpec`.
 - The per-probe type gate is gone. With boundary validation in place, `KeyIndex` assumes same-type keys and the fast path stays unboxed.
 
 `SparkKeyedJoinParitySpec` covers valid joins, null keys, mismatched key types, and a declared type that disagrees with the column, across both backends.
 
 The core suite (`testFull`, 596 tests) is green, including the rewritten `JoinOnNullKeysSpec` and the new `KeyedJoinKeyTypeSpec` (mismatch errors, resolved-column check, fast-type coverage, inner-join symmetry).
+
+#### Phase 1d — Single-column null model (September 2026)
+
+The schema and the column disagreed about nullability: a column carries a null `BitSet` independently of the schema, and `optionSchema` encoded `Option[A]` as a presence Boolean plus the inner columns, so `Option[Int]` was two columns while a `Dataset[Int]` with nulls was one column the row decoder could not represent (it dereferenced null while building the error). Phase 1d makes nullability one thing, matching Spark's nullable field:
+
+- `Option[A]` is one nullable column. `optionSchema` stores `None` as a null and `Some(a)` as the inner value; when `A` is a single column the column is the inner column, when `A` flattens to several columns (a tuple or a derived case class) it is a struct column. A Spark nullable field maps to `Option` and a non-optional field to a plain type, in both directions, including nested struct fields.
+- Non-optional fields are null-free. `Dataset.fromColumns` rejects a null in a non-optional field with `SchemaError.NullInNonNullableColumn`, and the Spark read boundary enforces the same contract: `SchemaConverter.validateSchema` requires a non-optional Vairë field to map to a non-nullable Spark field, and `RowConverter.toMaterialized` rejects a null read into a non-optional field. A nullable-by-declaration source (Parquet, JDBC) is read as `Option`; `Dataset.narrow[U]` asserts non-null against the data and reinterprets the schema.
+- Decoding never throws. A null in a non-optional target yields `DecodeError.NullValue`, surfaced as `ExecutionError.DecodeFailed`; `MaterializedDataset.toVectorOrError` is the safe accessor, and every row-decoding path in both backends (core `sort`/`sortBy`/`collectAndTransform`/checkpoint/predicate and keyed joins; Spark `collectValues`/`fromRow` and the join helpers) propagates it. `fromRowUnsafe` is gone.
+- Option-typed expressions are null-based: `IsDefined`/`GetOrElse`/`Option2Iterable` treat a null as `None`, and a higher-order lambda binding (`zip_with` padding, `map_zip_with` missing keys) stores nulls rather than boxed `Some`/`None`, so one rule covers both.
+
+The core suite (`testFull`, 609 tests) and the Spark suite (`testFull`, 247) are green, including `NullModelSpec`, `NullDecodeSpec`, `NarrowSpec`, `SparkNullabilitySpec`, `SparkSchemaValidationSpec`, and the nested struct nullability mapping.
 
 ---
 

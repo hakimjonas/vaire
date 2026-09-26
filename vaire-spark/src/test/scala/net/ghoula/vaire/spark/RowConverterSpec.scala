@@ -3,6 +3,9 @@ package net.ghoula.vaire.spark
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import org.apache.spark.sql.Row
+
+import net.ghoula.vaire.errors.{DecodeError, ExecutionError}
 import net.ghoula.vaire.prelude.*
 import net.ghoula.vaire.types
 
@@ -160,9 +163,16 @@ class RowConverterSpec extends AnyFlatSpec with Matchers {
     decoded.toOption.get.toUnscaled shouldBe 12345L
   }
 
-  "fromRowUnsafe" should "return value directly" in {
+  "fromRow" should "decode a null in a non-optional field as NullValue" in {
     val schema = Schema.intSchema
-    val row = RowConverter.toRow(99, schema)
-    RowConverter.fromRowUnsafe(row, schema) shouldBe 99
+    val row = Row.fromSeq(Seq(null))
+    RowConverter.fromRow(row, schema) shouldBe Left(DecodeError.NullValue(0))
+  }
+
+  "toMaterialized" should "reject a null in a non-optional field" in {
+    val rows = Array(Row.fromSeq(Seq(null))) // scalafix:ok DisableSyntax.null
+    RowConverter.toMaterialized(rows, Schema.intSchema) shouldBe Left(
+      ExecutionError.DecodeFailed(DecodeError.NullValue(0))
+    )
   }
 }

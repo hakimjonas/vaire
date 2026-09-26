@@ -11,7 +11,7 @@ import net.ghoula.vaire.prelude.*
 
 class ConditionalBitwiseParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
-  case class M(id: Int, score: Double, label: String)
+  case class M(id: Int, score: Option[Double], label: String)
   given Schema[M] = Schema.derived
 
   private lazy val base: DataFrame = spark.sql("""

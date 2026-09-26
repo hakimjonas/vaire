@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to Vairë. Versions follow the automated release pipeline: every
-PR merge to `main` cuts the next alpha tag and publishes to Maven Central; the first
-release tag (`v1.0.0-alpha`) is cut manually.
+All notable changes to Vairë. Releases follow a scheduled train: a weekly run tags
+everything merged to `main` since the last tag as the next alpha, and `release.yml`
+publishes that tag to Maven Central. Stable releases are cut manually.
 
 ## Unreleased
 
@@ -63,6 +63,11 @@ release tag (`v1.0.0-alpha`) is cut manually.
   open-addressing table, both mapping a key to the head of a flat chain. On one machine,
   100k-10M, 2-4x faster than the boxed index and 3-10x less allocation, with the 10M GC time
   dropping to zero; see `docs/join-optimization-plan.md`, Phase 1e.
+- **Predicate-join memory** — `fullJoin` records matches per row instead of materializing the
+  n·m pair vector and two value sets. This also fixes a case where a row equal by value to a
+  matched row, but different under the condition, was left out of the unmatched output. The
+  other predicate joins short-circuit empty inputs. `KeyedJoinEquivalenceSpec` and
+  `JoinOpsSpec` pin the keyed-join and full-join semantics.
 
 ## 0.0.20
 

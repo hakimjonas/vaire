@@ -7,7 +7,7 @@ memory-frugal on shared CI, while the heavy suites still run somewhere.
 
 | Tier | Scope | Where | Trigger |
 |---|---|---|---|
-| Fast (PR gate) | `check` + `core/testFull` + `spark/testFull` with `Slow` excluded | `ci.yml` | every push / PR |
+| Fast (PR gate) | `check` + `testAll` with `Slow` excluded | `ci.yml` | every push / PR |
 | Slow | 5M-row stress + TPC-H end-to-end (`Slow`-tagged) | `stress.yml` | scheduled (weekly) + manual |
 | Benchmark | micro-benchmarks (`Benchmark`-tagged) | excluded from CI | `BenchRunner` / local only |
 
@@ -41,7 +41,7 @@ not the heap.
 ```bash
 sbt check                          # doc coverage + scalafix + scalafmt (CI gate)
 sbt testAll                        # core + spark + docTool, full (includes slow)
-FAST_TESTS=1 sbt spark/Test/testFull   # what ci.yml runs
+FAST_TESTS=1 sbt testAll              # what ci.yml runs (Slow excluded)
 sbt testSlow                       # 5M stress + TPC-H only
 ```
 

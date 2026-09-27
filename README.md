@@ -1,5 +1,9 @@
 # Vairë
 
+[![Maven Central](https://img.shields.io/maven-central/v/net.ghoula/vaire-core_3?label=Maven%20Central)](https://github.com/hakimjonas/vaire/releases)
+[![CI](https://github.com/hakimjonas/vaire/actions/workflows/ci.yml/badge.svg)](https://github.com/hakimjonas/vaire/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/License-LGPLv3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
+
 A type-safe columnar dataset library for Scala 3, with one plan that runs on an in-memory
 columnar engine or Apache Spark.
 
@@ -31,6 +35,9 @@ libraryDependencies ++= Seq(
 
 `vaire-spark` pulls in Spark SQL 4.2.0 (`Provided` scope in the build; declare your own Spark
 dependency to match your cluster).
+
+The latest release is `1.1.0-alpha`; see [Releases](https://github.com/hakimjonas/vaire/releases)
+and [CHANGELOG.md](CHANGELOG.md) for the change history.
 
 Build a dataset from columns, transform it, and collect the result:
 

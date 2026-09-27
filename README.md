@@ -1,6 +1,6 @@
 # Vairë
 
-[![Maven Central](https://img.shields.io/maven-central/v/net.ghoula/vaire-core_3?label=Maven%20Central)](https://github.com/hakimjonas/vaire/releases)
+[![Maven Central](https://img.shields.io/maven-central/v/net.ghoula/vaire-core_3?label=Maven%20Central)](https://central.sonatype.com/artifact/net.ghoula/vaire-core_3)
 [![CI](https://github.com/hakimjonas/vaire/actions/workflows/ci.yml/badge.svg)](https://github.com/hakimjonas/vaire/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/License-LGPLv3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 

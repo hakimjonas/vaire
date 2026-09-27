@@ -51,6 +51,8 @@ jobs:
   publish:
     needs: test
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -102,3 +104,26 @@ jobs:
           else
             sbt "+publishSigned; sonaRelease"
           fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF#refs/tags/v}"
+          if gh release view "v${version}" >/dev/null 2>&1; then
+            echo "Release v${version} already exists — skipping."
+            exit 0
+          fi
+          notes=$(awk -v ver="${version}" '
+            $0 ~ "^## " ver { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md)
+          if [ -z "$notes" ]; then
+            notes="See CHANGELOG.md."
+          fi
+          gh release create "v${version}" \
+            --title "${version}" \
+            --notes "$notes" \
+            --prerelease \
+            --verify-tag

@@ -37,6 +37,11 @@ set -euo pipefail
 #                            mounted into the container at the same path.
 #   VAIRE_BENCH_FACT_SIZES   comma-separated fact scales, in the default block order (default
 #                            1000000,5000000). The reverse of this list is run as the second order.
+#   VAIRE_BENCH_DRIVER_MEMORY  Spark driver heap (default 4g). Raise it for a wider local run.
+#   VAIRE_BENCH_OFFHEAP_SIZE   Spark off-heap size (default 4g).
+#   VAIRE_BENCH_EXECUTOR_OVERHEAD  Spark executor memory overhead (default 2g).
+# The three memory settings exist so a local run can raise them without touching this file or the
+# workflow; their defaults are unchanged.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -45,6 +50,9 @@ IMAGE="vaire-spark-cluster"
 
 BENCH_DIR="${VAIRE_BENCH_DIR:-/tmp/vaire-comet}"
 FACT_SIZES="${VAIRE_BENCH_FACT_SIZES:-1000000,5000000}"
+DRIVER_MEMORY="${VAIRE_BENCH_DRIVER_MEMORY:-4g}"
+OFFHEAP_SIZE="${VAIRE_BENCH_OFFHEAP_SIZE:-4g}"
+EXECUTOR_OVERHEAD="${VAIRE_BENCH_EXECUTOR_OVERHEAD:-2g}"
 LOG_DIR="$PROJECT_DIR/target/comet-bench-logs"
 WORK_DIR="$LOG_DIR/work-dir"
 BASELINE_FILE="$PROJECT_DIR/comet-coverage.json"
@@ -138,11 +146,11 @@ run_block() {
       --conf spark.comet.explain.fallback.enabled=true
       --conf spark.comet.explain.fallback.log.enabled=true
       --conf spark.memory.offHeap.enabled=true
-      --conf spark.memory.offHeap.size=4g
-      --conf spark.executor.memoryOverhead=2g
+      --conf spark.memory.offHeap.size=$OFFHEAP_SIZE
+      --conf spark.executor.memoryOverhead=$EXECUTOR_OVERHEAD
     )
   fi
-  echo "--- Bench run: $logname (scale order $sizes) ---"
+  echo "--- Bench run: $logname (scale order $sizes, driver-memory $DRIVER_MEMORY, offheap $OFFHEAP_SIZE) ---"
   docker run --rm --user 0:0 \
     -v "$BENCH_JAR_HOST:$BENCH_JAR_CONT:ro" \
     -v "$BENCH_DIR:$BENCH_DIR" \
@@ -150,7 +158,7 @@ run_block() {
     --entrypoint /opt/spark/bin/spark-submit \
     "$IMAGE" \
     --master local[4] \
-    --driver-memory 4g \
+    --driver-memory "$DRIVER_MEMORY" \
     --conf spark.ui.enabled=false \
     --conf spark.driver.host=127.0.0.1 \
     --driver-java-options "${DRIVER_JAVA_OPTIONS[*]} -Dvaire.bench.fact.sizes=$sizes" \

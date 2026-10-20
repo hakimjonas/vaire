@@ -8,7 +8,7 @@ import org.apache.spark.sql.{functions => F}
 import org.apache.spark.sql.execution.ExplainMode
 
 import net.ghoula.vaire.prelude.*
-import net.ghoula.vaire.types.{DayTimeInterval, Timestamp}
+import net.ghoula.vaire.types.{DayTimeInterval, Decimal, Timestamp}
 
 import scala.collection.mutable
 
@@ -49,6 +49,12 @@ import scala.collection.mutable
   * plan-dependent among rows tied on that key, so its digest covers only the tie-invariant
   * `(key, value, rnk)` multiset and a separate check asserts that `rowNum` is a permutation of
   * `1..n` within each partition.
+  *
+  * Every distributed shape runs twice: once over the narrow `Fact` table and once over the wide
+  * table, which adds a low-cardinality string, a unique string, a nullable decimal, a nested
+  * `Seq[String]`, a boolean, and a timestamp. Three wide-only plans exercise the new types: a
+  * string filter-and-group, a nullable-decimal aggregate, and a nested-list transform. Wide rows
+  * carry the `wide-` prefix, so the effect of data shape is read off the same tables.
   *
   * The two driver-collecting plans (Map + groupByAgg, and the predicate join) run on a reduced fact
   * table: both rebuild the frame on the driver, and the predicate join is O(rows x dimension) by
@@ -92,6 +98,44 @@ object CometBench {
   case class DimSource(key: Option[Long], weight: Option[Int])
   given dimSourceSchema: Schema[DimSource] = Schema.derived
 
+  /** Precision and scale for the wide table's `amount` column. Precision ≤ 18 keeps the column an
+    * unscaled `Array[Long]` on both Vairë and Spark. It is scoped to this object so the derived
+    * schemas below resolve it ahead of the companion's default `Schema[Decimal]`.
+    */
+  given wideDecimalSchema: Schema[Decimal] = Schema.decimalWith(12, 2)
+
+  /** Wide fact table: the narrow [[Fact]] columns plus the new data shapes. `ts` is carried so the
+    * `time-bucket` shape runs over the same table; `name` is low-cardinality, `label`
+    * high-cardinality, `tags` is Vairë's `Seq[A]` array (there is no `Array[A]` schema), `amount`
+    * is nullable so its null path is exercised, and `flag` is a boolean.
+    */
+  case class Wide(
+    key: Long,
+    value: Int,
+    id: Long,
+    ts: Timestamp,
+    name: String,
+    label: String,
+    amount: Option[Decimal],
+    tags: Seq[String],
+    flag: Boolean
+  )
+  given wideSchema: Schema[Wide] = Schema.derived
+
+  /** Nullable mirror of [[Wide]] for the Parquet scan; `narrow` reinterprets it as [[Wide]]. */
+  case class WideSource(
+    key: Option[Long],
+    value: Option[Int],
+    id: Option[Long],
+    ts: Option[Timestamp],
+    name: Option[String],
+    label: Option[String],
+    amount: Option[Decimal],
+    tags: Option[Seq[String]],
+    flag: Option[Boolean]
+  )
+  given wideSourceSchema: Schema[WideSource] = Schema.derived
+
   /** Timestamp source for the 4.2-only `time_bucket` plan. */
   case class Clockin(key: Long, ts: Timestamp)
   given clockinSchema: Schema[Clockin] = Schema.derived
@@ -116,6 +160,37 @@ object CometBench {
   case class Mapped(key: Long, doubled: Int, id: Long)
   given mappedSchema: Schema[Mapped] = Schema.derived
 
+  /** Output of the wide string filter-and-group plan. */
+  case class NameGrouped(name: String, cnt: Long)
+  given nameGroupedSchema: Schema[NameGrouped] = Schema.derived
+
+  /** Output of the wide nullable-decimal aggregate; `max`/`min` are `None` for an all-null group.
+    */
+  case class DecimalAgg(maxAmount: Option[Decimal], minAmount: Option[Decimal], cnt: Long)
+  given decimalAggSchema: Schema[DecimalAgg] = Schema.derived
+
+  /** Output of the wide nested-list plan: the transformed `tags` array plus its size. */
+  case class Tagged(key: Long, tags2: Seq[String], n: Int)
+  given taggedSchema: Schema[Tagged] = Schema.derived
+
+  /** `withWindow` appends the window columns to the parent's, so the wide window output carries all
+    * nine wide columns before `rowNum` and `rnk`.
+    */
+  case class WideWindowed(
+    key: Long,
+    value: Int,
+    id: Long,
+    ts: Timestamp,
+    name: String,
+    label: String,
+    amount: Option[Decimal],
+    tags: Seq[String],
+    flag: Boolean,
+    rowNum: Int,
+    rnk: Int
+  )
+  given wideWindowedSchema: Schema[WideWindowed] = Schema.derived
+
   /** A distributed plan and the extra arguments its measurement needs. */
   private final case class DistributedPlan(
     id: String,
@@ -125,10 +200,11 @@ object CometBench {
     asserted: Boolean = false
   )
 
-  /** The distributed plan set, shared so the warmup blocks and the reported blocks run the same
-    * code.
+  /** The narrow distributed plan set, shared so the warmup blocks and the reported blocks run the
+    * same code. Labels are unchanged from the previous increment so the recorded narrow baseline
+    * stays comparable.
     */
-  private def distributedPlans(bench: Bench): Vector[DistributedPlan] = Vector(
+  private def narrowPlans(bench: Bench): Vector[DistributedPlan] = Vector(
     DistributedPlan("filter-groupby", () => bench.filterGroupBy),
     DistributedPlan("join-on", () => bench.joinOn),
     DistributedPlan("window", () => bench.window, windowDigestRows, rowNumberPermutation, asserted = true),
@@ -137,6 +213,32 @@ object CometBench {
     DistributedPlan("aggregate", () => bench.aggregate),
     DistributedPlan("time-bucket", () => bench.timeBucket)
   )
+
+  /** The same seven shapes over the wide table, plus three plans that exercise the new types. Each
+    * wide label carries the `wide-` prefix so narrow and wide rows are distinguishable everywhere.
+    */
+  private def widePlans(bench: Bench): Vector[DistributedPlan] = Vector(
+    DistributedPlan("wide-filter-groupby", () => bench.wideFilterGroupBy),
+    DistributedPlan("wide-join-on", () => bench.wideJoinOn),
+    DistributedPlan(
+      "wide-window",
+      () => bench.wideWindow,
+      wideWindowDigestRows,
+      wideRowNumberPermutation,
+      asserted = true
+    ),
+    DistributedPlan("wide-sort-limit", () => bench.wideSortLimit),
+    DistributedPlan("wide-distinct", () => bench.wideDistinct),
+    DistributedPlan("wide-aggregate", () => bench.wideAggregate),
+    DistributedPlan("wide-time-bucket", () => bench.wideTimeBucket),
+    DistributedPlan("wide-string-groupby", () => bench.wideStringGroupBy),
+    DistributedPlan("wide-decimal-agg", () => bench.wideDecimalAgg),
+    DistributedPlan("wide-tags-transform", () => bench.wideTagsTransform)
+  )
+
+  /** Narrow plus wide distributed plan sets. */
+  private def distributedPlans(bench: Bench): Vector[DistributedPlan] =
+    narrowPlans(bench) ++ widePlans(bench)
 
   def main(args: Array[String]): Unit = {
     val root = sys.props.get("vaire.bench.dir").getOrElse("/tmp/vaire-comet")
@@ -148,7 +250,7 @@ object CometBench {
         s"##VERSION spark=${spark.version} comet=$comet shuffle_partitions=$ShufflePartitions max_heap_mb=$heapMb"
       )
       println(
-        s"##DATA dir=$root groups=$NumGroups fact_scales=${FactScales.mkString(",")} driver_scale=$DriverCollectScale block_warmup_scale=$BlockWarmupScale"
+        s"##DATA dir=$root groups=$NumGroups fact_scales=${FactScales.mkString(",")} driver_scale=$DriverCollectScale block_warmup_scale=$BlockWarmupScale tables=narrow,wide amount=decimal(12,2)"
       )
 
       runWarmup(spark, root, BlockWarmupScale)
@@ -206,11 +308,21 @@ object CometBench {
       SparkDatasets.fromDataFrame(spark.read.parquet(dimPath), dimSourceSchema).narrow[Dim]
     private val clock: Dataset[Clockin] =
       SparkDatasets.fromDataFrame(spark.read.parquet(clockPath), clockinSourceSchema).narrow[Clockin]
+    private val widePath = ensureWide(spark, root, scale, NumGroups)
+    private val wide: Dataset[Wide] =
+      SparkDatasets.fromDataFrame(spark.read.parquet(widePath), wideSourceSchema).narrow[Wide]
 
     private val keyCell: Expr[Fact, Long] = Expr.Cell("key", ColumnIndex(0))
     private val valueCell: Expr[Fact, Int] = Expr.Cell("value", ColumnIndex(1))
     private val idCell: Expr[Fact, Long] = Expr.Cell("id", ColumnIndex(2))
     private val dimKeyCell: Expr[Dim, Long] = Expr.Cell("key", ColumnIndex(0))
+
+    private val wideKeyCell: Expr[Wide, Long] = Expr.Cell("key", ColumnIndex(0))
+    private val wideValueCell: Expr[Wide, Int] = Expr.Cell("value", ColumnIndex(1))
+    private val wideIdCell: Expr[Wide, Long] = Expr.Cell("id", ColumnIndex(2))
+    private val wideNameCell: Expr[Wide, String] = Expr.Cell("name", ColumnIndex(4))
+    private val wideAmountCell: Expr[Wide, Decimal] = Expr.Cell("amount", ColumnIndex(6))
+    private val wideTagsCell: Expr[Wide, Seq[String]] = Expr.Cell("tags", ColumnIndex(7))
 
     private def df[T](ds: Dataset[T]): DataFrame =
       interp.toDataFrame(ds) match {
@@ -221,6 +333,11 @@ object CometBench {
     private def sumAndCount: Vector[AggSpec[Fact]] = Vector(
       AggSpec("total", Expr.Sum(valueCell), ColumnType.LongType),
       AggSpec("cnt", Expr.Count[Fact](), ColumnType.LongType)
+    )
+
+    private def wideSumAndCount: Vector[AggSpec[Wide]] = Vector(
+      AggSpec("total", Expr.Sum(wideValueCell), ColumnType.LongType),
+      AggSpec("cnt", Expr.Count[Wide](), ColumnType.LongType)
     )
 
     def filterGroupBy: DataFrame =
@@ -290,6 +407,101 @@ object CometBench {
 
     def predicateJoin: DataFrame =
       df(fact.join(dim, (f, d) => f.key == d.key && f.value > d.weight))
+
+    // --- The seven narrow shapes over the wide table -------------------------------------------
+
+    def wideFilterGroupBy: DataFrame =
+      df(
+        wide
+          .where(_.value > 500)
+          .groupByAgg[Grouped](Vector(KeySpec("key", wideKeyCell, ColumnType.LongType)), wideSumAndCount)
+      )
+
+    def wideJoinOn: DataFrame =
+      df(wide.joinOn(dim, wideKeyCell, dimKeyCell, ColumnType.LongType, ColumnType.LongType))
+
+    def wideWindow: DataFrame = {
+      val spec = WindowSpec[Wide](
+        partitionBy = Vector(KeySpec("key", wideKeyCell, ColumnType.LongType)),
+        orderBy = Vector(SortSpec[Wide, Int](wideValueCell, summon[Ordering[Int]], ColumnType.IntType, true))
+      )
+      val exprs = Vector(
+        WindowExprSpec("rowNum", Expr.RowNumber[Wide](), ColumnType.IntType),
+        WindowExprSpec("rnk", Expr.Rank[Wide](), ColumnType.IntType)
+      )
+      df(wide.withWindow[WideWindowed](exprs, spec))
+    }
+
+    def wideSortLimit: DataFrame = {
+      val keys = Vector(
+        SortSpec[Wide, Int](wideValueCell, summon[Ordering[Int]], ColumnType.IntType, true),
+        SortSpec[Wide, Long](wideIdCell, summon[Ordering[Long]], ColumnType.LongType, false)
+      )
+      df(wide.sortByExprs(keys).limit(LimitRows))
+    }
+
+    def wideDistinct: DataFrame = df(wide.distinct)
+
+    def wideAggregate: DataFrame =
+      df(wide.aggregate[GlobalAgg](wideSumAndCount))
+
+    def wideTimeBucket: DataFrame = {
+      val tsCell: Expr[Wide, Timestamp] = Expr.Cell("ts", ColumnIndex(3))
+      val bucket = Expr.timeBucket[Wide](
+        Expr.const(DayTimeInterval.ofMicros(15L * 60L * 1000000L)),
+        tsCell,
+        Expr.const(Timestamp.ofEpochMicro(0L))
+      )
+      df(
+        wide.selectAs[Bucketed](
+          ("key", wideKeyCell, ColumnType.LongType),
+          ("bucket", bucket.asInstanceOf[Expr[Wide, Any]], ColumnType.TimestampType)
+        )
+      )
+    }
+
+    // --- Plans that exercise the new types ------------------------------------------------------
+
+    /** Filter on the low-cardinality string and group by it. */
+    def wideStringGroupBy: DataFrame =
+      df(
+        wide
+          .filter(wideNameCell === Expr.const[Wide, String]("n3"))
+          .groupByAgg[NameGrouped](
+            Vector(KeySpec("name", wideNameCell, ColumnType.StringType)),
+            Vector(AggSpec("cnt", Expr.Count[Wide](), ColumnType.LongType))
+          )
+      )
+
+    /** Global max/min over the nullable decimal, so the null path runs. */
+    def wideDecimalAgg: DataFrame = {
+      val aggs = Vector(
+        AggSpec(
+          "maxAmount",
+          Expr.Max(wideAmountCell, summon[Ordering[Decimal]]),
+          ColumnType.OptionType(ColumnType.DecimalType(12, 2))
+        ),
+        AggSpec(
+          "minAmount",
+          Expr.Min(wideAmountCell, summon[Ordering[Decimal]]),
+          ColumnType.OptionType(ColumnType.DecimalType(12, 2))
+        ),
+        AggSpec("cnt", Expr.Count[Wide](), ColumnType.LongType)
+      )
+      df(wide.aggregate[DecimalAgg](aggs))
+    }
+
+    /** Transform the nested string list element-wise and expose its size. */
+    def wideTagsTransform: DataFrame = {
+      val tags2 = wideTagsCell.transform(t => t ++ Expr.const("!"))
+      df(
+        wide.selectAs[Tagged](
+          ("key", wideKeyCell, ColumnType.LongType),
+          ("tags2", tags2.asInstanceOf[Expr[Wide, Any]], ColumnType.ArrayType(ColumnType.StringType)),
+          ("n", wideTagsCell.arraySize, ColumnType.IntType)
+        )
+      )
+    }
   }
 
   private def ensureFact(spark: SparkSession, root: String, rows: Long, groups: Int): String = {
@@ -339,6 +551,41 @@ object CometBench {
     path
   }
 
+  /** The wide fact table: the narrow [[Fact]] columns plus a timestamp and the new data shapes,
+    * generated with the same key and value distributions so joins and groupings behave identically.
+    * `amount` is null on every seventh row so the decimal null path is exercised; `name` has 10
+    * distinct values, `label` is unique per row, and `tags` is a two-element string array. The
+    * `amount` column is written as `decimal(12, 2)`, matching [[wideDecimalSchema]].
+    */
+  private def ensureWide(spark: SparkSession, root: String, rows: Long, groups: Int): String = {
+    val path = s"$root/fact-wide-$rows-$groups"
+    if (!new java.io.File(path).exists()) {
+      val decimal = org.apache.spark.sql.types.DecimalType(12, 2)
+      val base = spark.range(0L, rows).toDF("id")
+      base
+        .select(
+          (F.col("id") % F.lit(groups.toLong)).as("key"),
+          ((F.col("id") * F.lit(2654435761L)) % F.lit(1000L)).cast("int").as("value"),
+          F.col("id").as("id"),
+          F.timestamp_micros(F.col("id") % F.lit(86_400_000_000L)).as("ts"),
+          F.concat(F.lit("n"), (F.col("id") % F.lit(10L)).cast("string")).as("name"),
+          F.concat(F.lit("l-"), F.col("id").cast("string")).as("label"),
+          F.when(F.col("id") % F.lit(7L) === F.lit(0L), F.lit(null).cast(decimal))
+            .otherwise((F.col("id") % F.lit(100000L)).cast(decimal))
+            .as("amount"),
+          F.array(
+            F.concat(F.lit("t"), (F.col("id") % F.lit(3L)).cast("string")),
+            F.concat(F.lit("u"), (F.col("id") % F.lit(5L)).cast("string"))
+          ).as("tags"),
+          (F.col("id") % F.lit(2L) === F.lit(0L)).as("flag")
+        )
+        .write
+        .mode("errorifexists")
+        .parquet(path)
+    }
+    path
+  }
+
   /** Pay the JVM's first-block cost at a scale before its reported block. Timing only: both actions
     * run once, the results are discarded, and the lines carry a prefix the extraction ignores.
     */
@@ -359,16 +606,22 @@ object CometBench {
     }
   }
 
-  /** `(key, value, rnk)` — invariant under the tie order `row_number` assigns. */
-  private def windowDigestRows(rows: Array[Row]): Array[Row] =
-    rows.map(r => Row(r.getLong(0), r.getInt(1), r.getInt(4)))
+  /** `(key, value, rnk)` — invariant under the tie order `row_number` assigns. `rnkIndex` locates
+    * `rnk` in the output row (4 for the narrow [[Windowed]], 10 for the wide [[WideWindowed]]).
+    */
+  private def windowDigestAt(rnkIndex: Int)(rows: Array[Row]): Array[Row] =
+    rows.map(r => Row(r.getLong(0), r.getInt(1), r.getInt(rnkIndex)))
+
+  private def windowDigestRows(rows: Array[Row]): Array[Row] = windowDigestAt(4)(rows)
+
+  private def wideWindowDigestRows(rows: Array[Row]): Array[Row] = windowDigestAt(10)(rows)
 
   /** `rowNum` must be a permutation of `1..n` within each `key` partition. */
-  private def rowNumberPermutation(rows: Array[Row]): Option[String] = {
+  private def rowNumberPermutationAt(rowNumIndex: Int)(rows: Array[Row]): Option[String] = {
     val byKey = mutable.HashMap.empty[Long, mutable.ArrayBuffer[Int]]
     var i = 0
     while (i < rows.length) {
-      byKey.getOrElseUpdate(rows(i).getLong(0), mutable.ArrayBuffer.empty) += rows(i).getInt(3)
+      byKey.getOrElseUpdate(rows(i).getLong(0), mutable.ArrayBuffer.empty) += rows(i).getInt(rowNumIndex)
       i += 1
     }
     byKey.iterator.collectFirst {
@@ -376,6 +629,10 @@ object CometBench {
         s"key=$key rowNum is not a permutation of 1..${nums.length}"
     }
   }
+
+  private def rowNumberPermutation(rows: Array[Row]): Option[String] = rowNumberPermutationAt(3)(rows)
+
+  private def wideRowNumberPermutation(rows: Array[Row]): Option[String] = rowNumberPermutationAt(9)(rows)
 
   private def fmtMs(value: Double): String =
     "%.1f".formatLocal(java.util.Locale.ROOT, value)

@@ -72,13 +72,26 @@ acceleration without failing any test. This gate makes that loss visible.
 in `CometBench` inside that image — on plain Spark and with the pinned Comet snapshot on the
 classpath, twice at the default and twice at the reversed fact-scale order. It harvests the `Comet*`
 operators from each plan's physical plan and the non-instrument `[COMET: ...]` fallback reasons
-from the driver log, and records them per plan and scale in `comet-coverage.json`:
+from the driver log, and records them per plan and scale in `comet-coverage.json`.
+
+The plan set runs twice: once over the narrow integer fact table and once over a wide table that
+adds a low-cardinality string, a unique string, a nullable `decimal(12, 2)`, a nested
+`Seq[String]`, a boolean, and a timestamp. The same seven shapes run over both tables, so the
+effect of data shape is read off a controlled comparison; wide rows carry the `wide-` prefix. Three
+wide-only plans exercise the new types: a string filter-and-group, a nullable-decimal `max`/`min`
+aggregate (with nulls present), and a nested-list `transform`. The wide table is generated with the
+narrow key and value distributions, so joins and groupings behave identically.
 
 ```bash
 scripts/comet-bench.sh snapshot   # rewrite comet-coverage.json from a fresh run
 scripts/comet-bench.sh check      # run, then ratchet the inventory against the baseline
 scripts/comet-bench.sh check --reuse   # skip the build and runs; check the last artifacts
 ```
+
+The driver heap and off-heap size default to the recorded values (`4g` and `4g`) and read from
+`VAIRE_BENCH_DRIVER_MEMORY` and `VAIRE_BENCH_OFFHEAP_SIZE`; `VAIRE_BENCH_EXECUTOR_OVERHEAD`
+controls the executor memory overhead (`2g` by default). A local run over the wide table may need a
+larger heap than the CI job; the defaults and `comet.yml` are unchanged.
 
 The ratchet direction matches `doc-coverage.json`: Comet operators may only be **added** and
 non-instrument fallback reasons may only **decrease**. A plan that loses an operator or gains a
@@ -92,9 +105,9 @@ run in `ci.yml`. It runs from `comet.yml` on a weekly schedule and on `workflow_
 
 Three points are printed by the harness and matter when reading it:
 
-- **The plan set is a sample, not the whole backend.** It exercises roughly eight of Vairë's
-  `Expr` cases and nine operators, so the ratchet is only as broad as this set. Broadening it is a
-  separate change.
+- **The plan set is a sample, not the whole backend.** The narrow table exercises roughly eight of
+  Vairë's `Expr` cases and nine operators; the wide table adds strings, a decimal, a nested array
+  and a boolean. The ratchet is only as broad as this set; broadening it is a separate change.
 - **`exec_ms` is a lower bound on Comet's advantage.** The `noop` write that forces the plan
   carries unaccelerated writer setup and per-row `DataWriter` cost on both arms, so the off/on
   ratio understates Comet rather than being neutral.

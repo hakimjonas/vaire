@@ -8,24 +8,34 @@ import org.apache.spark.sql.{functions => F}
 import org.apache.spark.sql.execution.ExplainMode
 
 import net.ghoula.vaire.prelude.*
+import net.ghoula.vaire.types.{DayTimeInterval, Timestamp}
+
+import scala.collection.mutable
 
 /** Comet acceleration benchmark for Vairë's Spark backend.
   *
   * Runs a fixed set of Vairë plans on one Spark distribution and reports, per plan and per input
-  * size, the median wall-clock of a `collect()`, the row count, a SHA-256 digest of the collected
-  * rows (canonically encoded, sorted), and the `Comet*` operator names found in the physical plan.
-  * The same object is submitted twice by `scripts/comet-bench.sh`: once on plain Spark and once
-  * with the Apache DataFusion Comet plugin on the classpath. The object contains no Comet
-  * reference, so the control run is genuinely Comet-free; Comet is switched on entirely from the
-  * submit command.
+  * size, the measured `collect()` samples with their min/median/max, the row count, a SHA-256
+  * digest of the collected rows (canonically encoded, sorted), and the `Comet*` operator names
+  * found in the physical plan. The same object is submitted twice by `scripts/comet-bench.sh`: once
+  * on plain Spark and once with the Apache DataFusion Comet plugin on the classpath. The object
+  * contains no Comet reference, so the control run is genuinely Comet-free; Comet is switched on
+  * entirely from the submit command.
   *
   * The source data is generated once, written to Parquet under `-Dvaire.bench.dir` (default
   * `/tmp/vaire-comet`), and read back with `spark.read.parquet`, so every measured plan starts at a
   * real file scan. Seeding through `Dataset.fromColumns`/`DataFrameBuilder.fromMaterialized` would
   * produce a `LocalRelation` (a `LocalTableScanExec`), which Comet disables by default and which
   * would take the scan out of the comparison before anything the harness means to measure. The
-  * Parquet reader reports every column nullable, so the scan is read into a nullable mirror schema
+  * Parquet reader reports every column nullable, so each scan is read into a nullable mirror schema
   * and narrowed to the non-optional one the plans use.
+  *
+  * Two plans probe the semantics rather than the throughput. `time-bucket` uses `time_bucket` over
+  * a timestamp column, one of the Spark 4.2-only functions Vairë calls, so it fails on 4.1.3 and is
+  * the check that the container really runs 4.2.0. `window` orders by a non-unique key on purpose:
+  * `row_number` is then plan-dependent among rows tied on that key, so its digest covers only the
+  * tie-invariant `(key, value, rnk)` multiset and a separate check asserts that `rowNum` is a
+  * permutation of `1..n` within each partition.
   *
   * The two driver-collecting plans (Map + groupByAgg, and the predicate join) run on a reduced fact
   * table: both rebuild the frame on the driver, and the predicate join is O(rows x dimension) by
@@ -58,16 +68,28 @@ object CometBench {
   case class Fact(key: Long, value: Int, id: Long)
   given factSchema: Schema[Fact] = Schema.derived
 
-  case class Dim(key: Long, weight: Int)
-  given dimSchema: Schema[Dim] = Schema.derived
-
   /** Nullable mirror of [[Fact]] for the Parquet scan; `narrow` reinterprets it as [[Fact]]. */
   case class FactSource(key: Option[Long], value: Option[Int], id: Option[Long])
   given factSourceSchema: Schema[FactSource] = Schema.derived
 
+  case class Dim(key: Long, weight: Int)
+  given dimSchema: Schema[Dim] = Schema.derived
+
   /** Nullable mirror of [[Dim]] for the Parquet scan; `narrow` reinterprets it as [[Dim]]. */
   case class DimSource(key: Option[Long], weight: Option[Int])
   given dimSourceSchema: Schema[DimSource] = Schema.derived
+
+  /** Timestamp source for the 4.2-only `time_bucket` plan. */
+  case class Clockin(key: Long, ts: Timestamp)
+  given clockinSchema: Schema[Clockin] = Schema.derived
+
+  /** Nullable mirror of [[Clockin]] for the Parquet scan; `narrow` reinterprets it as [[Clockin]].
+    */
+  case class ClockinSource(key: Option[Long], ts: Option[Timestamp])
+  given clockinSourceSchema: Schema[ClockinSource] = Schema.derived
+
+  case class Bucketed(key: Long, bucket: Timestamp)
+  given bucketedSchema: Schema[Bucketed] = Schema.derived
 
   case class Grouped(key: Long, total: Long, cnt: Long)
   given groupedSchema: Schema[Grouped] = Schema.derived
@@ -98,10 +120,11 @@ object CometBench {
         val bench = new Bench(spark, root, scale)
         runPlan("filter-groupby", scale, () => bench.filterGroupBy)
         runPlan("join-on", scale, () => bench.joinOn)
-        runPlan("window", scale, () => bench.window)
+        runPlan("window", scale, () => bench.window, project = windowDigestRows, check = rowNumberPermutation)
         runPlan("sort-limit", scale, () => bench.sortLimit)
         runPlan("distinct", scale, () => bench.distinct)
         runPlan("aggregate", scale, () => bench.aggregate)
+        runPlan("time-bucket", scale, () => bench.timeBucket)
       }
 
       val bench = new Bench(spark, root, DriverCollectScale)
@@ -118,6 +141,11 @@ object CometBench {
       .appName("vaire-comet-bench")
       .config("spark.ui.enabled", "false")
       .config("spark.sql.shuffle.partitions", ShufflePartitions.toString)
+      // Route join-on through a shuffle instead of a broadcast: the 1000-row dimension sits well
+      // under the 10 MB default threshold, so the default plan would exercise
+      // CometBroadcastExchange rather than CometNativeShuffle. A negative threshold disables
+      // broadcast joins for every plan.
+      .config("spark.sql.autoBroadcastJoinThreshold", "-1")
       // Spark 4.x artifact session isolation breaks Janino during whole-stage codegen in local
       // mode; see SparkTestSession for the same setting and rationale.
       .config("spark.sql.artifact.isolation.enabled", "false")
@@ -129,22 +157,21 @@ object CometBench {
     session
   }
 
-  /** Generate the fact and dimension Parquet datasets, then expose the plans over them. */
+  /** Generate the Parquet datasets, then expose the plans over them. */
   private final class Bench(spark: SparkSession, root: String, scale: Long) {
 
     private val factPath = ensureFact(spark, root, scale, NumGroups)
     private val dimPath = ensureDim(spark, root, NumGroups)
+    private val clockPath = ensureClock(spark, root, scale, NumGroups)
     private val interp = SparkInterpreter(spark)
     // The Parquet reader reports every column nullable. Read into the nullable mirror schema and
     // `narrow` to the declared one; the generated data holds no nulls, so the narrow check passes.
     private val fact: Dataset[Fact] =
-      SparkDatasets
-        .fromDataFrame(spark.read.parquet(factPath), factSourceSchema)
-        .narrow[Fact]
+      SparkDatasets.fromDataFrame(spark.read.parquet(factPath), factSourceSchema).narrow[Fact]
     private val dim: Dataset[Dim] =
-      SparkDatasets
-        .fromDataFrame(spark.read.parquet(dimPath), dimSourceSchema)
-        .narrow[Dim]
+      SparkDatasets.fromDataFrame(spark.read.parquet(dimPath), dimSourceSchema).narrow[Dim]
+    private val clock: Dataset[Clockin] =
+      SparkDatasets.fromDataFrame(spark.read.parquet(clockPath), clockinSourceSchema).narrow[Clockin]
 
     private val keyCell: Expr[Fact, Long] = Expr.Cell("key", ColumnIndex(0))
     private val valueCell: Expr[Fact, Int] = Expr.Cell("value", ColumnIndex(1))
@@ -166,25 +193,19 @@ object CometBench {
       df(
         fact
           .where(_.value > 500)
-          .groupByAgg[Grouped](
-            Vector(KeySpec("key", keyCell, ColumnType.LongType)),
-            sumAndCount
-          )
+          .groupByAgg[Grouped](Vector(KeySpec("key", keyCell, ColumnType.LongType)), sumAndCount)
       )
 
     def joinOn: DataFrame =
       df(fact.joinOn(dim, keyCell, dimKeyCell, ColumnType.LongType, ColumnType.LongType))
 
     def window: DataFrame = {
+      // `value` alone leaves ties within a partition, so `row_number` is not stable across
+      // physical plans. The digest drops `rowNum` (see `windowDigestRows`) and `rowNumberPermutation`
+      // checks the invariant it still has to satisfy.
       val spec = WindowSpec[Fact](
         partitionBy = Vector(KeySpec("key", keyCell, ColumnType.LongType)),
-        // `row_number()` is only deterministic under a total order. `value` alone leaves ties
-        // within a partition, and their positions differ between physical plans; the unique `id`
-        // breaks ties so the result — and its digest — is stable across the control and Comet runs.
-        orderBy = Vector(
-          SortSpec[Fact, Int](valueCell, summon[Ordering[Int]], ColumnType.IntType, true),
-          SortSpec[Fact, Long](idCell, summon[Ordering[Long]], ColumnType.LongType, true)
-        )
+        orderBy = Vector(SortSpec[Fact, Int](valueCell, summon[Ordering[Int]], ColumnType.IntType, true))
       )
       val exprs = Vector(
         WindowExprSpec("rowNum", Expr.RowNumber[Fact](), ColumnType.IntType),
@@ -205,6 +226,22 @@ object CometBench {
 
     def aggregate: DataFrame =
       df(fact.aggregate[GlobalAgg](sumAndCount))
+
+    def timeBucket: DataFrame = {
+      val clockKey: Expr[Clockin, Long] = Expr.Cell("key", ColumnIndex(0))
+      val tsCell: Expr[Clockin, Timestamp] = Expr.Cell("ts", ColumnIndex(1))
+      val bucket = Expr.timeBucket[Clockin](
+        Expr.const(DayTimeInterval.ofMicros(15L * 60L * 1000000L)),
+        tsCell,
+        Expr.const(Timestamp.ofEpochMicro(0L))
+      )
+      df(
+        clock.selectAs[Bucketed](
+          ("key", clockKey, ColumnType.LongType),
+          ("bucket", bucket.asInstanceOf[Expr[Clockin, Any]], ColumnType.TimestampType)
+        )
+      )
+    }
 
     def mapGroupBy: DataFrame = {
       val mapped = fact.map(f => Mapped(f.key, f.value * 2, f.id))
@@ -243,9 +280,23 @@ object CometBench {
     if (!new java.io.File(path).exists()) {
       val base = spark.range(0L, groups.toLong).toDF("id")
       base
+        .select(F.col("id").as("key"), (F.col("id") % F.lit(7L)).cast("int").as("weight"))
+        .write
+        .mode("errorifexists")
+        .parquet(path)
+    }
+    path
+  }
+
+  private def ensureClock(spark: SparkSession, root: String, rows: Long, groups: Int): String = {
+    val path = s"$root/clock-$rows-$groups"
+    if (!new java.io.File(path).exists()) {
+      val base = spark.range(0L, rows).toDF("id")
+      base
         .select(
-          F.col("id").as("key"),
-          (F.col("id") % F.lit(7L)).cast("int").as("weight")
+          (F.col("id") % F.lit(groups.toLong)).as("key"),
+          // Milliseconds within one day, so `time_bucket` has a bounded domain to floor.
+          F.timestamp_micros(F.col("id") % F.lit(86_400_000_000L)).as("ts")
         )
         .write
         .mode("errorifexists")
@@ -254,7 +305,31 @@ object CometBench {
     path
   }
 
-  private def runPlan(id: String, scale: Long, plan: () => DataFrame): Unit = {
+  /** `(key, value, rnk)` — invariant under the tie order `row_number` assigns. */
+  private def windowDigestRows(rows: Array[Row]): Array[Row] =
+    rows.map(r => Row(r.getLong(0), r.getInt(1), r.getInt(4)))
+
+  /** `rowNum` must be a permutation of `1..n` within each `key` partition. */
+  private def rowNumberPermutation(rows: Array[Row]): Option[String] = {
+    val byKey = mutable.HashMap.empty[Long, mutable.ArrayBuffer[Int]]
+    var i = 0
+    while (i < rows.length) {
+      byKey.getOrElseUpdate(rows(i).getLong(0), mutable.ArrayBuffer.empty) += rows(i).getInt(3)
+      i += 1
+    }
+    byKey.iterator.collectFirst {
+      case (key, nums) if nums.sorted != (1 to nums.length).toVector =>
+        s"key=$key rowNum is not a permutation of 1..${nums.length}"
+    }
+  }
+
+  private def runPlan(
+    id: String,
+    scale: Long,
+    plan: () => DataFrame,
+    project: Array[Row] => Array[Row] = rows => rows,
+    check: Array[Row] => Option[String] = _ => None
+  ): Unit = {
     val df = plan()
     var lastRows: Array[Row] | Null = null
     val samples = new Array[Double](Warmup + Measured)
@@ -268,21 +343,27 @@ object CometBench {
       lastRows = collected
       i += 1
     }
-    val median = samples.drop(Warmup).sorted.apply(Measured / 2)
-    val (count, digest) = rowsDigest(lastRows.nn)
+    val rows = lastRows.nn
+    val measured = samples.drop(Warmup)
+    val sorted = measured.sorted
+    val fmt = (v: Double) => "%.1f".formatLocal(java.util.Locale.ROOT, v)
+    val digest = digestOf(project(rows))
     val ops = cometOperators(df)
     val opText = if (ops.isEmpty) "-" else ops.mkString(",")
-    val medianText = "%.1f".formatLocal(java.util.Locale.ROOT, median)
     println(
-      s"##RESULT plan=$id scale=$scale median_ms=$medianText rows=$count digest=$digest comet_ops=$opText"
+      s"##RESULT plan=$id scale=$scale n=${measured.length} min_ms=${fmt(sorted.head)} median_ms=${fmt(sorted(sorted.length / 2))} max_ms=${fmt(sorted.last)} samples=${measured.map(fmt).mkString(",")} rows=${rows.length} digest=$digest comet_ops=$opText"
     )
+    check(rows) match {
+      case Some(message) => println(s"##CHECK plan=$id scale=$scale ok=false message=$message")
+      case None => println(s"##CHECK plan=$id scale=$scale ok=true")
+    }
     if (ops.isEmpty) {
       println(s"##EXPLAIN plan=$id scale=$scale")
       println(physicalPlan(df).replace("\n", "\n##  "))
     }
   }
 
-  private def rowsDigest(rows: Array[Row]): (Long, String) = {
+  private def digestOf(rows: Array[Row]): String = {
     val canonical = rows.iterator.map(canonicalRow).toVector.sorted
     val md = MessageDigest.getInstance("SHA-256")
     var i = 0
@@ -291,8 +372,7 @@ object CometBench {
       md.update(0x0a.toByte)
       i += 1
     }
-    val hex = md.digest().map(b => f"${b & 0xff}%02x").mkString
-    (rows.length.toLong, hex)
+    md.digest().map(b => f"${b & 0xff}%02x").mkString
   }
 
   private def canonicalRow(row: Row): String = {

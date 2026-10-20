@@ -9,6 +9,7 @@ memory-frugal on shared CI, while the heavy suites still run somewhere.
 |---|---|---|---|
 | Fast (PR gate) | `check` + `testAll` with `Slow` excluded | `ci.yml` | every push / PR |
 | Slow | 5M-row stress + TPC-H end-to-end (`Slow`-tagged) | `stress.yml` | scheduled (weekly) + manual |
+| Comet coverage | generated-plan Comet operator inventory ratchet | `scripts/comet-bench.sh check` in `comet.yml` | scheduled (weekly) + manual |
 | Benchmark | micro-benchmarks (`Benchmark`-tagged) | excluded from CI | `BenchRunner` / local only |
 
 ## Why not run everything on every push?
@@ -58,3 +59,52 @@ or a doc removed). Documenting members never fails.
 sbt docCoverage            # ratchet check (also runs as part of check)
 sbt docCoverageSnapshot    # regenerate the baseline after intentional doc work
 ```
+
+## Comet coverage gate
+
+Comet is a Spark plugin, so Vairë has no compile-time dependency on it: it is switched on entirely
+by `spark-submit` configuration. Comet accelerates the operators it recognises and silently falls
+back on the rest, so a Vairë change that starts emitting something Comet cannot execute loses the
+acceleration without failing any test. This gate makes that loss visible.
+
+`scripts/comet-bench.sh` builds the bench jar (`sbt spark/assembly`), builds the cluster image
+(`docker/spark-cluster/Dockerfile`, base `apache/spark:4.2.0-java17`), and runs the fixed plan set
+in `CometBench` inside that image — on plain Spark and with the pinned Comet snapshot on the
+classpath, twice at the default and twice at the reversed fact-scale order. It harvests the `Comet*`
+operators from each plan's physical plan and the non-instrument `[COMET: ...]` fallback reasons
+from the driver log, and records them per plan and scale in `comet-coverage.json`:
+
+```bash
+scripts/comet-bench.sh snapshot   # rewrite comet-coverage.json from a fresh run
+scripts/comet-bench.sh check      # run, then ratchet the inventory against the baseline
+scripts/comet-bench.sh check --reuse   # skip the build and runs; check the last artifacts
+```
+
+The ratchet direction matches `doc-coverage.json`: Comet operators may only be **added** and
+non-instrument fallback reasons may only **decrease**. A plan that loses an operator or gains a
+reason exits non-zero; a gained operator or a lost reason is reported but passes, so it can be
+re-snapshotted deliberately. The baseline also records the Comet jar filename and sha1 and
+`spark.version`; `check` fails when either differs from the run. Timings never enter the ratchet —
+it compares inventories only.
+
+Because the gate needs Docker, the Spark 4.2.0 image, and the pinned Comet snapshot, it does not
+run in `ci.yml`. It runs from `comet.yml` on a weekly schedule and on `workflow_dispatch`.
+
+Three points are printed by the harness and matter when reading it:
+
+- **The plan set is a sample, not the whole backend.** It exercises roughly eight of Vairë's
+  `Expr` cases and nine operators, so the ratchet is only as broad as this set. Broadening it is a
+  separate change.
+- **`exec_ms` is a lower bound on Comet's advantage.** The `noop` write that forces the plan
+  carries unaccelerated writer setup and per-row `DataWriter` cost on both arms, so the off/on
+  ratio understates Comet rather than being neutral.
+- **The inventory and the timing describe different plans.** `comet_ops` and the fallback
+  inventory come from `df.queryExecution` (the read plan); `exec_ms` times a `noop` write whose
+  child is that read plan. The operator inventory therefore describes the read plan, while the
+  timing describes the write plan.
+
+The harness also replaces a fixed cross-run ratio tolerance with an order-effect test: for each
+plan and scale it pools the two repeats of each order, compares the default order's exec median
+against the reversed order's, separately for the Comet-off and Comet-on sides, and suppresses the
+ratio when they separate by more than the larger pooled within-order spread (rows below 50 ms are
+not judged).

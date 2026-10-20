@@ -19,12 +19,15 @@ import scala.collection.mutable
   * of `DataFrame.collect()`, and `exec_ms`, the wall-clock of a `noop` write that forces the whole
   * plan without materialising the result on the driver. The off/on ratio uses `exec_ms`;
   * `collect_ms` is kept because the digest, row count and window check come from the collected
-  * rows.
+  * rows. [[cometOperators]] is read from `df.queryExecution`, the read plan, while `exec_ms` times
+  * the separate `noop` write whose child is that read plan, so the operator inventory describes the
+  * read plan and the timing the write plan.
   *
-  * The same object is submitted twice by `scripts/comet-bench.sh`: once on plain Spark and once
-  * with the Apache DataFusion Comet plugin on the classpath. The object contains no Comet
-  * reference, so the control run is genuinely Comet-free; Comet is switched on entirely from the
-  * submit command.
+  * The same object is submitted eight times by `scripts/comet-bench.sh`: twice on plain Spark and
+  * twice with the Apache DataFusion Comet plugin on the classpath, each pair at the property's
+  * fact-scale order and at its reverse (the order-effect test pools the two repeats). The object
+  * contains no Comet reference, so the control runs are genuinely Comet-free; Comet is switched on
+  * entirely from the submit command.
   *
   * The source data is generated once, written to Parquet under `-Dvaire.bench.dir` (default
   * `/tmp/vaire-comet`), and read back with `spark.read.parquet`, so every measured plan starts at a

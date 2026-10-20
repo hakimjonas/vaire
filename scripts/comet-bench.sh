@@ -7,8 +7,10 @@ set -euo pipefail
 # the Scala 3 classpath question stays out of scope).
 #
 # Usage: scripts/comet-bench.sh
-#   VAIRE_BENCH_DIR  host directory for the generated Parquet (default /tmp/vaire-comet); mounted
-#                    into the container at the same path.
+#   VAIRE_BENCH_DIR          host directory for the generated Parquet (default /tmp/vaire-comet);
+#                            mounted into the container at the same path.
+#   VAIRE_BENCH_FACT_SIZES   comma-separated fact scales, in block order (default 1000000,5000000).
+#                            Reversing it checks that the timings are order-independent.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -16,6 +18,7 @@ COMPOSE_FILE="$PROJECT_DIR/docker/spark-cluster/docker-compose.yml"
 IMAGE="vaire-spark-cluster"
 
 BENCH_DIR="${VAIRE_BENCH_DIR:-/tmp/vaire-comet}"
+FACT_SIZES="${VAIRE_BENCH_FACT_SIZES:-1000000,5000000}"
 LOG_DIR="$PROJECT_DIR/target/comet-bench-logs"
 WORK_DIR="$LOG_DIR/work-dir"
 COMET_JAR="/opt/comet/comet-spark-spark4.2_2.13-1.2.0-20261020.040418-9.jar"
@@ -65,6 +68,7 @@ DRIVER_JAVA_OPTIONS=(
   "--add-opens=java.base/sun.nio.ch=ALL-UNNAMED"
   "--add-opens=java.base/sun.util.calendar=ALL-UNNAMED"
   "-Dvaire.bench.dir=$BENCH_DIR"
+  "-Dvaire.bench.fact.sizes=$FACT_SIZES"
 )
 
 run_block() {
@@ -134,10 +138,16 @@ extract_results() {
 extract_results "$LOG_DIR/off.log" > "$LOG_DIR/off.results"
 extract_results "$LOG_DIR/on.log" > "$LOG_DIR/on.results"
 
+if grep -q '^##WARMUP' "$LOG_DIR/off.results" "$LOG_DIR/on.results"; then
+  echo "ERROR: ##WARMUP leaked into the extracted results." >&2
+  exit 1
+fi
+
 echo
 echo "=================== version lines ==================="
 grep '^##VERSION' "$LOG_DIR/off.log" "$LOG_DIR/on.log" || true
 echo "Comet native library lines in the control log: $(grep -c 'Comet native library' "$LOG_DIR/off.log" || true)"
+echo "##WARMUP lines (excluded from every table): off=$(grep -c '^##WARMUP' "$LOG_DIR/off.log" || true), on=$(grep -c '^##WARMUP' "$LOG_DIR/on.log" || true)"
 
 echo
 echo "=================== per-plan comparison ==================="

@@ -30,6 +30,13 @@ import scala.collection.mutable
   * Parquet reader reports every column nullable, so each scan is read into a nullable mirror schema
   * and narrowed to the non-optional one the plans use.
   *
+  * Before the first reported scale block, [[runBlockWarmup]] runs the same distributed plan set
+  * once at a small scale and prints it under `##WARMUP`; the results are discarded. The per-plan
+  * warmups inside [[runPlan]] absorb per-iteration cost, but they do not absorb a fixed penalty
+  * that attaches to the first scale block in the JVM, which is why the first block used to read
+  * high. The warmup block is timing-only: it changes no digest, row count, or operator inventory,
+  * and its lines carry a prefix the extraction does not match.
+  *
   * Two plans probe the semantics rather than the throughput. `time-bucket` uses `time_bucket` over
   * a timestamp column, one of the Spark 4.2-only functions Vairë calls, so it fails on 4.1.3 and is
   * the check that the container really runs 4.2.0. `window` orders by a non-unique key on purpose:
@@ -50,6 +57,7 @@ object CometBench {
   private val NumGroups = 1000
   private val ShufflePartitions = 8
   private val LimitRows = 1_000
+  private val BlockWarmupScale = 200_000L
   private val FactScales: Vector[Long] =
     csvProp("vaire.bench.fact.sizes", Vector(1_000_000L, 5_000_000L))
   private val DriverCollectScale: Long =
@@ -103,6 +111,28 @@ object CometBench {
   case class Mapped(key: Long, doubled: Int, id: Long)
   given mappedSchema: Schema[Mapped] = Schema.derived
 
+  /** A distributed plan and the extra arguments its measurement needs. */
+  private final case class DistributedPlan(
+    id: String,
+    build: () => DataFrame,
+    project: Array[Row] => Array[Row] = rows => rows,
+    check: Array[Row] => Option[String] = _ => None,
+    asserted: Boolean = false
+  )
+
+  /** The distributed plan set, shared so the warmup block and the reported blocks run the same
+    * code.
+    */
+  private def distributedPlans(bench: Bench): Vector[DistributedPlan] = Vector(
+    DistributedPlan("filter-groupby", () => bench.filterGroupBy),
+    DistributedPlan("join-on", () => bench.joinOn),
+    DistributedPlan("window", () => bench.window, windowDigestRows, rowNumberPermutation, asserted = true),
+    DistributedPlan("sort-limit", () => bench.sortLimit),
+    DistributedPlan("distinct", () => bench.distinct),
+    DistributedPlan("aggregate", () => bench.aggregate),
+    DistributedPlan("time-bucket", () => bench.timeBucket)
+  )
+
   def main(args: Array[String]): Unit = {
     val root = sys.props.get("vaire.bench.dir").getOrElse("/tmp/vaire-comet")
     val spark = newSession()
@@ -113,18 +143,14 @@ object CometBench {
         s"##VERSION spark=${spark.version} comet=$comet shuffle_partitions=$ShufflePartitions max_heap_mb=$heapMb"
       )
       println(
-        s"##DATA dir=$root groups=$NumGroups fact_scales=${FactScales.mkString(",")} driver_scale=$DriverCollectScale"
+        s"##DATA dir=$root groups=$NumGroups fact_scales=${FactScales.mkString(",")} driver_scale=$DriverCollectScale block_warmup_scale=$BlockWarmupScale"
       )
+
+      runBlockWarmup(spark, root)
 
       FactScales.foreach { scale =>
         val bench = new Bench(spark, root, scale)
-        runPlan("filter-groupby", scale, () => bench.filterGroupBy)
-        runPlan("join-on", scale, () => bench.joinOn)
-        runPlan("window", scale, () => bench.window, project = windowDigestRows, check = rowNumberPermutation)
-        runPlan("sort-limit", scale, () => bench.sortLimit)
-        runPlan("distinct", scale, () => bench.distinct)
-        runPlan("aggregate", scale, () => bench.aggregate)
-        runPlan("time-bucket", scale, () => bench.timeBucket)
+        distributedPlans(bench).foreach(p => runPlan(p.id, scale, p.build, p.project, p.check, p.asserted))
       }
 
       val bench = new Bench(spark, root, DriverCollectScale)
@@ -305,6 +331,23 @@ object CometBench {
     path
   }
 
+  /** Pay the JVM's first-block cost at a small scale, before any reported block. Timing only: the
+    * results are discarded and the lines carry a prefix the extraction ignores.
+    */
+  private def runBlockWarmup(spark: SparkSession, root: String): Unit = {
+    val bench = new Bench(spark, root, BlockWarmupScale)
+    distributedPlans(bench).foreach { p =>
+      val df = p.build()
+      val t0 = System.nanoTime()
+      val rows = df.collect()
+      val t1 = System.nanoTime()
+      cometOperators(df) // warm plan inspection too; not reported
+      println(
+        s"##WARMUP plan=${p.id} scale=$BlockWarmupScale ms=${fmtMs((t1 - t0) / 1e6)} rows=${rows.length}"
+      )
+    }
+  }
+
   /** `(key, value, rnk)` — invariant under the tie order `row_number` assigns. */
   private def windowDigestRows(rows: Array[Row]): Array[Row] =
     rows.map(r => Row(r.getLong(0), r.getInt(1), r.getInt(4)))
@@ -323,12 +366,16 @@ object CometBench {
     }
   }
 
+  private def fmtMs(value: Double): String =
+    "%.1f".formatLocal(java.util.Locale.ROOT, value)
+
   private def runPlan(
     id: String,
     scale: Long,
     plan: () => DataFrame,
     project: Array[Row] => Array[Row] = rows => rows,
-    check: Array[Row] => Option[String] = _ => None
+    check: Array[Row] => Option[String] = _ => None,
+    asserted: Boolean = false
   ): Unit = {
     val df = plan()
     var lastRows: Array[Row] | Null = null
@@ -346,16 +393,19 @@ object CometBench {
     val rows = lastRows.nn
     val measured = samples.drop(Warmup)
     val sorted = measured.sorted
-    val fmt = (v: Double) => "%.1f".formatLocal(java.util.Locale.ROOT, v)
     val digest = digestOf(project(rows))
     val ops = cometOperators(df)
     val opText = if (ops.isEmpty) "-" else ops.mkString(",")
     println(
-      s"##RESULT plan=$id scale=$scale n=${measured.length} min_ms=${fmt(sorted.head)} median_ms=${fmt(sorted(sorted.length / 2))} max_ms=${fmt(sorted.last)} samples=${measured.map(fmt).mkString(",")} rows=${rows.length} digest=$digest comet_ops=$opText"
+      s"##RESULT plan=$id scale=$scale n=${measured.length} min_ms=${fmtMs(sorted.head)} median_ms=${fmtMs(sorted(sorted.length / 2))} max_ms=${fmtMs(sorted.last)} samples=${measured.map(fmtMs).mkString(",")} rows=${rows.length} digest=$digest comet_ops=$opText"
     )
-    check(rows) match {
-      case Some(message) => println(s"##CHECK plan=$id scale=$scale ok=false message=$message")
-      case None => println(s"##CHECK plan=$id scale=$scale ok=true")
+    if (asserted) {
+      check(rows) match {
+        case Some(message) => println(s"##CHECK plan=$id scale=$scale asserted=true ok=false message=$message")
+        case None => println(s"##CHECK plan=$id scale=$scale asserted=true ok=true")
+      }
+    } else {
+      println(s"##CHECK plan=$id scale=$scale asserted=false ok=true")
     }
     if (ops.isEmpty) {
       println(s"##EXPLAIN plan=$id scale=$scale")

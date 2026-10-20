@@ -15,40 +15,42 @@ import scala.collection.mutable
 /** Comet acceleration benchmark for Vairë's Spark backend.
   *
   * Runs a fixed set of Vairë plans on one Spark distribution and reports, per plan and per input
-  * size, the measured `collect()` samples with their min/median/max, the row count, a SHA-256
-  * digest of the collected rows (canonically encoded, sorted), and the `Comet*` operator names
-  * found in the physical plan. The same object is submitted twice by `scripts/comet-bench.sh`: once
-  * on plain Spark and once with the Apache DataFusion Comet plugin on the classpath. The object
-  * contains no Comet reference, so the control run is genuinely Comet-free; Comet is switched on
-  * entirely from the submit command.
+  * size, two measured actions with their min/median/max and samples: `collect_ms`, the wall-clock
+  * of `DataFrame.collect()`, and `exec_ms`, the wall-clock of a `noop` write that forces the whole
+  * plan without materialising the result on the driver. The off/on ratio uses `exec_ms`;
+  * `collect_ms` is kept because the digest, row count and window check come from the collected
+  * rows.
+  *
+  * The same object is submitted twice by `scripts/comet-bench.sh`: once on plain Spark and once
+  * with the Apache DataFusion Comet plugin on the classpath. The object contains no Comet
+  * reference, so the control run is genuinely Comet-free; Comet is switched on entirely from the
+  * submit command.
   *
   * The source data is generated once, written to Parquet under `-Dvaire.bench.dir` (default
   * `/tmp/vaire-comet`), and read back with `spark.read.parquet`, so every measured plan starts at a
-  * real file scan. Seeding through `Dataset.fromColumns`/`DataFrameBuilder.fromMaterialized` would
-  * produce a `LocalRelation` (a `LocalTableScanExec`), which Comet disables by default and which
-  * would take the scan out of the comparison before anything the harness means to measure. The
-  * Parquet reader reports every column nullable, so each scan is read into a nullable mirror schema
-  * and narrowed to the non-optional one the plans use.
+  * real file scan. The Parquet reader reports every column nullable, so each scan is read into a
+  * nullable mirror schema and narrowed to the non-optional one the plans use.
   *
-  * Before the first reported scale block, [[runBlockWarmup]] runs the same distributed plan set
-  * once at a small scale and prints it under `##WARMUP`; the results are discarded. The per-plan
-  * warmups inside [[runPlan]] absorb per-iteration cost, but they do not absorb a fixed penalty
-  * that attaches to the first scale block in the JVM, which is why the first block used to read
-  * high. The warmup block is timing-only: it changes no digest, row count, or operator inventory,
-  * and its lines carry a prefix the extraction does not match.
+  * Before the first reported block, and before each reported scale block, [[runWarmup]] runs that
+  * block's plan set once and prints it under `##WARMUP`; the results are discarded. The per-plan
+  * warmups inside [[runPlan]] absorb per-iteration cost, but they do not absorb the first-block
+  * cost, which is why the warmup blocks exist.
+  *
+  * Each reported plan is bracketed by `##PLAN-BEGIN`/`##PLAN-END` so `scripts/comet-bench.sh` can
+  * window the driver log and harvest Comet's `[COMET: ...]` fallback warnings into `##FALLBACK`.
   *
   * Two plans probe the semantics rather than the throughput. `time-bucket` uses `time_bucket` over
   * a timestamp column, one of the Spark 4.2-only functions Vairë calls, so it fails on 4.1.3 and is
-  * the check that the container really runs 4.2.0. `window` orders by a non-unique key on purpose:
-  * `row_number` is then plan-dependent among rows tied on that key, so its digest covers only the
-  * tie-invariant `(key, value, rnk)` multiset and a separate check asserts that `rowNum` is a
-  * permutation of `1..n` within each partition.
+  * the check that the container really runs 4.2.0; it also leaves work on Spark, which validates
+  * the fallback harvesting. `window` orders by a non-unique key on purpose: `row_number` is then
+  * plan-dependent among rows tied on that key, so its digest covers only the tie-invariant
+  * `(key, value, rnk)` multiset and a separate check asserts that `rowNum` is a permutation of
+  * `1..n` within each partition.
   *
   * The two driver-collecting plans (Map + groupByAgg, and the predicate join) run on a reduced fact
   * table: both rebuild the frame on the driver, and the predicate join is O(rows x dimension) by
-  * construction (`SparkInterpreter.applyInnerJoin`), so a full 5M-row fact would not finish within
-  * the fork's 4G heap and budget. Their role here is to show which paths bypass Comet, not to time
-  * them at scale.
+  * construction (`SparkInterpreter.applyInnerJoin`). Their role here is to show which paths bypass
+  * Comet, not to time them at scale.
   */
 object CometBench {
 
@@ -120,7 +122,7 @@ object CometBench {
     asserted: Boolean = false
   )
 
-  /** The distributed plan set, shared so the warmup block and the reported blocks run the same
+  /** The distributed plan set, shared so the warmup blocks and the reported blocks run the same
     * code.
     */
   private def distributedPlans(bench: Bench): Vector[DistributedPlan] = Vector(
@@ -146,9 +148,10 @@ object CometBench {
         s"##DATA dir=$root groups=$NumGroups fact_scales=${FactScales.mkString(",")} driver_scale=$DriverCollectScale block_warmup_scale=$BlockWarmupScale"
       )
 
-      runBlockWarmup(spark, root)
+      runWarmup(spark, root, BlockWarmupScale)
 
       FactScales.foreach { scale =>
+        runWarmup(spark, root, scale)
         val bench = new Bench(spark, root, scale)
         distributedPlans(bench).foreach(p => runPlan(p.id, scale, p.build, p.project, p.check, p.asserted))
       }
@@ -179,7 +182,9 @@ object CometBench {
       .config("spark.shuffle.compress", "false")
       .config("spark.shuffle.spill.compress", "false")
       .getOrCreate()
-    session.sparkContext.setLogLevel("ERROR")
+    // WARN, not ERROR: Comet emits its `[COMET: ...]` fallback reasons as warnings when
+    // spark.comet.explain.fallback.log.enabled is set, and the harness harvests them.
+    session.sparkContext.setLogLevel("WARN")
     session
   }
 
@@ -331,19 +336,22 @@ object CometBench {
     path
   }
 
-  /** Pay the JVM's first-block cost at a small scale, before any reported block. Timing only: the
-    * results are discarded and the lines carry a prefix the extraction ignores.
+  /** Pay the JVM's first-block cost at a scale before its reported block. Timing only: both actions
+    * run once, the results are discarded, and the lines carry a prefix the extraction ignores.
     */
-  private def runBlockWarmup(spark: SparkSession, root: String): Unit = {
-    val bench = new Bench(spark, root, BlockWarmupScale)
+  private def runWarmup(spark: SparkSession, root: String, scale: Long): Unit = {
+    val bench = new Bench(spark, root, scale)
     distributedPlans(bench).foreach { p =>
       val df = p.build()
-      val t0 = System.nanoTime()
+      val c0 = System.nanoTime()
       val rows = df.collect()
-      val t1 = System.nanoTime()
+      val c1 = System.nanoTime()
+      val e0 = System.nanoTime()
+      df.write.format("noop").mode("overwrite").save()
+      val e1 = System.nanoTime()
       cometOperators(df) // warm plan inspection too; not reported
       println(
-        s"##WARMUP plan=${p.id} scale=$BlockWarmupScale ms=${fmtMs((t1 - t0) / 1e6)} rows=${rows.length}"
+        s"##WARMUP plan=${p.id} scale=$scale collect_ms=${fmtMs((c1 - c0) / 1e6)} exec_ms=${fmtMs((e1 - e0) / 1e6)} rows=${rows.length}"
       )
     }
   }
@@ -369,6 +377,12 @@ object CometBench {
   private def fmtMs(value: Double): String =
     "%.1f".formatLocal(java.util.Locale.ROOT, value)
 
+  /** `min_ms=… median_ms=… max_ms=… samples=…` for one action. */
+  private def summarize(name: String, measured: Array[Double]): String = {
+    val sorted = measured.sorted
+    s"${name}_min_ms=${fmtMs(sorted.head)} ${name}_median_ms=${fmtMs(sorted(sorted.length / 2))} ${name}_max_ms=${fmtMs(sorted.last)} ${name}_samples=${measured.map(fmtMs).mkString(",")}"
+  }
+
   private def runPlan(
     id: String,
     scale: Long,
@@ -377,27 +391,35 @@ object CometBench {
     check: Array[Row] => Option[String] = _ => None,
     asserted: Boolean = false
   ): Unit = {
+    println(s"##PLAN-BEGIN plan=$id scale=$scale")
     val df = plan()
     var lastRows: Array[Row] | Null = null
-    val samples = new Array[Double](Warmup + Measured)
+    val collectSamples = new Array[Double](Warmup + Measured)
+    val execSamples = new Array[Double](Warmup + Measured)
     var i = 0
     while (i < Warmup + Measured) {
       lastRows = null // release the previous run's result before collecting the next
-      val t0 = System.nanoTime()
+      val c0 = System.nanoTime()
       val collected = df.collect()
-      val t1 = System.nanoTime()
-      samples(i) = (t1 - t0) / 1e6
+      val c1 = System.nanoTime()
+      collectSamples(i) = (c1 - c0) / 1e6
+      // Force the same plan without materialising it on the driver. The noop data source runs the
+      // whole query and returns nothing.
+      val e0 = System.nanoTime()
+      df.write.format("noop").mode("overwrite").save()
+      val e1 = System.nanoTime()
+      execSamples(i) = (e1 - e0) / 1e6
       lastRows = collected
       i += 1
     }
     val rows = lastRows.nn
-    val measured = samples.drop(Warmup)
-    val sorted = measured.sorted
+    val collectMeasured = collectSamples.drop(Warmup)
+    val execMeasured = execSamples.drop(Warmup)
     val digest = digestOf(project(rows))
     val ops = cometOperators(df)
     val opText = if (ops.isEmpty) "-" else ops.mkString(",")
     println(
-      s"##RESULT plan=$id scale=$scale n=${measured.length} min_ms=${fmtMs(sorted.head)} median_ms=${fmtMs(sorted(sorted.length / 2))} max_ms=${fmtMs(sorted.last)} samples=${measured.map(fmtMs).mkString(",")} rows=${rows.length} digest=$digest comet_ops=$opText"
+      s"##RESULT plan=$id scale=$scale n=${collectMeasured.length} ${summarize("collect", collectMeasured)} ${summarize("exec", execMeasured)} rows=${rows.length} digest=$digest comet_ops=$opText"
     )
     if (asserted) {
       check(rows) match {
@@ -411,6 +433,7 @@ object CometBench {
       println(s"##EXPLAIN plan=$id scale=$scale")
       println(physicalPlan(df).replace("\n", "\n##  "))
     }
+    println(s"##PLAN-END plan=$id scale=$scale")
   }
 
   private def digestOf(rows: Array[Row]): String = {

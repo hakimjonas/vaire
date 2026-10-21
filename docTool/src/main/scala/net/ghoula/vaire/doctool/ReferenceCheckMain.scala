@@ -17,8 +17,7 @@ object ReferenceCheckMain {
     }
 
   /** Run the gate and print its report. */
-  def run(args: Array[String]): Int = {
-    val _ = args
+  def run(): Int = {
     val root = Paths.get("").toAbsolutePath.normalize()
     val result = ReferenceCheck.trackedFiles(root).map(files => ReferenceCheck.check(root, files))
 
@@ -36,5 +35,5 @@ object ReferenceCheckMain {
     exitCode(result)
   }
 
-  def main(args: Array[String]): Unit = sys.exit(run(args))
+  def main(args: Array[String]): Unit = sys.exit(run())
 }

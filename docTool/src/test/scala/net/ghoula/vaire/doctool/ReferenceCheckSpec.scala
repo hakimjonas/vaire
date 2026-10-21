@@ -109,7 +109,7 @@ class ReferenceCheckSpec extends AnyFlatSpec with Matchers {
   // tree. The decision function above covers the exit code; the branch's formatting stays covered
   // by the checker's own tests, which feed findings directly to ReferenceCheck.check.
   "the CLI run" should "return zero on the working tree" in {
-    val (code, output) = captureOut(ReferenceCheckMain.run(Array.empty))
+    val (code, output) = captureOut(ReferenceCheckMain.run())
     code shouldBe 0
     output should include("reference check ok:")
   }

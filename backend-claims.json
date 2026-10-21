@@ -1,0 +1,86 @@
+{
+  "messages": [
+    {"message": "Between not supported for untyped columns", "class": "in-class"},
+    {"message": "Comparison not supported for untyped columns", "class": "in-class"},
+    {"message": "Explode requires Dataset-level handling", "class": "in-class"},
+    {"message": "ArraySort on untyped columns not supported", "class": "in-class"},
+    {"message": "VariantExplode requires Dataset-level handling", "class": "in-class"},
+    {"message": "Generator functions require Dataset-level handling", "class": "in-class"},
+    {"message": "Aggregations not supported in columnar evalColumn", "class": "in-class"},
+    {"message": "Window functions not supported in columnar evalColumn", "class": "in-class"},
+    {"message": "Datasketches and current_path are Spark-only; use SparkInterpreter", "class": "in-class"},
+    {"message": "AES functions use Spark's key-derivation and cipher format; use SparkInterpreter", "class": "in-class"},
+    {"message": "HistogramNumeric is Spark-only", "class": "in-class"},
+    {"message": "Grouping requires a grouping-sets context (Spark-only)", "class": "in-class"},
+    {"message": "GroupingId requires a grouping-sets context (Spark-only)", "class": "in-class"},
+    {"message": "${fn} requires the in-memory interpreter", "class": "in-class"},
+    {"message": "json_tuple key cannot be addressed by a Spark get_json_object path: ${k}", "class": "in-class"},
+    {"message": "schema_of_json requires a constant JSON string on Spark (foldable input)", "class": "in-class"},
+    {"message": "Unsupported window expr: ${other}", "class": "in-class"},
+    {
+      "message": "StructType columns require a nested schema; use Column.structFromValues",
+      "class": "excluded",
+      "reason": "Schema-shape precondition: the caller must supply the nested schema on either backend."
+    },
+    {
+      "message": "Coalesce: no expressions provided",
+      "class": "excluded",
+      "reason": "Malformed expression: invalid on every backend, not a backend capability."
+    },
+    {
+      "message": "StructType column requires a nested schema (Schema.nestedSchemas)",
+      "class": "excluded",
+      "reason": "Schema-shape precondition: the caller must supply the nested schema on either backend."
+    },
+    {
+      "message": "DatasetInterpreter does not support ${other.getClass.getSimpleName}",
+      "class": "excluded",
+      "reason": "Data-source plumbing: rejects an internal DataSource implementation, not a user-facing transformation."
+    },
+    {
+      "message": "Nested withErrorPolicy scopes are not supported: a policy scopes exactly one plan",
+      "class": "excluded",
+      "reason": "Execution-policy control: covered by ErrorPolicySpec and docs/error-policy-design.md."
+    },
+    {
+      "message": "Policy-scoped plans must run through executeCollect; the plain execute path carries no error result",
+      "class": "excluded",
+      "reason": "Execution-policy routing: covered by ErrorPolicySpec and docs/error-policy-design.md."
+    },
+    {
+      "message": "executeCollect requires a withErrorPolicy scope as the outermost plan node",
+      "class": "excluded",
+      "reason": "Execution-policy usage: covered by ErrorPolicySpec and docs/error-policy-design.md."
+    },
+    {
+      "message": "timestampdiff unit ${tdf.unit} not supported; use MICROSECOND, MILLISECOND, SECOND, MINUTE, HOUR, DAY or WEEK",
+      "class": "excluded",
+      "reason": "Invalid argument value: the unit is outside the API's accepted set on every backend."
+    },
+    {
+      "message": "executeCollect is an in-memory interpreter feature; per-row error policies are unrepresentable on Spark (see docs/error-policy-design.md §5.3)",
+      "class": "excluded",
+      "reason": "Execution-policy control: covered by docs/error-policy-design.md."
+    },
+    {
+      "message": "SparkInterpreter does not support ${other.getClass.getSimpleName}",
+      "class": "excluded",
+      "reason": "Data-source plumbing: rejects an internal DataSource implementation, not a user-facing transformation."
+    },
+    {
+      "message": "withErrorPolicy scopes are an in-memory interpreter feature; per-row error policies are unrepresentable on Spark (see docs/error-policy-design.md §5.3)",
+      "class": "excluded",
+      "reason": "Execution-policy control: covered by docs/error-policy-design.md."
+    },
+    {
+      "message": "Expr conversion failed: ${err}",
+      "class": "excluded",
+      "reason": "Generic conversion wrapper: restates an inner failure; it does not name a backend capability."
+    },
+    {
+      "message": "${context}: ${err}",
+      "class": "excluded",
+      "reason": "Generic conversion wrapper: restates an inner failure; it does not name a backend capability."
+    }
+  ]
+}

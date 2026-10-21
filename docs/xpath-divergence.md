@@ -9,8 +9,8 @@ restate the cases.
 
 The affected expressions are the eight strict cases `Expr.Xpath`, `XpathString`,
 `XpathBoolean`, `XpathShort`, `XpathInt`, `XpathLong`, `XpathFloat` and `XpathDouble`.
-The eight `TryXpath*` cases are a separate capability gap, covered in
-[TryXpath* open question](#internal-tryxpath-open-question).
+The eight `TryXpath*` cases are rejected on Spark; the decision is recorded in
+`ExprToColumn.tryXpathUnsupported`.
 
 ## The divergence
 
@@ -60,6 +60,8 @@ exotic.
 
 The third row is an extension on Vairë's side. It is not a reason to prefer Spark: on the
 same document Spark already returns wrong values for the first two rows.
+
+These values were verified against Spark 4.2 on 2026-10-21.
 
 ## Mechanism
 
@@ -116,28 +118,6 @@ not changed to reproduce Spark's results. Two reasons:
 The `*:b` extension stays as it is. It is not part of the XPath 1.0 conformance claim and
 is not a candidate for removal in this increment.
 
-## Internal: TryXpath* open question
-
-The eight `TryXpath*` cases are rejected on Spark; the rejection claim, its mechanism and its
-test are recorded in [`backend-claims.md`](backend-claims.md). Whether that rejection stays is
-open.
-
-Not decided, and not implemented in this increment.
-
-**Keep `UnsupportedOperation`.** The try family exists for per-row error handling, which is
-an in-memory execution mode. A Spark implementation would have to collect the input to the
-driver and evaluate row by row, giving up Catalyst and the distributed execution model. The
-current error is explicit and fails fast instead of silently moving a potentially large
-dataset through one JVM.
-
-**Add a driver-collect fallback.** Spark already has the precedent:
-`applyFilterViaMap` (`SparkInterpreter.scala:342`) and `applySortByExprViaCollect`
-(`SparkInterpreter.scala:385`) collect, evaluate in memory, and rebuild a `DataFrame`. A
-`TryXpath*` fallback would follow the same shape and turn a hard capability gap into a
-visible performance cost, with semantics identical to the in-memory engine. The cost is a
-new execution path, a changed public failure mode, and the risk of exhausting driver memory
-on large inputs.
-
 ## Internal: upstream status
 
 No evidence that Spark has examined this behaviour, as of 2026-10-21.
@@ -182,16 +162,10 @@ null `localName` and `namespaceURI` for every element. The one point to state as
 uncertain is intent: the class does not say whether the omission is deliberate, and no
 Spark discussion records a decision.
 
-### Internal: how the values were verified
-
-Spark 4.2.0, `local[2]`, forked test JVM heap `-Xmx4G`, host DRAM 186 GiB total, on
-2026-10-21. The values in the table were produced by a one-off probe on the Spark test
-classpath and are now pinned as assertions in `XpathDivergenceSpec`. No production code
-changed to produce them.
-
 ## Backend claims
 
 Rejection claims outside the XPath divergence — aggregations, window functions, datasketches,
-AES, generator expressions and the rest — are enumerated with their tests in
-[`backend-claims.md`](backend-claims.md). That document owns the coverage table; this one owns
-the XPath divergence and the upstream record.
+AES, generator expressions and the rest — are summarised in
+[`backend-claims.md`](backend-claims.md). The authoritative message list is
+[`backend-claims.json`](../backend-claims.json). This document owns the XPath divergence and the
+upstream record.

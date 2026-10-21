@@ -65,11 +65,12 @@ sbt docCoverageSnapshot    # regenerate the baseline after intentional doc work
 
 ## Claims coverage ledger
 
-`docs/backend-claims.md` records every expression or dataset-transformation rejection in both
-modules and the test that pins it. Unlike `doc-coverage.json`, it is not a gate: nothing fails
-when a new rejection site appears without an entry. The ledger states the proposed drift check;
-building it is a separate change. A maintainer adding a rejection site updates the ledger in the
-same change.
+`backend-claims.json` records every expression or dataset-transformation rejection in both
+modules, classified in-class or excluded with a reason. `claimLedger` (part of `check`) scans
+both `src/main` trees for string literals passed to `UnsupportedOperation` and
+`UnsupportedExpression`, and fails when a source message is missing from the file or a listed
+message has no source site. The user-facing summary is `docs/backend-claims.md`; the JSON file is
+the authoritative list.
 
 ## Document reference check
 

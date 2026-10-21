@@ -18,8 +18,8 @@ import net.ghoula.vaire.errors.ExecutionError
   *
   * Spark 4.2 (`spark.sql.ansi` is on by default) implicitly coerces some pairs (e.g. Int vs Long)
   * and rejects others (e.g. Long vs Timestamp). Requiring an explicit cast to a common type keeps
-  * the typed API honest and the in-memory and Spark backends in agreement; see
-  * `docs/join-optimization-plan.md`.
+  * the typed API honest and the in-memory and Spark backends in agreement; `KeyedJoinKeyTypeSpec`
+  * pins that contract.
   */
 private[vaire] object KeyedJoin {
 

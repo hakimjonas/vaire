@@ -6,9 +6,9 @@ import org.scalatest.matchers.should.Matchers
 import net.ghoula.vaire.prelude.*
 
 /** Join-operator benchmark for the in-memory interpreter. No Spark dependency — pure core
-  * `DatasetInterpreter` execution. Phase 0 of `docs/join-optimization-plan.md`: establishes the
-  * current performance curve with skew represented, so the contended cost in the keyed path is
-  * visible before any fix is made. Nothing is fixed here; this file only reports.
+  * `DatasetInterpreter` execution. Establishes the current performance curve with skew represented,
+  * so the contended cost in the keyed path is visible. Nothing is fixed here; this file only
+  * reports.
   *
   * The keyed-family sweeps put the skew on the side each join *indexes*, which differs per
   * operator: `InnerJoinOn` indexes the left, `LeftJoinOn`/`FullJoinOn` index the right

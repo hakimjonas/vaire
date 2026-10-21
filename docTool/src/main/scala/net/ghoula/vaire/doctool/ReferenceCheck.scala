@@ -12,16 +12,16 @@ final case class ReferenceFinding(file: String, line: Int, target: String) deriv
 /** Result of one reference-check run. */
 final case class ReferenceResult(findings: Vector[ReferenceFinding], references: Int, files: Int) derives CanEqual
 
-/** Checks path-shaped document references in tracked text files.
+/** Checks path-shaped references in tracked text files.
   *
-  * A reference is either a Markdown link target ending in a document extension, or an inline-code
-  * token that contains `/` and ends in a document extension. Bare mentions such as `KeyIndex.scala`
-  * are prose, not paths, and are ignored. The extension is anchored at the end of the token, so
-  * `cell.md5` is not a `cell.md` hit.
+  * A reference is either a Markdown link target ending in a covered extension, or an inline-code
+  * token that contains `/` and ends in a covered extension. Documents and JSON data files are
+  * covered; bare mentions such as `KeyIndex.scala` are prose, not paths, and are ignored. The
+  * extension is anchored at the end of the token, so `cell.md5` is not a `cell.md` hit.
   */
 object ReferenceCheck {
 
-  private val DocumentExtension = """(?i)\.(?:md|markdown|rst|txt)$""".r
+  private val DocumentExtension = """(?i)\.(?:md|markdown|rst|txt|json)$""".r
   private val InlineCode = """`([^`\n]+)`""".r
   private val MarkdownLink = """\[[^\]]*\]\(([^)]+)\)""".r
   private val LineSuffix = """:\d+(?:-\d+)?$""".r

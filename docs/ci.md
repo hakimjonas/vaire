@@ -49,6 +49,15 @@ FAST_TESTS=1 sbt testAll              # what ci.yml runs (Slow excluded)
 sbt testSlow                       # 5M stress + TPC-H only
 ```
 
+## Build hazard: read-only links under `target/out`
+
+A `spark/Test/testFull` run has failed with `AccessDeniedException` while writing a semanticdb
+file through a symlink under `target/out`. Deleting the untracked build output and rerunning
+cleared it on both occasions. The suspected mechanism is sbt 2's content-addressed store
+symlinking to read-only entries under `~/.cache/sbt/v2/cas/`; the cause has not been diagnosed.
+The docker class-dir mounts fail through the same mechanism, so a reader meeting either symptom
+should treat this as the same hazard.
+
 ## Scaladoc coverage gate
 
 `check` enforces the pana-style scaladoc ratchet: every public member of `src/main/scala`
@@ -72,14 +81,20 @@ both `src/main` trees for string literals passed to `UnsupportedOperation` and
 message has no source site. The user-facing summary is `docs/backend-claims.md`; the JSON file is
 the authoritative list.
 
-## Document reference check
+The check verifies coverage of the list in both directions, not the correctness of each entry's
+classification. Whether a site belongs in-class or excluded, and whether its reason is sound, is
+judgement; a new rejection site filed as excluded with a plausible reason passes silently. The
+gate cannot distinguish a mis-filed site from a correct exclusion.
 
-`referenceCheck` (part of `check`) scans every tracked text file for path-shaped document
-references: backticked tokens containing `/` and ending in a document extension, plus Markdown
-link targets. A reference must resolve from the repository root or from the containing file; the
-gate prints the file, line and target for each failure. It covers path-shaped references only.
-Prose that names a document without a path — “the handover”, “the plan” — is not mechanically
-detectable and remains a review responsibility.
+## Reference check
+
+`referenceCheck` (part of `check`) scans every tracked text file for path-shaped references:
+backticked tokens containing `/` and ending in a covered extension, plus Markdown link targets.
+The covered extensions are `md`, `markdown`, `rst`, `txt` and `json`. A reference must resolve
+from the repository root or from the containing file; the gate prints the file, line and target
+for each failure. It covers path-shaped references only. Prose that names a document without a
+path — “the handover”, “the plan” — is not mechanically detectable and remains a review
+responsibility.
 
 ## Comet coverage gate
 

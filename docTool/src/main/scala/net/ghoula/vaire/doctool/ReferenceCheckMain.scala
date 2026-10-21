@@ -2,10 +2,10 @@ package net.ghoula.vaire.doctool
 
 import java.nio.file.Paths
 
-/** CLI for the inter-document reference gate.
+/** CLI for the reference gate.
   *
-  * Walks every tracked text file, extracts path-shaped document references, and exits 1 when a
-  * target does not resolve from the repository root or from the containing file.
+  * Walks every tracked text file, extracts path-shaped document and JSON references, and exits 1
+  * when a target does not resolve from the repository root or from the containing file.
   */
 object ReferenceCheckMain {
 

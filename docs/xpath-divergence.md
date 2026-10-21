@@ -1,7 +1,7 @@
 # XPath divergence between the in-memory engine and Spark
 
 Status: authoritative
-Audience: user; the Internal sections are for maintainers.
+Audience: user.
 
 This is the single statement of how Vairë's `xpath*` family differs between the in-memory
 interpreter and the Spark backend. The test suites and the README point here; they do not
@@ -118,54 +118,9 @@ not changed to reproduce Spark's results. Two reasons:
 The `*:b` extension stays as it is. It is not part of the XPath 1.0 conformance claim and
 is not a candidate for removal in this increment.
 
-## Internal: upstream status
-
-No evidence that Spark has examined this behaviour, as of 2026-10-21.
-
-- An all-time JIRA summary search for `xpath` returns eight tickets: the original function
-  implementation (2016), Scala/Python bindings (2023), collations (May 2024), return-type
-  nullness (August 2024), codegen (October 2024) and docstrings (January 2025). None
-  concerns evaluation semantics, the XPath version, namespace handling, or the parser.
-- A full-text search for `saxon` returns no tickets.
-- A full-text search for `namespace aware` returns four tickets, none XPath-related.
-- The three most recent substantive tickets, SPARK-48160, SPARK-50081 and SPARK-50764, have
-  one or two comments each. None mentions the parser, the DOM, or namespaces. Those tickets
-  do show continued activity in the XPath code, so the committers who review changes in this
-  area are identifiable.
-
-### Internal: record for filing
-
-File this as a defect with a reproducer, not as a feature request. A request to "support
-XML namespaces" invites a scope and policy discussion and will stall; a wrong `xpath_string`
-result on a five-line document is a bug with a pinned expectation.
-
-Minimal reproducer:
-
-```sql
-SELECT xpath_string('<ns:r xmlns:ns="urn:x"><ns:b>1</ns:b><b>2</b></ns:r>', '//ns:b');
--- Spark 4.2 returns ""
--- XPath 1.0 requires "1"
-```
-
-```sql
-SELECT xpath_string('<ns:r xmlns:ns="urn:x"><ns:b>1</ns:b><b>2</b></ns:r>', 'r/b');
--- Spark 4.2 returns "1"
--- XPath 1.0 requires ""
-```
-
-Pinned expectations on each backend are in the table above and asserted by
-`vaire-spark/src/test/scala/net/ghoula/vaire/spark/XpathDivergenceSpec.scala`.
-
-The ticket should cite the mechanism as confirmed by source inspection and standalone
-reproduction: `UDFXPathUtil` never enables namespace processing, and the resulting DOM has
-null `localName` and `namespaceURI` for every element. The one point to state as
-uncertain is intent: the class does not say whether the omission is deliberate, and no
-Spark discussion records a decision.
-
 ## Backend claims
 
 Rejection claims outside the XPath divergence — aggregations, window functions, datasketches,
 AES, generator expressions and the rest — are summarised in
 [`backend-claims.md`](backend-claims.md). The authoritative message list is
-[`backend-claims.json`](../backend-claims.json). This document owns the XPath divergence and the
-upstream record.
+[`backend-claims.json`](../backend-claims.json). This document owns the XPath divergence.

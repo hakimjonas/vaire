@@ -11,13 +11,13 @@ this index was revised.
 
 ## Documents
 
-| Document | Audience | Status | Purpose |
-|---|---|---|---|
-| [`backend-claims.md`](backend-claims.md) | user; contributor for internal sections | current | Which constructs each backend rejects, and the test that pins each rejection |
-| [`ci.md`](ci.md) | contributor | current | Test tiers, gates, memory model, local runs |
-| [`error-policy-design.md`](error-policy-design.md) | contributor | current | Per-row error policy design and the shipped E1–E3 decisions |
-| [`xpath-divergence.md`](xpath-divergence.md) | user; contributor for internal sections | authoritative | The XPath divergence, which backend to trust, and the upstream record |
-| `README.md` (this file) | contributor | current | The index and the convention below |
+| Document | Audience | Status |
+|---|---|---|
+| [`backend-claims.md`](backend-claims.md) | user | current |
+| [`ci.md`](ci.md) | contributor | current |
+| [`error-policy-design.md`](error-policy-design.md) | contributor | current |
+| [`xpath-divergence.md`](xpath-divergence.md) | user | authoritative |
+| `README.md` (this file) | contributor | current |
 
 ## Status vocabulary
 
@@ -34,12 +34,9 @@ this index was revised.
   boundaries. A new user-facing divergence belongs in the document that owns that subject, not
   in a plan or a ledger.
 - **contributor** — CI, design rationale, conventions, and how to change the code.
-- **internal** — coverage ledgers and filing records. These are bookkeeping, not product
-  documentation.
 
-A document with more than one audience states both on its `Audience:` line and marks the
-internal parts with `Internal:` in the section heading. A new document must name its audience
-and status here before it is added; a document with no audience is not a document.
+A new document must name its audience and status here before it is added; a document with no
+audience is not a document.
 
 ## Plans
 
@@ -53,7 +50,7 @@ Every file in `docs/` starts with its title, then:
 
 ```
 Status: authoritative | current | historical
-Audience: user | contributor | internal, and any mixed audience.
+Audience: user | contributor
 ```
 
 A missing or invented status word is a documentation defect.

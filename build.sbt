@@ -184,10 +184,14 @@ lazy val docTool = project
 addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; Test/compile")
 addCommandAlias(
   "check",
-  "docCoverage; referenceCheck; claimLedger; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
+  "docCoverage; indexCheck; referenceCheck; claimLedger; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
 )
 addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull; docTool/Test/testFull")
 addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.vaire.Slow")
+addCommandAlias(
+  "indexCheck",
+  "docTool/runMain net.ghoula.vaire.doctool.IndexCheckMain"
+)
 addCommandAlias(
   "referenceCheck",
   "docTool/runMain net.ghoula.vaire.doctool.ReferenceCheckMain"

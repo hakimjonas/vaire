@@ -194,10 +194,21 @@ Spark 4.2.0, `local[2]`, forked test JVM heap `-Xmx4G`, host DRAM 186 GiB total,
 classpath and are now pinned as assertions in `XpathDivergenceSpec`. No production code
 changed to produce them.
 
-## Out-of-scope stale reference
+## Unpinned backend claims outside xpath
 
-`Expr.Xpath`'s scaladoc in `vaire-core/src/main/scala/net/ghoula/vaire/expr/Expr.scala` still
-says documents with a DTD are not parseable by the in-memory parser. That is false:
-`XpathDivergenceSpec` pins internal-subset entity expansion on both backends. This increment's
-scope excluded `src/main`, so the sentence is unchanged and remains to be corrected in a
-follow-up.
+The prose audit of 2026-10-21 also checked the runtime `UnsupportedOperation` messages in
+`ExprInterpreter` that make backend-behaviour claims. The code emits each message, but no test
+asserts every member of the listed group. Adding tests is out of scope for this increment; the
+gaps are recorded here and the claims are unchanged.
+
+- `Aggregations not supported in columnar evalColumn`: `Variance` and `VariancePop` are pinned
+  by `ExprMathDateSpec`. `AnyValue`, `BoolAnd`, `BoolOr`, `Corr`, `CovarSamp`, `CovarPop`,
+  `Median` and `Mode` are not.
+- `Window functions not supported in columnar evalColumn`: `NTile`, `CumeDist` and
+  `PercentRank` are pinned by `ExprMathDateSpec`. `RowNumber`, `Rank`, `DenseRank`, `Lag`,
+  `Lead`, `NthValue`, `FirstValue` and `LastValue` are not.
+- `Datasketches and current_path are Spark-only`: `SparkOnlySpec` pins the KLL aggregate and
+  getN cases, the tuple aggregate/estimate/theta cases, and `current_path`. The remaining
+  sketch cases are not asserted unsupported in memory.
+- `AES functions use Spark's key-derivation and cipher format`: no test. `CryptoParitySpec`
+  covers the non-AES hash functions only.

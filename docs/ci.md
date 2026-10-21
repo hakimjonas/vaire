@@ -71,6 +71,15 @@ when a new rejection site appears without an entry. The ledger states the propos
 building it is a separate change. A maintainer adding a rejection site updates the ledger in the
 same change.
 
+## Document reference check
+
+`referenceCheck` (part of `check`) scans every tracked text file for path-shaped document
+references: backticked tokens containing `/` and ending in a document extension, plus Markdown
+link targets. A reference must resolve from the repository root or from the containing file; the
+gate prints the file, line and target for each failure. It covers path-shaped references only.
+Prose that names a document without a path — “the handover”, “the plan” — is not mechanically
+detectable and remains a review responsibility.
+
 ## Comet coverage gate
 
 Comet is a Spark plugin, so Vairë has no compile-time dependency on it: it is switched on entirely

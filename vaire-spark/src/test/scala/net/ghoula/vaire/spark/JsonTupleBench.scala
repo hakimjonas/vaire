@@ -15,16 +15,18 @@ import parsers.json.parseJson
 
 /** json_tuple representation benchmark — the measurement behind the representation decision.
   *
-  * Compares, per the handover:
+  * Compares:
   *   - In-memory: candidate A = per-row `Seq` of extracted values stored boxed in `AnyColumn`;
   *     candidate B = a `StructColumn` with one StringColumn per requested key (dynamic Schema).
   *     Timed separately: evaluation (parse + extraction) and row access (getValue over all rows).
   *     Retained heap measured around a fresh build (ZGC: indicative, not exact).
   *   - Spark: native `json_tuple(...)` (struct output, legal only as a lone top-level generator) vs
-  *     `array(...)` of per-key `get_json_object`. The handover's `array(json_tuple(...).getField)`
-  *     unwrapping is *illegal* — Spark rejects generators nested in any expression
-  *     (UNSUPPORTED_GENERATOR.NESTED_IN_EXPRESSIONS) — so `get_json_object` is the only mapping
-  *     that composes with Vairë's single-projection `df.select(columns*)` model.
+  *     `array(...)` of per-key `get_json_object`. The `array(json_tuple(...).getField)` unwrapping
+  *     is *illegal* — Spark 4.2 rejects generators nested in any expression with
+  *     `UNSUPPORTED_GENERATOR.NESTED_IN_EXPRESSIONS` (verified 2026-10-21) — and its field access
+  *     is unreliable because `json_tuple` names the output fields `c0`, `c1`, not the requested
+  *     keys. `get_json_object` is the only mapping that composes with Vairë's single-projection
+  *     `df.select(columns*)` model.
   *
   * Shapes: 1/3/8 requested keys over narrow 8-field objects, 3 keys over a 64-field wide object,
   * and 3 keys over an 8-level nested document. ~1% null rows.
@@ -49,16 +51,15 @@ import parsers.json.parseJson
   *   json_tuple on compound values (null vs JSON text).
   * }}}
   *
-  * Decision (recorded for the parity handover): representation A — `Expr[Row, Seq[String | Null]]`
-  * with values boxed in AnyColumn, Spark mapping `array(get_json_object(col, "$['key']"))`.
-  * Criterion (b): the common case is a handful of keys where in-memory eval is parse-dominated and
-  * the two representations are indistinguishable. Criterion (c): no new column variants, no
-  * dynamic-shape Schema machinery, and the Spark mapping is equal to native json_tuple for the
-  * value kinds verified against Spark 4.2 (strings, booleans, compounds -> JSON text, JSON null,
-  * absent keys, dotted keys, invalid JSON, null rows). Number formatting diverges on edge-case
-  * doubles (pre-existing GetJsonObject gap; follow-up filed for JsonValue raw tokens) and keys
-  * mixing a single quote with a dot or bracket are unaddressable on Spark — see JsonTupleParitySpec
-  * for the pinned divergences.
+  * Decision (recorded here): representation A — `Expr[Row, Seq[String | Null]]` with values boxed
+  * in AnyColumn, Spark mapping `array(get_json_object(col, "$['key']"))`. Criterion (b): the common
+  * case is a handful of keys where in-memory eval is parse-dominated and the two representations
+  * are indistinguishable. Criterion (c): no new column variants, no dynamic-shape Schema machinery,
+  * and the Spark mapping is equal to native json_tuple for the value kinds verified against Spark
+  * 4.2 (strings, booleans, compounds -> JSON text, JSON null, absent keys, dotted keys, invalid
+  * JSON, null rows). Number formatting diverges on edge-case doubles (pre-existing GetJsonObject
+  * gap; follow-up filed for JsonValue raw tokens) and keys mixing a single quote with a dot or
+  * bracket are unaddressable on Spark — see JsonTupleParitySpec for the pinned divergences.
   */
 class JsonTupleBench extends AnyFlatSpec with Matchers with SparkTestBase {
 

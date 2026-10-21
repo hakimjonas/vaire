@@ -7,7 +7,7 @@ restate the cases.
 The affected expressions are the eight strict cases `Expr.Xpath`, `XpathString`,
 `XpathBoolean`, `XpathShort`, `XpathInt`, `XpathLong`, `XpathFloat` and `XpathDouble`.
 The eight `TryXpath*` cases are a separate capability gap, covered in
-[TryXpath* has no Spark implementation](#tryxpath-has-no-spark-implementation).
+[TryXpath* open question](#tryxpath-open-question).
 
 ## The divergence
 
@@ -113,19 +113,11 @@ not changed to reproduce Spark's results. Two reasons:
 The `*:b` extension stays as it is. It is not part of the XPath 1.0 conformance claim and
 is not a candidate for removal in this increment.
 
-## TryXpath* has no Spark implementation
+## TryXpath* open question
 
-The eight `TryXpath*` cases return
-`ExecutionError.UnsupportedOperation("<fn> requires the in-memory interpreter")` from
-`ExprToColumn.tryXpathUnsupported`. A per-row XML parse failure throws inside Spark's
-`xpath` implementation, and Spark's `Column` model has no combinator that catches a
-per-row exception, so the try semantics (null row instead of failed query) cannot be
-expressed in a Catalyst expression.
-
-This is a capability gap, not an evaluation divergence. It is recorded here because the
-README names it alongside the namespace divergence.
-
-### Open question: keep or replace the Spark rejection
+The eight `TryXpath*` cases are rejected on Spark; the rejection claim, its mechanism and its
+test are recorded in [`backend-claims.md`](backend-claims.md). Whether that rejection stays is
+open.
 
 Not decided, and not implemented in this increment.
 
@@ -194,21 +186,9 @@ Spark 4.2.0, `local[2]`, forked test JVM heap `-Xmx4G`, host DRAM 186 GiB total,
 classpath and are now pinned as assertions in `XpathDivergenceSpec`. No production code
 changed to produce them.
 
-## Unpinned backend claims outside xpath
+## Backend claims
 
-The prose audit of 2026-10-21 also checked the runtime `UnsupportedOperation` messages in
-`ExprInterpreter` that make backend-behaviour claims. The code emits each message, but no test
-asserts every member of the listed group. Adding tests is out of scope for this increment; the
-gaps are recorded here and the claims are unchanged.
-
-- `Aggregations not supported in columnar evalColumn`: `Variance` and `VariancePop` are pinned
-  by `ExprMathDateSpec`. `AnyValue`, `BoolAnd`, `BoolOr`, `Corr`, `CovarSamp`, `CovarPop`,
-  `Median` and `Mode` are not.
-- `Window functions not supported in columnar evalColumn`: `NTile`, `CumeDist` and
-  `PercentRank` are pinned by `ExprMathDateSpec`. `RowNumber`, `Rank`, `DenseRank`, `Lag`,
-  `Lead`, `NthValue`, `FirstValue` and `LastValue` are not.
-- `Datasketches and current_path are Spark-only`: `SparkOnlySpec` pins the KLL aggregate and
-  getN cases, the tuple aggregate/estimate/theta cases, and `current_path`. The remaining
-  sketch cases are not asserted unsupported in memory.
-- `AES functions use Spark's key-derivation and cipher format`: no test. `CryptoParitySpec`
-  covers the non-AES hash functions only.
+Rejection claims outside the XPath divergence — aggregations, window functions, datasketches,
+AES, generator expressions and the rest — are enumerated with their tests in
+[`backend-claims.md`](backend-claims.md). That document owns the coverage table; this one owns
+the XPath divergence and the upstream record.

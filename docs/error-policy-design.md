@@ -1,15 +1,16 @@
 # Vairë error policy — fail-fast, Collect, and quarantine
 
-Design document for per-row error handling policy in the in-memory interpreter.
-Companion to the parity plan (`vaire-spark-4.2-parity-plan.md`) and the handover
-(`vaire-parity-handover-2.md`); grew out of the error-model discussion on the
-`xpath*` work (PR #8), where the strict/try split raised the general question:
-**who decides what a single bad row costs?**
+Status: current
+Audience: contributor.
+
+Design document for per-row error handling policy in the in-memory interpreter. Grew out of the
+error-model discussion on the `xpath*` work (PR #8), where the strict/try split raised the general
+question: **who decides what a single bad row costs?**
 
 > **Decisions recorded (2026-09-01, operator):** result shape = separate
 > `evalColumnCollect` entry point; quarantine = separate method (E3); `maxErrors`
 > default = 100; input previews = `Off` (Collect) / `Truncated(120)` (quarantine).
-> Status: E1 shipped (`ErrorPolicy`, `evalColumnCollect`, `RowErrors`,
+> Delivery: E1 shipped (`ErrorPolicy`, `evalColumnCollect`, `RowErrors`,
 > `ErrorPolicySpec`); E2 shipped (`Dataset.WithPolicy` via `ds.withErrorPolicy`,
 > `executeCollect` on `Interpreter`/`DatasetInterpreter`/`DatasetActions`,
 > `CollectedDataset`, dataset-level specs — the plain `execute` path and Spark

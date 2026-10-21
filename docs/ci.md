@@ -1,5 +1,8 @@
 # CI and testing strategy
 
+Status: current
+Audience: contributor.
+
 Vairë's test suite is split into three tiers so the pull-request gate stays fast and
 memory-frugal on shared CI, while the heavy suites still run somewhere.
 
@@ -7,9 +10,9 @@ memory-frugal on shared CI, while the heavy suites still run somewhere.
 
 | Tier | Scope | Where | Trigger |
 |---|---|---|---|
-| Fast (PR gate) | `check` + `testAll` with `Slow` excluded | `ci.yml` | every push / PR |
-| Slow | 5M-row stress + TPC-H end-to-end (`Slow`-tagged) | `stress.yml` | scheduled (weekly) + manual |
-| Comet coverage | generated-plan Comet operator inventory ratchet | `scripts/comet-bench.sh check` in `comet.yml` | scheduled (weekly) + manual |
+| Fast (PR gate) | `check` + `testAll` with `Slow` excluded | `.github/workflows/ci.yml` | every push / PR |
+| Slow | 5M-row stress + TPC-H end-to-end (`Slow`-tagged) | `.github/workflows/stress.yml` | scheduled (weekly) + manual |
+| Comet coverage | generated-plan Comet operator inventory ratchet | `scripts/comet-bench.sh check` in `.github/workflows/comet.yml` | scheduled (weekly) + manual |
 | Benchmark | micro-benchmarks (`Benchmark`-tagged) | excluded from CI | `BenchRunner` / local only |
 
 ## Why not run everything on every push?
@@ -22,14 +25,14 @@ memory-frugal on shared CI, while the heavy suites still run somewhere.
   running it on every push would burn shared-runner minutes for no additional signal.
 - **Resource fairness.** Shared CI runners (GitHub-hosted, and Codeberg before it) are
   metered. Oversized heaps are antisocial and an OOM/eviction accident waiting to happen.
-  CI heaps are right-sized; local development keeps the larger `.jvmopts`.
+  CI heaps are right-sized; local development keeps the larger local `.jvmopts` copied from `.jvmopts.example`.
 
 ## Memory model
 
 | Context | sbt JVM | forked test JVM |
 |---|---|---|
-| `ci.yml` (fast) | 3G | 4G |
-| `stress.yml` / `release.yml` (slow) | 3G | 4G |
+| `.github/workflows/ci.yml` (fast) | 3G | 4G |
+| `.github/workflows/stress.yml` / `.github/workflows/release.yml` (slow) | 3G | 4G |
 
 The fork heap is a fixed `-Xmx4G` (the 5M stress suite needs it; the fast suites use far less
 but the ceiling is only a maximum, and ZGC commits only what it uses). The sbt heap comes from
@@ -59,6 +62,14 @@ or a doc removed). Documenting members never fails.
 sbt docCoverage            # ratchet check (also runs as part of check)
 sbt docCoverageSnapshot    # regenerate the baseline after intentional doc work
 ```
+
+## Claims coverage ledger
+
+`docs/backend-claims.md` records every expression or dataset-transformation rejection in both
+modules and the test that pins it. Unlike `doc-coverage.json`, it is not a gate: nothing fails
+when a new rejection site appears without an entry. The ledger states the proposed drift check;
+building it is a separate change. A maintainer adding a rejection site updates the ledger in the
+same change.
 
 ## Comet coverage gate
 
@@ -108,7 +119,7 @@ re-snapshotted deliberately. The baseline also records the Comet jar filename an
 it compares inventories only.
 
 Because the gate needs Docker, the Spark 4.2.0 image, and the pinned Comet snapshot, it does not
-run in `ci.yml`. It runs from `comet.yml` on a weekly schedule and on `workflow_dispatch`.
+run in `.github/workflows/ci.yml`. It runs from `.github/workflows/comet.yml` on a weekly schedule and on `workflow_dispatch`.
 
 Three points are printed by the harness and matter when reading it:
 

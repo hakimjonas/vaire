@@ -1,6 +1,13 @@
 # Join optimization plan
 
+Status: historical
+Audience: internal.
+
 Take-home work plan for improving the in-memory join operators in `vaire-core`. Written after an algorithmic review of the current join implementations (September 2026). Phases are self-contained; Phase 0 must come first, but Phases 1–3 can be done one at a time or in any order after 0.
+
+All phases were delivered by September 2026. Phase 3a was implemented, measured and dropped;
+3b and 3c stand. The plan is kept because `KeyedJoin.scala` cites it and because the Phase 0/1
+benchmark tables are the only record of those measurements. It is not a current work plan.
 
 All line references are to `vaire-core/src/main/scala/net/ghoula/vaire/` as of `main`; verify line numbers when implementing.
 
@@ -26,7 +33,7 @@ The boxing issue compounds both: keys and rows travel as boxed `Any` through `ge
 
 ### Tests and benchmarks today
 
-- Functional correctness: `test/scala/net/ghoula/vaire/DatasetJoinSpec.scala`, `SemiJoinSpec.scala`.
+- Functional correctness: `vaire-core/src/test/scala/net/ghoula/vaire/DatasetJoinSpec.scala`, `SemiJoinSpec.scala`.
 - No join benchmark existed anywhere.
 
 ---
@@ -35,7 +42,7 @@ The boxing issue compounds both: keys and rows travel as boxed `Any` through `ge
 
 **Goal:** establish the current performance curve so every later phase has a before/after. Skew must be represented, or the contended (boxed, log-factor) path stays invisible.
 
-Create `vaire-core/src/test/scala/net/ghoula/vaire/interpreter/JoinOperationsBench.scala` (or alongside `ColumnOperationsBench` if that lives in spark; keep core benchmarks in core). Do not commit benchmark time assertions as pass/fail tests — benchmarks report; correctness stays in the existing specs.
+The benchmark lives at `vaire-spark/src/test/scala/net/ghoula/vaire/spark/JoinOperationsBench.scala` (the delivered location; it exercises the core join code from the Spark test module). Do not commit benchmark time assertions as pass/fail tests — benchmarks report; correctness stays in the existing specs.
 
 Sweep across:
 
@@ -308,7 +315,7 @@ Each phase is verifiable on its own. Keep the Phase 0 bench committed before and
 
 ## Artifacts to produce
 
-- `interpreter/JoinOperationsBench.scala` (Phase 0).
+- `vaire-spark/src/test/scala/net/ghoula/vaire/spark/JoinOperationsBench.scala` (Phase 0).
 - Keyed-index rework in `DatasetInterpreter.scala` (`buildKeyIndex`, `probeJoinOnKeys`, join case handlers) — Phase 1.
 - `JoinOps.fullJoin` / `outerJoinDatasets` / `innerJoinDatasets` / `leftAntiJoinDatasets` — Phase 2.
 - Size-aware indexing + join-direction `PropertySpec` + README claim edit — Phase 3.

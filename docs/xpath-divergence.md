@@ -1,5 +1,8 @@
 # XPath divergence between the in-memory engine and Spark
 
+Status: authoritative
+Audience: user; the Internal sections are for maintainers.
+
 This is the single statement of how Vairë's `xpath*` family differs between the in-memory
 interpreter and the Spark backend. The test suites and the README point here; they do not
 restate the cases.
@@ -7,7 +10,7 @@ restate the cases.
 The affected expressions are the eight strict cases `Expr.Xpath`, `XpathString`,
 `XpathBoolean`, `XpathShort`, `XpathInt`, `XpathLong`, `XpathFloat` and `XpathDouble`.
 The eight `TryXpath*` cases are a separate capability gap, covered in
-[TryXpath* open question](#tryxpath-open-question).
+[TryXpath* open question](#internal-tryxpath-open-question).
 
 ## The divergence
 
@@ -113,7 +116,7 @@ not changed to reproduce Spark's results. Two reasons:
 The `*:b` extension stays as it is. It is not part of the XPath 1.0 conformance claim and
 is not a candidate for removal in this increment.
 
-## TryXpath* open question
+## Internal: TryXpath* open question
 
 The eight `TryXpath*` cases are rejected on Spark; the rejection claim, its mechanism and its
 test are recorded in [`backend-claims.md`](backend-claims.md). Whether that rejection stays is
@@ -135,7 +138,7 @@ visible performance cost, with semantics identical to the in-memory engine. The 
 new execution path, a changed public failure mode, and the risk of exhausting driver memory
 on large inputs.
 
-## Upstream status
+## Internal: upstream status
 
 No evidence that Spark has examined this behaviour, as of 2026-10-21.
 
@@ -150,7 +153,7 @@ No evidence that Spark has examined this behaviour, as of 2026-10-21.
   do show continued activity in the XPath code, so the committers who review changes in this
   area are identifiable.
 
-### Record for filing
+### Internal: record for filing
 
 File this as a defect with a reproducer, not as a feature request. A request to "support
 XML namespaces" invites a scope and policy discussion and will stall; a wrong `xpath_string`
@@ -179,7 +182,7 @@ null `localName` and `namespaceURI` for every element. The one point to state as
 uncertain is intent: the class does not say whether the omission is deliberate, and no
 Spark discussion records a decision.
 
-### How the values were verified
+### Internal: how the values were verified
 
 Spark 4.2.0, `local[2]`, forked test JVM heap `-Xmx4G`, host DRAM 186 GiB total, on
 2026-10-21. The values in the table were produced by a one-off probe on the Spark test

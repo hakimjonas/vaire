@@ -74,6 +74,12 @@ object CometBench {
   private val DriverCollectScale: Long =
     csvProp("vaire.bench.driver.scale", Vector(200_000L)).head
 
+  /** `collect_ms` is a continuity column retained from 789235e8. It materialises the whole result
+    * on the driver, so it is measured only when explicitly enabled; off by default.
+    */
+  private val CollectEnabled: Boolean =
+    sys.props.get("vaire.bench.collect").contains("1")
+
   /** Parse a comma-separated list of sizes from a system property, for smoke runs. The defaults are
     * the sizes the harness reports.
     */
@@ -191,12 +197,15 @@ object CometBench {
   )
   given wideWindowedSchema: Schema[WideWindowed] = Schema.derived
 
-  /** A distributed plan and the extra arguments its measurement needs. */
+  /** A distributed plan and the extra arguments its measurement needs. `project` maps one raw row
+    * to its digest row; `check` builds a fresh streaming assertion accumulator per pass. Neither
+    * materialises the result.
+    */
   private final case class DistributedPlan(
     id: String,
     build: () => DataFrame,
-    project: Array[Row] => Array[Row] = rows => rows,
-    check: Array[Row] => Option[String] = _ => None,
+    project: Row => Row = identity,
+    check: () => RowCheck = () => RowCheck.NoCheck,
     asserted: Boolean = false
   )
 
@@ -207,7 +216,7 @@ object CometBench {
   private def narrowPlans(bench: Bench): Vector[DistributedPlan] = Vector(
     DistributedPlan("filter-groupby", () => bench.filterGroupBy),
     DistributedPlan("join-on", () => bench.joinOn),
-    DistributedPlan("window", () => bench.window, windowDigestRows, rowNumberPermutation, asserted = true),
+    DistributedPlan("window", () => bench.window, windowDigest, () => new WindowPermutation(3), asserted = true),
     DistributedPlan("sort-limit", () => bench.sortLimit),
     DistributedPlan("distinct", () => bench.distinct),
     DistributedPlan("aggregate", () => bench.aggregate),
@@ -223,8 +232,8 @@ object CometBench {
     DistributedPlan(
       "wide-window",
       () => bench.wideWindow,
-      wideWindowDigestRows,
-      wideRowNumberPermutation,
+      wideWindowDigest,
+      () => new WindowPermutation(9),
       asserted = true
     ),
     DistributedPlan("wide-sort-limit", () => bench.wideSortLimit),
@@ -241,6 +250,10 @@ object CometBench {
     narrowPlans(bench) ++ widePlans(bench)
 
   def main(args: Array[String]): Unit = {
+    if (sys.props.get("vaire.bench.hashing.selfcheck").contains("1")) {
+      hashingSelfCheck()
+      return
+    }
     val root = sys.props.get("vaire.bench.dir").getOrElse("/tmp/vaire-comet")
     val spark = newSession()
     try {
@@ -586,53 +599,139 @@ object CometBench {
     path
   }
 
-  /** Pay the JVM's first-block cost at a scale before its reported block. Timing only: both actions
-    * run once, the results are discarded, and the lines carry a prefix the extraction ignores.
+  /** Pay the JVM's first-block cost at a scale before its reported block. Timing only: the noop
+    * write, the streaming digest pass and the plan inspection each run once, and the lines carry a
+    * prefix the extraction ignores.
     */
   private def runWarmup(spark: SparkSession, root: String, scale: Long): Unit = {
     val bench = new Bench(spark, root, scale)
     distributedPlans(bench).foreach { p =>
       val df = p.build()
-      val c0 = System.nanoTime()
-      val rows = df.collect()
-      val c1 = System.nanoTime()
       val e0 = System.nanoTime()
       df.write.format("noop").mode("overwrite").save()
       val e1 = System.nanoTime()
+      streamResult(df, p.project, p.check()) // warm the streaming pass too; not reported
       cometOperators(df) // warm plan inspection too; not reported
-      println(
-        s"##WARMUP plan=${p.id} scale=$scale collect_ms=${fmtMs((c1 - c0) / 1e6)} exec_ms=${fmtMs((e1 - e0) / 1e6)} rows=${rows.length}"
-      )
+      println(s"##WARMUP plan=${p.id} scale=$scale exec_ms=${fmtMs((e1 - e0) / 1e6)}")
     }
+  }
+
+  /** A streaming row assertion: `observe` is called once per row and `result` once afterwards. */
+  private trait RowCheck {
+    def observe(row: Row): Unit
+    def result(): Option[String]
+  }
+
+  private object RowCheck {
+    val NoCheck: RowCheck = new RowCheck {
+      def observe(row: Row): Unit = ()
+      def result(): Option[String] = None
+    }
+  }
+
+  /** `rowNum` must be a permutation of `1..n` within each `key` partition. Tracks, per key, the row
+    * count and a bitset over the observed `rowNum` values; the total number of bits is bounded by
+    * the row count, so a 5M-row plan costs about 625 KB rather than a per-row map.
+    */
+  private final class WindowPermutation(rowNumIndex: Int) extends RowCheck {
+    private val counts = mutable.HashMap.empty[Long, Int]
+    private val bits = mutable.HashMap.empty[Long, java.util.BitSet]
+
+    def observe(row: Row): Unit = {
+      val key = row.getLong(0)
+      val n = row.getInt(rowNumIndex)
+      counts.update(key, counts.getOrElse(key, 0) + 1)
+      bits.getOrElseUpdate(key, new java.util.BitSet()).set(n)
+    }
+
+    def result(): Option[String] =
+      counts.iterator.collectFirst {
+        case (key, n) if { val b = bits(key); b.cardinality() != n || b.length() > n + 1 } =>
+          s"key=$key rowNum is not a permutation of 1..$n"
+      }
+  }
+
+  /** Order-independent, duplicate-sensitive multiset hash: the 256-bit sum of the per-row SHA-256
+    * digests, one 64-bit word each. Addition is commutative, so the value depends only on the
+    * multiset of rows; it replaces the sort the previous digest required.
+    */
+  private final class MultisetHash {
+    private val accumulator = new Array[Long](4)
+    private var observed = 0L
+
+    def add(digest: Array[Byte]): Unit = {
+      var word = 0
+      while (word < 4) {
+        var value = 0L
+        var byteIndex = 0
+        while (byteIndex < 8) {
+          value = (value << 8) | (digest(word * 8 + byteIndex) & 0xffL)
+          byteIndex += 1
+        }
+        accumulator(word) += value
+        word += 1
+      }
+      observed += 1
+    }
+
+    def rows: Long = observed
+    def value: String = accumulator.iterator.map(w => f"$w%016x").mkString
   }
 
   /** `(key, value, rnk)` — invariant under the tie order `row_number` assigns. `rnkIndex` locates
     * `rnk` in the output row (4 for the narrow [[Windowed]], 10 for the wide [[WideWindowed]]).
     */
-  private def windowDigestAt(rnkIndex: Int)(rows: Array[Row]): Array[Row] =
-    rows.map(r => Row(r.getLong(0), r.getInt(1), r.getInt(rnkIndex)))
+  private def windowDigestAt(rnkIndex: Int)(row: Row): Row =
+    Row(row.getLong(0), row.getInt(1), row.getInt(rnkIndex))
 
-  private def windowDigestRows(rows: Array[Row]): Array[Row] = windowDigestAt(4)(rows)
+  private def windowDigest: Row => Row = windowDigestAt(4)
 
-  private def wideWindowDigestRows(rows: Array[Row]): Array[Row] = windowDigestAt(10)(rows)
+  private def wideWindowDigest: Row => Row = windowDigestAt(10)
 
-  /** `rowNum` must be a permutation of `1..n` within each `key` partition. */
-  private def rowNumberPermutationAt(rowNumIndex: Int)(rows: Array[Row]): Option[String] = {
-    val byKey = mutable.HashMap.empty[Long, mutable.ArrayBuffer[Int]]
-    var i = 0
-    while (i < rows.length) {
-      byKey.getOrElseUpdate(rows(i).getLong(0), mutable.ArrayBuffer.empty) += rows(i).getInt(rowNumIndex)
-      i += 1
+  /** One streaming pass over the result: hash each projected row into the multiset accumulator and
+    * feed each raw row to the streaming check. Peak driver memory is O(1) rows; nothing is
+    * collected. This is instrumentation, run outside every timed region.
+    */
+  private def streamResult(
+    df: DataFrame,
+    project: Row => Row,
+    check: RowCheck
+  ): (String, Long, Option[String]) = {
+    val md = MessageDigest.getInstance("SHA-256")
+    val hash = new MultisetHash
+    val iterator = df.toLocalIterator()
+    while (iterator.hasNext) {
+      val row = iterator.next()
+      hash.add(md.digest(canonicalRow(project(row)).getBytes(StandardCharsets.UTF_8)))
+      check.observe(row)
     }
-    byKey.iterator.collectFirst {
-      case (key, nums) if nums.sorted != (1 to nums.length).toVector =>
-        s"key=$key rowNum is not a permutation of 1..${nums.length}"
-    }
+    (hash.value, hash.rows, check.result())
   }
 
-  private def rowNumberPermutation(rows: Array[Row]): Option[String] = rowNumberPermutationAt(3)(rows)
-
-  private def wideRowNumberPermutation(rows: Array[Row]): Option[String] = rowNumberPermutationAt(9)(rows)
+  /** Order-independence and change-sensitivity self-check for [[MultisetHash]], run from `main`
+    * when `-Dvaire.bench.hashing.selfcheck=1` is set.
+    */
+  private def hashingSelfCheck(): Unit = {
+    def accumulate(rows: Vector[Row]): String = {
+      val md = MessageDigest.getInstance("SHA-256")
+      val hash = new MultisetHash
+      rows.foreach(row => hash.add(md.digest(canonicalRow(row).getBytes(StandardCharsets.UTF_8))))
+      hash.value
+    }
+    val a = Row(1L, "x")
+    val b = Row(2L, "y")
+    val c = Row(3L, "z")
+    val inOrder = accumulate(Vector(a, b, c))
+    val shuffled = accumulate(Vector(c, a, b))
+    val changed = accumulate(Vector(a, b, Row(3L, "Z")))
+    val duplicated = accumulate(Vector(a, b, c, c))
+    println(s"##HASHSELF order_independent=${inOrder == shuffled} change_sensitive=${inOrder != changed}")
+    println(s"##HASHSELF duplicate_sensitive=${inOrder != duplicated}")
+    println(s"##HASHSELF in_order=$inOrder")
+    println(s"##HASHSELF shuffled=$shuffled")
+    println(s"##HASHSELF changed=$changed")
+    println(s"##HASHSELF duplicated=$duplicated")
+  }
 
   private def fmtMs(value: Double): String =
     "%.1f".formatLocal(java.util.Locale.ROOT, value)
@@ -647,42 +746,47 @@ object CometBench {
     id: String,
     scale: Long,
     plan: () => DataFrame,
-    project: Array[Row] => Array[Row] = rows => rows,
-    check: Array[Row] => Option[String] = _ => None,
+    project: Row => Row = identity,
+    check: () => RowCheck = () => RowCheck.NoCheck,
     asserted: Boolean = false
   ): Unit = {
     println(s"##PLAN-BEGIN plan=$id scale=$scale")
     val df = plan()
-    var lastRows: Array[Row] | Null = null
-    val collectSamples = new Array[Double](Warmup + Measured)
+    // Primary metric: force the whole plan with a noop write. Nothing is returned to the driver.
     val execSamples = new Array[Double](Warmup + Measured)
     var i = 0
     while (i < Warmup + Measured) {
-      lastRows = null // release the previous run's result before collecting the next
-      val c0 = System.nanoTime()
-      val collected = df.collect()
-      val c1 = System.nanoTime()
-      collectSamples(i) = (c1 - c0) / 1e6
-      // Force the same plan without materialising it on the driver. The noop data source runs the
-      // whole query and returns nothing.
       val e0 = System.nanoTime()
       df.write.format("noop").mode("overwrite").save()
       val e1 = System.nanoTime()
       execSamples(i) = (e1 - e0) / 1e6
-      lastRows = collected
       i += 1
     }
-    val rows = lastRows.nn
-    val collectMeasured = collectSamples.drop(Warmup)
     val execMeasured = execSamples.drop(Warmup)
-    val digest = digestOf(project(rows))
+    // Instrumentation, outside every timed region: one streaming pass supplies the digest, the row
+    // count and the window check without materialising the result.
+    val (digest, rowCount, checkResult) = streamResult(df, project, check())
+    // collect_ms is a continuity column; measured only when explicitly enabled.
+    val collectText =
+      if (CollectEnabled) {
+        val collectSamples = new Array[Double](Warmup + Measured)
+        var j = 0
+        while (j < Warmup + Measured) {
+          val c0 = System.nanoTime()
+          df.collect()
+          val c1 = System.nanoTime()
+          collectSamples(j) = (c1 - c0) / 1e6
+          j += 1
+        }
+        summarize("collect", collectSamples.drop(Warmup)) + " "
+      } else ""
     val ops = cometOperators(df)
     val opText = if (ops.isEmpty) "-" else ops.mkString(",")
     println(
-      s"##RESULT plan=$id scale=$scale n=${collectMeasured.length} ${summarize("collect", collectMeasured)} ${summarize("exec", execMeasured)} rows=${rows.length} digest=$digest comet_ops=$opText"
+      s"##RESULT plan=$id scale=$scale n=${execMeasured.length} ${collectText}${summarize("exec", execMeasured)} rows=$rowCount digest=$digest comet_ops=$opText"
     )
     if (asserted) {
-      check(rows) match {
+      checkResult match {
         case Some(message) => println(s"##CHECK plan=$id scale=$scale asserted=true ok=false message=$message")
         case None => println(s"##CHECK plan=$id scale=$scale asserted=true ok=true")
       }
@@ -694,18 +798,6 @@ object CometBench {
       println(physicalPlan(df).replace("\n", "\n##  "))
     }
     println(s"##PLAN-END plan=$id scale=$scale")
-  }
-
-  private def digestOf(rows: Array[Row]): String = {
-    val canonical = rows.iterator.map(canonicalRow).toVector.sorted
-    val md = MessageDigest.getInstance("SHA-256")
-    var i = 0
-    while (i < canonical.length) {
-      md.update(canonical(i).getBytes(StandardCharsets.UTF_8))
-      md.update(0x0a.toByte)
-      i += 1
-    }
-    md.digest().map(b => f"${b & 0xff}%02x").mkString
   }
 
   private def canonicalRow(row: Row): String = {

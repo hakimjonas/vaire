@@ -40,8 +40,14 @@ set -euo pipefail
 #   VAIRE_BENCH_DRIVER_MEMORY  Spark driver heap (default 4g). Raise it for a wider local run.
 #   VAIRE_BENCH_OFFHEAP_SIZE   Spark off-heap size (default 4g).
 #   VAIRE_BENCH_EXECUTOR_OVERHEAD  Spark executor memory overhead (default 2g).
+#   VAIRE_BENCH_COLLECT      set to 1 to also measure collect_ms (default 0). collect_ms
+#                            materialises the whole result on the driver; the default run never does.
 # The three memory settings exist so a local run can raise them without touching this file or the
 # workflow; their defaults are unchanged.
+#
+# Ratchet vs measurement: the digest, row count and window check come from one streaming pass over
+# the result (toLocalIterator), outside every timed region. collect_ms is a continuity column,
+# measured only when VAIRE_BENCH_COLLECT=1, and the collect_ratio column is printed only then.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -53,6 +59,7 @@ FACT_SIZES="${VAIRE_BENCH_FACT_SIZES:-1000000,5000000}"
 DRIVER_MEMORY="${VAIRE_BENCH_DRIVER_MEMORY:-4g}"
 OFFHEAP_SIZE="${VAIRE_BENCH_OFFHEAP_SIZE:-4g}"
 EXECUTOR_OVERHEAD="${VAIRE_BENCH_EXECUTOR_OVERHEAD:-2g}"
+COLLECT_ENABLED="${VAIRE_BENCH_COLLECT:-0}"
 LOG_DIR="$PROJECT_DIR/target/comet-bench-logs"
 WORK_DIR="$LOG_DIR/work-dir"
 BASELINE_FILE="$PROJECT_DIR/comet-coverage.json"
@@ -68,10 +75,12 @@ BENCH_JAR_CONT="/opt/vaire/vaire-spark-bench.jar"
 
 # The ratio uses exec_ms. A plan is overhead-dominated when its Comet-off exec median grows by less
 # than this factor from the smaller to the larger reported scale (its work does not scale). A ratio
-# is printed only when the longer exec median clears RES_MS and the off/on exec sample ranges are
-# disjoint; otherwise the row is `unresolvable`.
+# is printed only when the longer exec median clears RES_MS, the off/on exec sample ranges are
+# disjoint, and the longer arm's sample spread (max - min) is at most SPREAD_FRACTION of its median;
+# the spread bound is the precision criterion (see the rules output for the justification).
 GROWTH_FACTOR=1.5
 RES_MS=50
+SPREAD_FRACTION=0.10
 
 MODE="bench"
 REUSE=0
@@ -161,7 +170,7 @@ run_block() {
     --driver-memory "$DRIVER_MEMORY" \
     --conf spark.ui.enabled=false \
     --conf spark.driver.host=127.0.0.1 \
-    --driver-java-options "${DRIVER_JAVA_OPTIONS[*]} -Dvaire.bench.fact.sizes=$sizes" \
+    --driver-java-options "${DRIVER_JAVA_OPTIONS[*]} -Dvaire.bench.fact.sizes=$sizes -Dvaire.bench.collect=$COLLECT_ENABLED" \
     "${flags[@]}" \
     --class net.ghoula.vaire.spark.CometBench \
     "$BENCH_JAR_CONT" 2>&1 | tee "$log"
@@ -262,7 +271,7 @@ fi
 
 extract_results() {
   awk '/^##RESULT /{
-    plan=""; scale=""; n=""; cmin=""; cmed=""; cmax=""; csmp=""; emin=""; emed=""; emax=""; esmp=""; rows=""; dig=""; ops="";
+    plan=""; scale=""; n=""; cmin="-"; cmed="-"; cmax="-"; csmp="-"; emin=""; emed=""; emax=""; esmp=""; rows=""; dig=""; ops="";
     for (i = 2; i <= NF; i++) {
       k = split($i, p, "=");
       if (k == 2) {
@@ -300,6 +309,13 @@ if grep -q '^##WARMUP' "$LOG_DIR/off.results" "$LOG_DIR/on.results" "$LOG_DIR/of
   "$LOG_DIR/off-rev.results" "$LOG_DIR/on-rev.results" "$LOG_DIR/off-rev-2.results" "$LOG_DIR/on-rev-2.results"; then
   echo "ERROR: ##WARMUP leaked into the extracted results." >&2
   exit 1
+fi
+
+# collect_ms is present in the results only when the run was started with VAIRE_BENCH_COLLECT=1; the
+# extracted collect fields are "-" otherwise.
+COLLECT_MEASURED=0
+if [ "$(awk -F'|' 'NR == 1 { print $4 }' "$LOG_DIR/on.results")" != "-" ]; then
+  COLLECT_MEASURED=1
 fi
 
 # Window the Comet driver log between ##PLAN-BEGIN/##PLAN-END and harvest the `[COMET: ...]`
@@ -407,11 +423,14 @@ echo "Comet native library lines in the control log: $(grep -c 'Comet native lib
 echo "##WARMUP lines (excluded from every table): off=$(grep -c '^##WARMUP' "$LOG_DIR/off.log" || true), on=$(grep -c '^##WARMUP' "$LOG_DIR/on.log" || true)"
 
 echo
+SPREAD_FRACTION_PCT="$(awk -v f="$SPREAD_FRACTION" 'BEGIN { printf "%.0f", f * 100 }')"
 echo "=================== rules ==================="
-echo "ratio column = exec_ms (whole plan forced by a noop write, nothing returned to the driver); collect_ratio is the 789235e8-style collect_ms ratio, shown for continuity only."
+echo "ratio column = exec_ms (whole plan forced by a noop write, nothing returned to the driver)."
 echo "lower bound: exec_ms is a lower bound on Comet's advantage. The noop write carries unaccelerated writer setup and per-row DataWriter cost on BOTH arms, so the exec ratio understates Comet's speed-up rather than being neutral."
 echo "inventory caveat: comet_ops is read from df.queryExecution (the read plan) while exec_ms times the noop write whose child is that plan; the operator inventory describes the read plan, the timing the write plan."
-echo "row decision order: (1) comet_ops=- -> n/a; (2) an order effect on either side -> ratio suppressed; (3) plan overhead-dominated when its Comet-off exec median grows < ${GROWTH_FACTOR}x from the smaller to the larger scale; (4) longer exec median < ${RES_MS} ms -> unresolvable; (5) off/on exec sample ranges disjoint -> off/on ratio, else unresolvable."
+echo "row decision order: (1) comet_ops=- -> n/a; (2) an order effect on either side -> ratio suppressed; (3) plan overhead-dominated when its Comet-off exec median grows < ${GROWTH_FACTOR}x from the smaller to the larger scale; (4) longer exec median < ${RES_MS} ms -> unresolvable (small); (5) off/on exec sample ranges not disjoint -> unresolvable; (6) longer arm's spread > ${SPREAD_FRACTION_PCT}% of its median -> noisy; else the off/on ratio with its interval."
+echo "precision rule: the longer arm's spread (max - min of its exec samples) must be <= ${SPREAD_FRACTION_PCT}% of its median. On the 8g run this separates clean rows from heap-contaminated ones: wide-sort-limit@5M is 0.04 and resolves; wide-join-on@5M is 0.36 and wide-tags-transform@5M is 0.37 and are marked noisy. ${SPREAD_FRACTION_PCT}% sits ~2.5x above the clean rows and ~3.5x below the contaminated ones."
+echo "collect_ratio is the 789235e8-style collect_ms ratio; the column is printed only when the run measured collect_ms (VAIRE_BENCH_COLLECT=1), which materialises the result on the driver."
 echo "instrument rule: a [COMET: ...] reason whose text names WriteFiles/DataWritingCommand/ExecutedCommand/InsertIntoHadoopFsRelation/NoopDataSource/noop is the harness write, counted as instrument=, not reasons=."
 echo "order-effect rule: each order's median and spread are pooled over its two repeats; a side is EFFECT when |default median - reversed median| exceeds the larger of the two orders' pooled spreads (max - min). Rows with magnitude < ${RES_MS} ms are 'small' and not judged."
 
@@ -438,7 +457,7 @@ awk -F'|' -v growth="$GROWTH_FACTOR" '
 echo
 echo "=================== per-plan comparison ==================="
 echo "exec ratio is a lower bound (see rules): the noop write's unaccelerated writer cost sits on both arms."
-awk -F'|' -v growth="$GROWTH_FACTOR" -v resms="$RES_MS" '
+awk -F'|' -v growth="$GROWTH_FACTOR" -v resms="$RES_MS" -v frac="$SPREAD_FRACTION" -v collect="$COLLECT_MEASURED" '
   FNR == NR {
     nf = split($0, f, ";"); split(f[1], ks, "|")
     oe[ks[1] "|" ks[2]] = ((f[5] == "EFFECT" || f[9] == "EFFECT") ? "yes" : "no")
@@ -454,21 +473,37 @@ awk -F'|' -v growth="$GROWTH_FACTOR" -v resms="$RES_MS" '
   { on[$1 "|" $2] = $0 }
   END {
     for (p in smin) if (smax[p] > smin[p]) overhead[p] = (emax_of[p] / emin_of[p] < growth)
-    printf "%-14s %8s | %-20s %-20s | %-24s %-8s %-6s %s\n", "plan", "scale", "off_exec[min,med,max]", "on_exec[min,med,max]", "exec_decision", "col_ratio", "digest", "comet_ops"
+    if (collect == 1)
+      printf "%-14s %8s | %-20s %-20s | %-22s %-8s %-15s %-8s %-6s %s\n", "plan", "scale", "off_exec[min,med,max]", "on_exec[min,med,max]", "exec_decision", "ratio", "ratio_interval", "col_ratio", "digest", "comet_ops"
+    else
+      printf "%-14s %8s | %-20s %-20s | %-22s %-8s %-15s %-6s %s\n", "plan", "scale", "off_exec[min,med,max]", "on_exec[min,med,max]", "exec_decision", "ratio", "ratio_interval", "digest", "comet_ops"
     for (i = 1; i <= n; i++) {
       key = order[i]; split(off[key], o, "|"); split(on[key], onf, "|")
       ops = onf[14]
       mag = (o[9] + 0 > onf[9] + 0) ? o[9] + 0 : onf[9] + 0
       disjoint = (o[8] + 0 > onf[10] + 0) || (onf[8] + 0 > o[10] + 0)
+      if (o[9] + 0 >= onf[9] + 0) { longerMed = o[9] + 0; longerSpread = (o[10] - o[8]) + 0 }
+      else { longerMed = onf[9] + 0; longerSpread = (onf[10] - onf[8]) + 0 }
+      spreadFrac = (longerMed > 0) ? longerSpread / longerMed : 0
+      ratio = "n/a"; interval = "n/a"
       if (ops == "-") decision = "n/a"
       else if (oe[key] == "yes") decision = "order-effect"
       else if (overhead[o[1]]) decision = "overhead-dominated"
       else if (mag < resms) decision = "unresolvable (small)"
-      else if (disjoint) decision = sprintf("%.2fx", o[9] / onf[9])
-      else decision = "unresolvable"
-      cratio = (ops == "-" || oe[key] == "yes") ? "n/a" : sprintf("%.2fx", o[5] / onf[5])
-      printf "%-14s %8s | %5.1f[%5.1f,%6.1f]     %5.1f[%5.1f,%6.1f]     | %-24s %-8s %-6s %s\n",
-        o[1], o[2], o[8], o[9], o[10], onf[8], onf[9], onf[10], decision, cratio, ((o[13] == onf[13]) ? "match" : "MISMATCH"), ops
+      else if (!disjoint) decision = "unresolvable"
+      else if (spreadFrac > frac) decision = "noisy"
+      else {
+        decision = sprintf("%.2fx", o[9] / onf[9])
+        ratio = decision
+        interval = sprintf("[%.2f,%.2f]", o[8] / onf[10], o[10] / onf[8])
+      }
+      cratio = "n/a"
+      if (collect == 1 && ops != "-" && oe[key] != "yes") cratio = sprintf("%.2fx", o[5] / onf[5])
+      dig = (o[13] == onf[13]) ? "match" : "MISMATCH"
+      if (collect == 1)
+        printf "%-14s %8s | %5.1f[%5.1f,%6.1f]     %5.1f[%5.1f,%6.1f]     | %-22s %-8s %-15s %-8s %-6s %s\n", o[1], o[2], o[8], o[9], o[10], onf[8], onf[9], onf[10], decision, ratio, interval, cratio, dig, ops
+      else
+        printf "%-14s %8s | %5.1f[%5.1f,%6.1f]     %5.1f[%5.1f,%6.1f]     | %-22s %-8s %-15s %-6s %s\n", o[1], o[2], o[8], o[9], o[10], onf[8], onf[9], onf[10], decision, ratio, interval, dig, ops
     }
   }' "$LOG_DIR/order-effect.tsv" "$LOG_DIR/off.results" "$LOG_DIR/on.results"
 

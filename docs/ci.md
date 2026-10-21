@@ -88,10 +88,17 @@ scripts/comet-bench.sh check      # run, then ratchet the inventory against the 
 scripts/comet-bench.sh check --reuse   # skip the build and runs; check the last artifacts
 ```
 
-The driver heap and off-heap size default to the recorded values (`4g` and `4g`) and read from
-`VAIRE_BENCH_DRIVER_MEMORY` and `VAIRE_BENCH_OFFHEAP_SIZE`; `VAIRE_BENCH_EXECUTOR_OVERHEAD`
-controls the executor memory overhead (`2g` by default). A local run over the wide table may need a
-larger heap than the CI job; the defaults and `comet.yml` are unchanged.
+The driver heap and off-heap size default to `4g` and `4g` and read from `VAIRE_BENCH_DRIVER_MEMORY`
+and `VAIRE_BENCH_OFFHEAP_SIZE`; `VAIRE_BENCH_EXECUTOR_OVERHEAD` controls the executor memory
+overhead (`2g` by default). The defaults are the ones the scheduled job runs.
+
+The digest, the row count and the window-permutation check come from one streaming pass
+(`df.toLocalIterator`), not from `df.collect()`: each projected row is hashed into an
+order-independent 256-bit multiset accumulator and the window check keeps a per-key count and a
+bitset bounded by the row count. A default run therefore holds O(1) rows on the driver. `collect_ms`
+is a continuity column retained from `789235e8` and is measured only when `VAIRE_BENCH_COLLECT=1`;
+it materialises the whole result and must not be re-enabled by default. The `collect_ratio` column
+is printed only when it was measured.
 
 The ratchet direction matches `doc-coverage.json`: Comet operators may only be **added** and
 non-instrument fallback reasons may only **decrease**. A plan that loses an operator or gains a
@@ -121,3 +128,11 @@ plan and scale it pools the two repeats of each order, compares the default orde
 against the reversed order's, separately for the Comet-off and Comet-on sides, and suppresses the
 ratio when they separate by more than the larger pooled within-order spread (rows below 50 ms are
 not judged).
+
+Disjointness is not precision, so a ratio is printed only when the longer arm's exec sample spread
+(max − min) is at most 10% of its median; rows that fail are reported as **noisy** rather than
+unresolvable, and every printed ratio is accompanied by its interval (`[off_min/on_max,
+off_max/on_min]`). The fraction is justified against the 8g run: the clean wide-sort-limit@5M row
+is 4% and resolves, while the heap-contaminated wide-join-on@5M (36%) and wide-tags-transform@5M
+(37%) are suppressed — 10% sits about 2.5× above the clean rows and 3.5× below the contaminated
+ones.

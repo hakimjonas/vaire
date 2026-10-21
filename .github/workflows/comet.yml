@@ -12,10 +12,6 @@ permissions:
 env:
   JAVA_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
   SBT_OPTS: "-Xms1G -Xmx3G -XX:+UseZGC -XX:ReservedCodeCacheSize=512m -XX:CICompilerCount=2"
-  # The wide plan set's 5M-row collects exceed the harness's 4g default driver heap (see the
-  # 2026-10-21 STOP in the wide-table increment), so the scheduled job runs at 8g. The harness
-  # default stays 4g; this override is the deliberate adjustment the STOP called for.
-  VAIRE_BENCH_DRIVER_MEMORY: "8g"
 
 jobs:
   comet:

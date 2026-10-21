@@ -108,4 +108,66 @@ class ClaimLedgerSpec extends AnyFlatSpec with Matchers {
     result.totalMessages shouldBe 2
     result.ok shouldBe true
   }
+
+  private def repoRoot: Path = Paths.get("").toAbsolutePath.normalize()
+
+  private def sourceMessages: Vector[String] =
+    ClaimLedger.extract(
+      repoRoot,
+      Seq(Paths.get("vaire-core/src/main"), Paths.get("vaire-spark/src/main"))
+    ) match {
+      case Right(sites) => sites.map(_.message).distinct
+      case Left(error) => fail(error)
+    }
+
+  private def ledger(messages: Seq[String]): Path = {
+    val entries = messages.map(message => ujson.Obj("message" -> ujson.Str(message), "class" -> ujson.Str("in-class")))
+    val file = Files.createTempFile("claim-ledger-cli", ".json")
+    Files.writeString(file, ujson.Obj("messages" -> ujson.Arr(entries*)).render())
+    file
+  }
+
+  private def captureOut(body: => Int): (Int, String) = {
+    val buffer = new java.io.ByteArrayOutputStream()
+    val stream = new java.io.PrintStream(buffer, true, "UTF-8")
+    try {
+      val code = Console.withOut(stream)(body)
+      stream.flush()
+      (code, buffer.toString("UTF-8"))
+    } finally stream.close()
+  }
+
+  "the CLI decision" should "return zero for a successful ledger check" in {
+    ClaimLedgerMain.exitCode(Right(ClaimLedger.check(Vector.empty, Vector.empty))) shouldBe 0
+  }
+
+  it should "return non-zero for a failed ledger check" in {
+    ClaimLedgerMain.exitCode(Left("cannot read ledger")) should not be 0
+    ClaimLedgerMain.exitCode(
+      Right(ClaimLedger.check(Vector(RejectionSite("a.scala", 1, "A")), Vector.empty))
+    ) should not be 0
+  }
+
+  "the CLI run" should "return zero for a complete temporary ledger" in {
+    val file = ledger(sourceMessages)
+    val (code, output) = captureOut(ClaimLedgerMain.run(Array(file.toString)))
+    code shouldBe 0
+    output should include("claim ledger ok:")
+  }
+
+  it should "return non-zero and print when a source message is missing" in {
+    val file = ledger(sourceMessages.tail)
+    val (code, output) = captureOut(ClaimLedgerMain.run(Array(file.toString)))
+    code should not be 0
+    output should not be empty
+    output should include("source messages missing from")
+  }
+
+  it should "return non-zero and print when a ledger message has no source site" in {
+    val file = ledger(sourceMessages :+ "message-with-no-source-site")
+    val (code, output) = captureOut(ClaimLedgerMain.run(Array(file.toString)))
+    code should not be 0
+    output should not be empty
+    output should include("listed messages with no source site")
+  }
 }

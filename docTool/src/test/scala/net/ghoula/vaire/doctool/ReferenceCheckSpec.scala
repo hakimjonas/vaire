@@ -83,4 +83,34 @@ class ReferenceCheckSpec extends AnyFlatSpec with Matchers {
     val file = write(".github/ISSUE_TEMPLATE/bug_report.yml", link("../../README.md"))
     ReferenceCheck.check(tempDir, Vector(file)).findings shouldBe empty
   }
+
+  private def captureOut(body: => Int): (Int, String) = {
+    val buffer = new java.io.ByteArrayOutputStream()
+    val stream = new java.io.PrintStream(buffer, true, "UTF-8")
+    try {
+      val code = Console.withOut(stream)(body)
+      stream.flush()
+      (code, buffer.toString("UTF-8"))
+    } finally stream.close()
+  }
+
+  "the CLI decision" should "return zero when the scan has no findings" in {
+    ReferenceCheckMain.exitCode(Right(ReferenceResult(Vector.empty, 21, 184))) shouldBe 0
+  }
+
+  it should "return non-zero for findings or a failed scan" in {
+    val finding = ReferenceFinding("docs/missing.md", 1, "missing.md")
+    ReferenceCheckMain.exitCode(Right(ReferenceResult(Vector(finding), 1, 1))) should not be 0
+    ReferenceCheckMain.exitCode(Left("git ls-files failed")) should not be 0
+  }
+
+  // The finding branch of ReferenceCheckMain.run cannot be reached from this spec: it needs a
+  // tracked file whose reference does not resolve, and the spec does not create one in the working
+  // tree. The decision function above covers the exit code; the branch's formatting stays covered
+  // by the checker's own tests, which feed findings directly to ReferenceCheck.check.
+  "the CLI run" should "return zero on the working tree" in {
+    val (code, output) = captureOut(ReferenceCheckMain.run(Array.empty))
+    code shouldBe 0
+    output should include("reference check ok:")
+  }
 }

@@ -94,4 +94,46 @@ class IndexCheckSpec extends AnyFlatSpec with Matchers {
     write(root, "docs/a.md", header("current", "internal"))
     messages(root) should contain("docs/a.md: audience 'internal' is outside user | contributor")
   }
+
+  private def captureOut(body: => Int): (Int, String) = {
+    val buffer = new java.io.ByteArrayOutputStream()
+    val stream = new java.io.PrintStream(buffer, true, "UTF-8")
+    try {
+      val code = Console.withOut(stream)(body)
+      stream.flush()
+      (code, buffer.toString("UTF-8"))
+    } finally stream.close()
+  }
+
+  private def runIndex(path: Path): (Int, String) =
+    captureOut(IndexCheckMain.run(Array(path.toString)))
+
+  "the CLI decision" should "return zero for a clean index" in {
+    IndexCheckMain.exitCode(Right(IndexResult(Vector.empty, 5, 5))) shouldBe 0
+  }
+
+  it should "return non-zero for findings or a failed read" in {
+    val finding = IndexFinding("docs/README.md", 1, "drift")
+    IndexCheckMain.exitCode(Right(IndexResult(Vector(finding), 1, 1))) should not be 0
+    IndexCheckMain.exitCode(Left("cannot read docs/README.md")) should not be 0
+  }
+
+  "the CLI run" should "return zero for a matching temporary index" in {
+    val root = tempDir()
+    val path = index(root, ("README.md", "contributor", "current"), ("a.md", "user", "current"))
+    write(root, "docs/a.md", header("current", "user"))
+    val (code, output) = runIndex(path)
+    code shouldBe 0
+    output should include("index check ok:")
+  }
+
+  it should "return non-zero and print for a mismatched temporary index" in {
+    val root = tempDir()
+    val path = index(root, ("README.md", "contributor", "current"), ("a.md", "contributor", "current"))
+    write(root, "docs/a.md", header("current", "user"))
+    val (code, output) = runIndex(path)
+    code should not be 0
+    output should not be empty
+    output should include("documentation index drift:")
+  }
 }

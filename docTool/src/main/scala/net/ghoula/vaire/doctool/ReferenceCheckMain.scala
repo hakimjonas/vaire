@@ -9,23 +9,32 @@ import java.nio.file.Paths
   */
 object ReferenceCheckMain {
 
-  def main(args: Array[String]): Unit = {
+  /** The exit code for a completed scan. */
+  def exitCode(result: Either[String, ReferenceResult]): Int =
+    result match {
+      case Right(checked) if checked.findings.isEmpty => 0
+      case _ => 1
+    }
+
+  /** Run the gate and print its report. */
+  def run(args: Array[String]): Int = {
+    val _ = args
     val root = Paths.get("").toAbsolutePath.normalize()
-    ReferenceCheck.trackedFiles(root) match {
+    val result = ReferenceCheck.trackedFiles(root).map(files => ReferenceCheck.check(root, files))
+
+    result match {
       case Left(message) =>
         println(message)
-        sys.exit(1)
-      case Right(files) =>
-        val result = ReferenceCheck.check(root, files)
-        if result.findings.isEmpty then
-          println(
-            s"reference check ok: ${result.references} references in ${result.files} files resolve"
-          )
-        else {
-          println("unresolved document references:")
-          result.findings.foreach(finding => println(s"  ${finding.file}:${finding.line}: ${finding.target}"))
-          sys.exit(1)
-        }
+      case Right(checked) if checked.findings.isEmpty =>
+        println(
+          s"reference check ok: ${checked.references} references in ${checked.files} files resolve"
+        )
+      case Right(checked) =>
+        println("unresolved document references:")
+        checked.findings.foreach(finding => println(s"  ${finding.file}:${finding.line}: ${finding.target}"))
     }
+    exitCode(result)
   }
+
+  def main(args: Array[String]): Unit = sys.exit(run(args))
 }

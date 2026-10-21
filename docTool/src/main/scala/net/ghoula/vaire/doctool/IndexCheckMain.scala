@@ -9,22 +9,33 @@ object IndexCheckMain {
 
   private val IndexPath = Paths.get("docs/README.md")
 
-  def main(args: Array[String]): Unit = {
+  /** The exit code for a completed index check. */
+  def exitCode(result: Either[String, IndexResult]): Int =
+    result match {
+      case Right(checked) if checked.ok => 0
+      case _ => 1
+    }
+
+  /** Run the index gate and print its report. */
+  def run(args: Array[String]): Int = {
     val root = Paths.get("").toAbsolutePath.normalize()
     val indexPath = args.headOption.map(Paths.get(_)).getOrElse(IndexPath)
-    IndexCheck.check(root, indexPath) match {
+    val result = IndexCheck.check(root, indexPath)
+
+    result match {
       case Left(message) =>
         println(message)
-        sys.exit(1)
-      case Right(result) if result.ok =>
-        println(s"index check ok: ${result.documents} documents match ${result.rows} rows")
-      case Right(result) =>
+      case Right(checked) if checked.ok =>
+        println(s"index check ok: ${checked.documents} documents match ${checked.rows} rows")
+      case Right(checked) =>
         println("documentation index drift:")
-        result.findings.foreach { finding =>
+        checked.findings.foreach { finding =>
           val location = if finding.line > 0 then s"${finding.index}:${finding.line}" else finding.index
           println(s"  $location: ${finding.message}")
         }
-        sys.exit(1)
     }
+    exitCode(result)
   }
+
+  def main(args: Array[String]): Unit = sys.exit(run(args))
 }

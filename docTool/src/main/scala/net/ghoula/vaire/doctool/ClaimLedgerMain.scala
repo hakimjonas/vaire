@@ -10,7 +10,15 @@ object ClaimLedgerMain {
   private val SourceDirs = Vector(Paths.get("vaire-core/src/main"), Paths.get("vaire-spark/src/main"))
   private val LedgerPath = "backend-claims.json"
 
-  def main(args: Array[String]): Unit = {
+  /** The exit code for a completed ledger check. */
+  def exitCode(result: Either[String, ClaimLedger.Result]): Int =
+    result match {
+      case Right(checked) if checked.ok => 0
+      case _ => 1
+    }
+
+  /** Run the ledger gate and print its report. */
+  def run(args: Array[String]): Int = {
     val root = Paths.get("").toAbsolutePath.normalize()
     val ledgerPath = args.headOption.map(Paths.get(_)).getOrElse(Paths.get(LedgerPath))
     val result: Either[String, ClaimLedger.Result] = for {
@@ -21,7 +29,6 @@ object ClaimLedgerMain {
     result match {
       case Left(message) =>
         println(message)
-        sys.exit(1)
       case Right(checked) if checked.ok =>
         println(
           s"claim ledger ok: ${checked.inClassSites} in-class sites / ${checked.inClassMessages} messages; " +
@@ -45,7 +52,9 @@ object ClaimLedgerMain {
           println("claim ledger: invalid entries:")
           checked.invalidClaims.foreach(message => println(s"  $message"))
         }
-        sys.exit(1)
     }
+    exitCode(result)
   }
+
+  def main(args: Array[String]): Unit = sys.exit(run(args))
 }

@@ -20,3 +20,7 @@ project/project/
 
 # SemanticDB
 *.semanticdb
+
+# JVM crash artifacts
+hs_err_pid*.log
+core.*

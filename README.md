@@ -217,8 +217,10 @@ BitSet null tracking — SQL NULL as metadata, not values. `Array.tabulate` and 
 | Casting       | CastToLong, CastToDouble, CastToString                                                        |
 
 Documented exceptions: the try-xpath variants are in-memory-only (Spark's Column model cannot catch
-per-row evaluation failures), and a few generator-style expressions (`explode`, `variant_explode`)
-need Dataset-level handling in the in-memory interpreter.
+per-row evaluation failures), Spark's `xpath*` family evaluates over a namespace-unaware DOM while
+the in-memory engine follows XPath 1.0 (see [docs/xpath-divergence.md](docs/xpath-divergence.md)),
+and a few generator-style expressions (`explode`, `variant_explode`) need Dataset-level handling in
+the in-memory interpreter.
 
 ## Build
 

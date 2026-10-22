@@ -159,7 +159,8 @@ class VariantSpec extends AnyFlatSpec with Matchers with SparkTestBase {
   "variant_explode" should "be unsupported in-memory" in {
     val expr = Expr.variantExplode[Doc](Expr.parseJson[Doc](jCell))
     ExprInterpreter.evalColumn(expr, materialized.columns, ColumnType.VariantType) match {
-      case Left(_: ExecutionError.UnsupportedOperation) => (): Unit
+      case Left(ExecutionError.UnsupportedOperation(msg)) =>
+        msg shouldBe "VariantExplode requires Dataset-level handling"
       case other => fail(s"Expected UnsupportedOperation, got: $other")
     }
   }

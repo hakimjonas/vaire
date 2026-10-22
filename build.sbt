@@ -174,6 +174,7 @@ lazy val docTool = project
     publish / skip := true,
     libraryDependencies ++= Seq(
       "org.scalameta" %% "scalameta" % "4.17.4",
+      "com.lihaoyi" %% "ujson" % "4.3.2",
       "org.scalatest" %% "scalatest" % "3.2.20" % Test
     ),
     Compile / run / mainClass := Some("net.ghoula.vaire.doctool.DocCoverageMain")
@@ -183,10 +184,22 @@ lazy val docTool = project
 addCommandAlias("prepare", "scalafmtAll; scalafmtSbt; core/scalafixAll; Test/compile")
 addCommandAlias(
   "check",
-  "docCoverage; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
+  "docCoverage; indexCheck; referenceCheck; claimLedger; core/scalafixAll --check; scalafmtCheckAll; scalafmtSbtCheck"
 )
 addCommandAlias("testAll", "core/Test/testFull; spark/Test/testFull; docTool/Test/testFull")
 addCommandAlias("testSlow", "spark/Test/testOnly * -- -n net.ghoula.vaire.Slow")
+addCommandAlias(
+  "indexCheck",
+  "docTool/runMain net.ghoula.vaire.doctool.IndexCheckMain"
+)
+addCommandAlias(
+  "referenceCheck",
+  "docTool/runMain net.ghoula.vaire.doctool.ReferenceCheckMain"
+)
+addCommandAlias(
+  "claimLedger",
+  "docTool/runMain net.ghoula.vaire.doctool.ClaimLedgerMain"
+)
 addCommandAlias(
   "docCoverage",
   "docTool/run check doc-coverage.json vaire-core/src/main/scala vaire-spark/src/main/scala"

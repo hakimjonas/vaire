@@ -52,7 +52,9 @@ class ExprArrayMapSpec extends AnyFlatSpec with Matchers {
     val cell = Expr.Cell[Any, Seq[Int]]("arr", ColumnIndex(0))
     val expr = cell.arraySort
     val result = eval(expr, columns, 0)
-    result.isLeft shouldBe true
+    result shouldBe Left(
+      ExecutionError.UnsupportedOperation("ArraySort on untyped columns not supported")
+    )
   }
 
   "ArrayDistinct" should "remove duplicates from array" in {

@@ -52,7 +52,7 @@ lazy val sharedScalacOptions = Seq(
 ThisBuild / Test / scalacOptions += "-Xcheck-macros"
 
 // Dependencies
-val saratiVersion = "1.0.0-alpha.5"
+val saratiVersion = "1.0.0-alpha.6"
 val rumilVersion = "1.0.0-alpha.13"
 val sparkVersion = "4.2.0"
 

@@ -8,14 +8,10 @@ import net.ghoula.vaire.expr.Expr
 import net.ghoula.vaire.interpreter.ExprInterpreter
 import net.ghoula.vaire.prelude.*
 
-/** Pinned divergences between the in-memory xpath* family and Spark, each verified against Spark
-  * 4.2 during the validation gate:
-  *
-  *   1. Prefixed name tests: Spark's engine runs over a namespace-unaware DOM — `b` matches both
-  *      `b` and `ns:b` (local-name semantics) and `*:b` fails the query ("Prefix must resolve to a
-  *      namespace"). In-memory matches prefix-literally per XPath 1.0. (CDATA was the third
-  *      divergence - resolved by sarati 0.3.12's cdata flag, tracked as sarati#11; both backends
-  *      now exclude it from text(), pinned in XpathParitySpec's text() coverage.)
+/** Pins the backend differences for the xpath* family. The divergence set, its mechanism, the
+  * recorded decision and the open question are stated once in `docs/xpath-divergence.md`; this
+  * suite asserts those values. DTD entities and CDATA sections are parity cases here, not
+  * divergences.
   */
 class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
@@ -56,16 +52,14 @@ class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
   "prefixed name tests" should "match prefix-literally in-memory while Spark uses local names" in {
     val doc = """<ns:r xmlns:ns="urn:x"><ns:b>1</ns:b><b>2</b></ns:r>"""
-    // unprefixed `b` with an unprefixed parent: both match. Note `r/b` matches NOTHING
-    // in-memory (the root is ns:r; prefix-literal `r` does not match it) while Spark's
-    // local-name semantics match ns:r and both b elements.
+    // Case 1 in docs/xpath-divergence.md; values from the 2026-10-21 Spark 4.2 run.
     val inMemRb = evalInMemory(doc, cell(doc).xpathString("r/b"))
     inMemRb shouldBe Right("")
     val sparkRb = evalSpark(doc, "xpath_string", "r/b")
     sparkRb shouldBe Right("1")
-    // Spark's abbreviated //b and absolute /descendant::b disagree with each other on this DOM
-    // (verified empirically: //b -> "2", /descendant::b -> "1"); in-memory is consistent
-    // (prefix-literal //b -> "2").
+    // Control values: on this document Spark returns "2" for both //b and /descendant::b, and
+    // in-memory does the same. Verified against Spark 4.2 on 2026-10-21; see
+    // docs/xpath-divergence.md for the probe record.
     val inMemB = evalInMemory(doc, cell(doc).xpathString("//b"))
     inMemB shouldBe Right("2")
     val sparkB = evalSpark(doc, "xpath_string", "//b")
@@ -74,8 +68,7 @@ class XpathDivergenceSpec extends AnyFlatSpec with Matchers with SparkTestBase {
     inMemDesc shouldBe Right("2")
     val sparkDesc = evalSpark(doc, "xpath_string", "/descendant::b")
     sparkDesc shouldBe Right("2")
-    // prefixed `ns:b`: in-memory matches the prefixed element; Spark selects nothing
-    // (note `r/ns:b` is empty in-memory too — prefix-literal `r` does not match ns:r)
+    // Case 2 in docs/xpath-divergence.md.
     val inMemPrefixed = evalInMemory(doc, cell(doc).xpathString("//ns:b"))
     inMemPrefixed shouldBe Right("1")
     val sparkPrefixed = evalSpark(doc, "xpath_string", "//ns:b")

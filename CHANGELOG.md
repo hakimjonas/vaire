@@ -62,7 +62,7 @@ publishes that tag to Maven Central. Minor and stable releases are cut manually.
   unboxed index: dense keys use a direct-address array (`key - min`), sparse keys an
   open-addressing table, both mapping a key to the head of a flat chain. On one machine,
   100k-10M, 2-4x faster than the boxed index and 3-10x less allocation, with the 10M GC time
-  dropping to zero; see `docs/join-optimization-plan.md`, Phase 1e.
+  dropping to zero.
 - **Predicate-join memory** — `fullJoin` records matches per row instead of materializing the
   n·m pair vector and two value sets. This also fixes a case where a row equal by value to a
   matched row, but different under the condition, was left out of the unmatched output. The

@@ -1,6 +1,6 @@
 package net.ghoula.vaire.doctool
 
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, Paths}
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -211,6 +211,99 @@ class DocCoverageSpec extends AnyFlatSpec with Matchers {
     )
     val path = Files.createTempFile("snapshot", ".json")
     DocCoverage.writeSnapshot(path, reports)
+    DocCoverage.readSnapshot(path) shouldBe reports
+  }
+
+  private def sourceDir(text: String): Path = {
+    val dir = Files.createTempDirectory("doc-coverage-cli-src")
+    Files.writeString(dir.resolve("Fixture.scala"), text)
+    dir
+  }
+
+  private def analysisOf(dir: Path): DocCoverage.Analysis =
+    DocCoverage.analyze(Paths.get("").toAbsolutePath, Seq(dir)) match {
+      case Right(analysis) => analysis
+      case Left(message) => fail(message)
+    }
+
+  private def snapshotFor(reports: Map[String, FileReport]): Path = {
+    val path = Files.createTempFile("doc-coverage-cli-snapshot", ".json")
+    DocCoverage.writeSnapshot(path, reports)
+    path
+  }
+
+  private def captureOut(body: => Int): (Int, String) = {
+    val buffer = new java.io.ByteArrayOutputStream()
+    val stream = new java.io.PrintStream(buffer, true, "UTF-8")
+    try {
+      val code = Console.withOut(stream)(body)
+      stream.flush()
+      (code, buffer.toString("UTF-8"))
+    } finally stream.close()
+  }
+
+  private def run(args: String*): (Int, String) =
+    captureOut(DocCoverageMain.run(args.toArray))
+
+  "the CLI decision" should "return zero for snapshot written and coverage held" in {
+    DocCoverageMain.exitCode(DocCoverageMain.Outcome.SnapshotWritten) shouldBe 0
+    DocCoverageMain.exitCode(DocCoverageMain.Outcome.CoverageHeld) shouldBe 0
+  }
+
+  it should "return non-zero for usage error, analysis failure and regression" in {
+    DocCoverageMain.exitCode(DocCoverageMain.Outcome.UsageError) should not be 0
+    DocCoverageMain.exitCode(DocCoverageMain.Outcome.AnalysisFailed) should not be 0
+    DocCoverageMain.exitCode(DocCoverageMain.Outcome.CoverageRegressed) should not be 0
+  }
+
+  "the CLI run" should "print usage and fail with no arguments" in {
+    val (code, output) = run()
+    code should not be 0
+    output should not be empty
+    output should include("usage: DocCoverageMain")
+  }
+
+  it should "print usage and fail with an unrecognised mode" in {
+    val (code, output) = run("lint", "snapshot.json", "src")
+    code should not be 0
+    output should not be empty
+    output should include("usage: DocCoverageMain")
+  }
+
+  it should "fail with non-empty output when a source cannot be analysed" in {
+    val dir = sourceDir("object Broken {")
+    val snapshot = snapshotFor(Map.empty)
+    val (code, output) = run("check", snapshot.toString, dir.toString)
+    code should not be 0
+    output should not be empty
+    output should include("parse failed")
+  }
+
+  it should "pass when the snapshot matches the sources" in {
+    val dir = sourceDir("/** documented. */\ndef good: Int = 1\n")
+    val snapshot = snapshotFor(analysisOf(dir).reports)
+    val (code, output) = run("check", snapshot.toString, dir.toString)
+    code shouldBe 0
+    output should include("ratchet ok: coverage did not regress")
+  }
+
+  it should "fail with non-empty output when coverage regresses" in {
+    val dir = sourceDir("def bad: Int = 1\n")
+    val baseline = analysisOf(dir).reports.map { case (file, report) => file -> FileReport(report.total, report.total) }
+    val snapshot = snapshotFor(baseline)
+    val (code, output) = run("check", snapshot.toString, dir.toString)
+    code should not be 0
+    output should not be empty
+    output should include("doc coverage regressed:")
+  }
+
+  it should "write the snapshot and pass in snapshot mode" in {
+    val dir = sourceDir("def bad: Int = 1\n")
+    val reports = analysisOf(dir).reports
+    val path = Files.createTempDirectory("doc-coverage-cli-out").resolve("snapshot.json")
+    val (code, output) = run("snapshot", path.toString, dir.toString)
+    code shouldBe 0
+    output should include("snapshot written:")
     DocCoverage.readSnapshot(path) shouldBe reports
   }
 }

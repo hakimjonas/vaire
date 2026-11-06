@@ -37,6 +37,12 @@ object ExprToColumn {
   /** The try-xpath family cannot be expressed in Spark's Column model: a per-row XML parse failure
     * throws inside Spark's xpath implementation and no Column-level combinator can catch it, so the
     * try semantics (null rows instead of a failed query) are unrepresentable.
+    *
+    * The rejection is deliberate and stays. A driver-collect fallback would fire on every call,
+    * because collect-and-evaluate would be the only route; that is not a fallback for a conversion
+    * that rarely fails, it is a method that hides a full collect of the dataset behind an ordinary
+    * name. The try family belongs to the in-memory error-policy mode, and Spark rejects it at plan
+    * construction.
     */
   private def tryXpathUnsupported(fn: String): Either[ExecutionError, (SparkColumn, ColumnType)] =
     Left(ExecutionError.UnsupportedOperation(s"$fn requires the in-memory interpreter"))

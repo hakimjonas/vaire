@@ -658,9 +658,8 @@ enum Expr[Row, +A] {
   /** XPath 1.0 over an XML document (Spark's `xpath*` family). `path` is a constant, parsed once
     * per evaluation; per-row XML is parsed with [[net.ghoula.sarati.ast.xml.xpathXmlConfig]].
     * Invalid XML or a failing evaluation errors the whole column (mirroring Spark's query failure)
-    * with the row index in the message; null or empty inputs yield null rows. Documents with a DTD
-    * are not parseable by the in-memory XML parser (Spark expands internal DTD entities) — a
-    * documented divergence.
+    * with the row index in the message; null or empty inputs yield null rows. Backend differences
+    * are documented in `docs/xpath-divergence.md`.
     */
   case Xpath[Row](expr: Expr[Row, String], path: String) extends Expr[Row, Seq[String | Null]]
 

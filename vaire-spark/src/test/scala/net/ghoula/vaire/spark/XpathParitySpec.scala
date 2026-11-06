@@ -12,11 +12,9 @@ import net.ghoula.vaire.prelude.*
 /** Parity for the strict xpath* family (the try variants are in-memory-only: Spark's Column model
   * cannot catch per-row evaluation failures).
   *
-  * Both backends parse the same documents: Spark via its namespace-unaware DOM, in-memory via
-  * Rumil's XML parser under [[net.ghoula.sarati.ast.xml.xpathXmlConfig]]. Documented divergences
-  * (pinned in [[XpathDivergenceSpec]]): documents with a DTD fail in-memory parsing; prefixed name
-  * tests match prefix-literally in-memory while Spark's engine ignores prefixes (and fails on
-  * `*:b`); CDATA sections participate in `text()` in-memory but not on Spark.
+  * Both backends parse these documents with their own XML parser. DTD entities and CDATA sections
+  * are parity cases, pinned here and in [[XpathDivergenceSpec]]. The remaining evaluation
+  * divergence, Spark's namespace-unaware name tests, is stated once in `docs/xpath-divergence.md`.
   */
 class XpathParitySpec extends AnyFlatSpec with Matchers with SparkTestBase {
 
